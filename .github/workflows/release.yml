@@ -1,0 +1,176 @@
+name: Release Onigiri-Markdown
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+        default: 'v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: universal-apple-darwin
+            label: macos-universal
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x64
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            label: linux-x64
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build Tauri application
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          NO_STRIP: 'true'
+        run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Collect release binaries
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          mkdir -p release-assets
+          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            cp "$BUNDLE_DIR"/dmg/*.dmg release-assets/
+            (cd "$BUNDLE_DIR/macos" && tar -czf "$GITHUB_WORKSPACE/release-assets/Onigiri-Markdown_${TAG}_macos-universal.app.tar.gz" "Onigiri-Markdown.app")
+          elif [ "${{ matrix.platform }}" = "windows-latest" ]; then
+            cp "$BUNDLE_DIR"/nsis/*.exe release-assets/
+            cp "$BUNDLE_DIR"/msi/*.msi release-assets/
+          elif [ "${{ matrix.platform }}" = "ubuntu-22.04" ]; then
+            cp "$BUNDLE_DIR"/appimage/*.AppImage release-assets/
+            cp "$BUNDLE_DIR"/deb/*.deb release-assets/
+          fi
+          ls -lh release-assets/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.label }}
+          path: release-assets/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: all-binaries
+          merge-multiple: true
+
+      - name: Publish GitHub Release with English & Japanese Release Notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          ls -lh all-binaries/
+
+          cat << 'EOF' | sed 's/^          //' > release-notes.md
+          ## English
+
+          ### Onigiri-Markdown `v0.1.0` — Initial Release
+
+          **Onigiri-Markdown** is a cross-platform Markdown editor built for the AI era, featuring real-time synchronized preview, dual **Basic / Advanced** UI modes, and multilingual support (`English` / `日本語`).
+
+          #### Highlights
+          - **Dual UI Modes**:
+            - **Basic Mode**: Clean, distraction-free writing & live preview (`Editor` / `Split` / `Preview`) with essential formatting toolbar and interactive task checkboxes.
+            - **Advanced Mode**: Multi-tab workspace, folder explorer with full-text search, document outline (TOC), snippets library, snapshots & line diff viewer, YAML frontmatter editor, Find & Replace (Regex), Command Palette (`⌘K` / `Ctrl+K`), Zen Mode, custom preview CSS, and HTML/PDF export.
+          - **AI-Era Toolkit**:
+            - One-click **AI Output Cleanup & Formatter** (strip zero-width chars, auto-align GFM tables with CJK width support, normalize bullets/headings/blank lines).
+            - **Estimated LLM Token Counter** (CJK + English) and writing goal tracker.
+            - **Rich Text Copy** (for Notion, Google Docs, Slack) & **Smart HTML Paste**.
+          - **Rich Rendering**: GFM tables, KaTeX math (`$...$`, `$$...$$`), live Mermaid diagrams (with zoom & SVG copy), syntax highlighting, and GitHub-style callouts (`[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`).
+          - **Themes & Localization**: `Light`, `Dark`, `Sepia`, and `Midnight` themes + `English` / `日本語` UI.
+
+          #### Downloads
+          - **macOS (Universal: Apple Silicon & Intel)**: `.dmg` / `.app.tar.gz`
+          - **Windows (x64)**: `.exe` (NSIS installer) / `.msi`
+          - **Linux (x64)**: `.AppImage` / `.deb`
+
+          ---
+
+          ## 日本語
+
+          ### Onigiri-Markdown `v0.1.0` — 初回リリース
+
+          **Onigiri-Markdown** は、AIが出力するリッチなMarkdownをプレビューしながら快適に編集・整形できるクロスプラットフォーム対応エディタです。UIの多言語化（`日本語` / `English`）と、用途に応じて切り替えられる **ベーシックモード / アドバンスドモード** を備えています。
+
+          #### 主な機能
+          - **2つのUIモード**:
+            - **ベーシックモード**: 書くこととプレビューに集中できるシンプルな構成（エディタ / 分割 / プレビュー切替、基本書式バー、プレビュー上のチェックボックス直接切替）。
+            - **アドバンスドモード**: マルチタブ編集、フォルダツリー＆全文検索、アウトライン（目次）、スニペット集、スナップショット＆差分（Diff）比較、YAML Frontmatter エディタ、検索・置換（正規表現対応）、コマンドパレット（`⌘K` / `Ctrl+K`）、集中モード（Zen）、カスタムCSS、HTML/PDF書き出し。
+          - **AI時代の便利機能**:
+            - **AI出力ワンクリック整形**: ゼロ幅文字除去、GFMテーブルの列幅自動揃え（日本語全角幅対応）、箇条書き・見出し・空行の自動クリーンアップ。
+            - **推定AIトークン数計測**: 日英混在テキストに対応した概算LLMトークン数・文字数・読了目安表示。
+            - **リッチテキストコピー**（Notion / Google Docs / Slack向け）＆ **HTML自動Markdown変換貼付**。
+          - **リッチプレビュー**: GFMテーブル、KaTeX数式、Mermaid図表（拡大・SVGコピー対応）、コードハイライト、GitHub互換コールアウト（`[!NOTE]` 等）。
+          - **テーマ＆多言語UI**: `ライト` / `ダーク` / `セピア` / `ミッドナイト` の4テーマ ＋ 日本語 / 英語UI。
+
+          #### ダウンロード（バイナリ一覧）
+          - **macOS（Universal: Apple Silicon / Intel 両対応）**: `.dmg` / `.app.tar.gz`
+          - **Windows（x64）**: `.exe`（インストーラ） / `.msi`
+          - **Linux（x64）**: `.AppImage` / `.deb`
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "Onigiri-Markdown $TAG" --notes-file release-notes.md
+            gh release upload "$TAG" all-binaries/* --clobber
+          else
+            gh release create "$TAG" all-binaries/* --title "Onigiri-Markdown $TAG" --notes-file release-notes.md
+          fi
