@@ -10,13 +10,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v100">What's New in v1.0.0</a> ・
+    <a href="#whats-new-in-v101">What's New in v1.0.1</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.0.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -38,7 +38,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.0.0`
+Current version: `v1.0.1`
 
 ## Key Features
 
@@ -95,7 +95,15 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.0.0
+## What's New in v1.0.1
+
+- **Windows CLI Shim Fix (`os error 193`)**: Fixed Windows launching extensionless POSIX shims in `%APPDATA%\npm` (such as `codex`, `claude`, `gemini`, `npm`) by skipping extensionless scripts and resolving `.exe` / `.com` / `.cmd` / `.bat` cleanly.
+- **Improved AI CLI & Local LLM Guidance**: Added Antigravity CLI (`agy`) standalone setup distinction and terminal installers (`curl` / `irm`), automatic `~/.npm-global` fallback on macOS/Linux to prevent `EACCES`, per-CLI login hints, and step-by-step Ollama / LM Studio server guidance.
+- **Expanded Web Runtime Diagnostics**: Filtered out Windows' empty Microsoft Store `python.exe` stub, added `wp-config-sample.php` / Laravel SQLite / Ruby-Jekyll / `.env.example` checks, Linux `python3-venv` & PHP extension hints, and action button legends.
+- **Upgraded Find & Replace**: Added full-width/half-width sensitivity toggle, **In Selection** search & replace scope with range refresh, literal `$1` preservation when Regex is off, and smoother navigation.
+
+<details>
+<summary>Previous release: v1.0.0</summary>
 
 - Renamed the application to **Onigiri Editor** with refreshed app icons across macOS, Windows, and Linux.
 - Added **OS-aware first-launch language detection** (Japanese UI + menu bar on Japanese OS; English on all other OS locales).
@@ -105,6 +113,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - Added **AI Connection Assistant & Model Picker** for Codex / Claude / Gemini / Antigravity CLIs, Ollama, LM Studio, and Cloud APIs across macOS, Windows, and Linux.
 - Added **Project Environment Diagnostics & Dev Server Integration** (Vite, Next.js, Laravel, WordPress, Docker, Python, static HTML/PHP, etc.) plus code/webpage right-pane previews.
 - Added **OS-specific guidance & compatibility improvements** across Windows, Linux, and macOS (`.cmd` shim handling, single-instance file-open args, terminal launch helpers, and non-blocking fallbacks).
+
+</details>
 
 ## Quick Start
 

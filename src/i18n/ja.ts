@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const ja: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.0.0',
+  versionLabel: 'v1.0.1',
   modes: {
     simple: 'シンプル',
     basic: '標準',
@@ -284,8 +284,15 @@ export const ja: Translations = {
     showLogsBtn: 'ログを表示',
     hideLogsBtn: 'ログを閉じる',
     terminalOpenedMsg: 'Terminal でセットアップを開きました。完了後に「環境を再チェック」を押してください。',
+    actionLegend:
+      '青いボタン＝Onigiri Editor 内で自動実行 ／ Terminal で実行＝OS端末で対話インストール ／ 公式サイト＝手動ダウンロード',
+    inAppActionTooltip: 'Onigiri Editor 内のバックグラウンドで自動実行します',
+    openTerminalTooltip: 'OS の Terminal を開いてインストールや対話コマンドを実行します',
+    openDownloadTooltip: '公式ダウンロード・導入手順ページをブラウザで開きます',
+    platformNoteMacos:
+      'macOS のヒント: Homebrew 未導入の場合は、Terminal 実行時にパスワードや Xcode Command Line Tools の導入確認が出ることがあります（初回は数分かかります）。完了後は「環境を再チェック」を押してください。',
     platformNoteWindows:
-      'Windows のヒント: セットアップ後は「環境を再チェック」を押してください。新しく PATH に追加されたツールが検出されない場合はアプリを一度再起動してください（winget 未導入時は公式サイトを開きます）。',
+      'Windows のヒント: セットアップ後は「環境を再チェック」を押してください。新しく PATH に追加されたツールが認識されない場合はアプリを一度再起動してください（winget 未導入時は公式サイトを開きます）。',
     platformNoteLinux:
       'Linux のヒント: パッケージ導入や Docker 起動時は端末内で sudo パスワードの入力が必要です。ネイティブ Docker Engine を使う場合はユーザーを docker グループへ追加（sudo usermod -aG docker $USER）して再ログインしてください。',
   },
@@ -331,11 +338,31 @@ export const ja: Translations = {
     availableSwitchTitle: '利用可能な AI にすぐ切り替えできます',
     switchToProvider: 'に切替',
     notInstalledCli: 'CLI がインストールされていないか、PATH 上に見つかりません。',
+    missingCliCodex:
+      'Codex CLI（codex）が見つかりません。Node.js 18 以上（20 LTS 推奨）と npm が必要です。「Terminal でセットアップ」から一括導入できます。',
+    missingCliClaude:
+      'Claude Code CLI（claude）が見つかりません。Node.js 18 以上（20 LTS 推奨）と npm が必要です。「Terminal でセットアップ」から一括導入できます。',
+    missingCliGemini:
+      'Gemini CLI（gemini）が見つかりません。Node.js 20 以上と npm が必要です。「Terminal でセットアップ」から一括導入できます。',
+    missingCliAntigravity:
+      'Antigravity CLI（agy）が PATH 上に見つかりません。Antigravity デスクトップアプリ本体（Antigravity.app）とは別配布の CLI のため、アプリが入っていても「Terminal でセットアップ」（Node.js 不要）または公式サイトから別途インストールが必要です。',
     notLoggedInCli: 'CLI は見つかりましたが、ログイン（認証）が必要です。',
+    authHintCodex:
+      '「Terminal でログイン」を実行し、開くブラウザまたは端末の案内に従って ChatGPT サブスクアカウント（または OpenAI API キー）で認証してください。完了後は「再検出」を押してください。',
+    authHintClaude:
+      '「Terminal でログイン」で claude を起動すると対話ログイン画面が開きます。Claude Pro/Max または Anthropic Console アカウントで認証後、この画面で「再検出」を押してください。',
+    authHintGemini:
+      '「Terminal でログイン」で gemini を起動し、Google アカウントでのブラウザ認証（または API キー選択）を完了してから「再検出」を押してください。',
+    authHintAntigravity:
+      '「Terminal でログイン」で agy を起動し、Google アカウントでの認証と初回セットアップを完了してから「再検出」を押してください。',
     ollamaNotRunningDesc: 'Ollama はインストール済みですが、ローカルサーバーが停止しています。',
     ollamaNoModelsDesc: 'Ollama は起動中ですが、ダウンロード済みモデルがありません。',
+    ollamaNoModelsHint:
+      '初回モデル取得には数 GB のダウンロードと数分かかります。下のボタンで Terminal から取得するか、`ollama pull <モデル名>` 実行後に「再検出」を押してください。',
     ollamaNotInstalledDesc: 'Ollama をインストールするとローカルLLMを無料で利用できます。',
     lmstudioNotRunningDesc: 'LM Studio のローカルサーバー（127.0.0.1:1234）に接続できません。',
+    lmstudioServerSteps:
+      'LM Studio を開いたら、①モデルを1つダウンロードして読み込み、②左の「Developer（開発者）」タブで「Start Server（127.0.0.1:1234）」を ON にし、③ここで「再検出」を押してください。',
     apiKeyMissingDesc: 'API キーを入力すると、このプロバイダーをすぐ利用できます。',
     customCliMissingDesc: '接続設定から実行するカスタム CLI コマンドを入力してください。',
     startOllamaBtn: 'Ollama を起動して接続',
@@ -354,10 +381,12 @@ export const ja: Translations = {
     connectionOk: '接続に成功しました',
     nodeRequiredHint: 'この CLI の導入には Node.js (npm) が必要です。「Terminal でセットアップ」を押すと未導入の Node.js（macOS の Homebrew / Windows の winget / Linux のパッケージマネージャ）も自動で補います。公式サイトから先に入れることもできます。',
     downloadNodeBtn: 'Node.js をダウンロード',
+    platformNoteMacos:
+      'macOS のヒント: 初回導入時に Homebrew や Xcode Command Line Tools のインストールでパスワード入力を求められる場合があります。完了後は「再検出」を押してください。',
     platformNoteWindows:
       'Windows のヒント: セットアップ後は「再検出」を押してください。新しく PATH に追加された CLI が認識されない場合は、アプリを一度再起動してください。',
     platformNoteLinux:
-      'Linux のヒント: グローバルパッケージ導入時に権限エラーが出た場合は、端末で指示に従って sudo を実行し、完了後に「再検出」を押してください。',
+      'Linux のヒント: 権限エラーを防ぐため npm の保存先をホーム配下（~/.npm-global）へ自動設定し、必要時のみ sudo を求めます。完了後に「再検出」を押してください。',
     includeDoc: '編集中のドキュメント内容をAIに共有する',
     includeFolder: '開いているフォルダー内のファイルも参照する',
     folderBadgeDisabled: 'フォルダー連携: OFF',
@@ -386,17 +415,25 @@ export const ja: Translations = {
     },
   },
   find: {
-    findPlaceholder: '検索...',
+    findPlaceholder: '検索する文字列...',
     replacePlaceholder: '置換後の文字列...',
-    caseSensitive: '大文字/小文字を区別',
+    caseSensitive: '大文字・小文字を区別する',
+    caseSensitiveShort: '大/小文字を区別',
+    widthSensitive: '英数字の全角・半角を区別する',
+    widthSensitiveShort: '全角/半角を区別',
+    inSelection: '選択範囲のみ',
+    refreshSelection: '現在の選択範囲を再取得',
+    noSelectionHint: 'エディタで範囲を選択してください',
     regex: '正規表現',
     wholeWord: '単語単位',
-    previous: '前へ',
-    next: '次へ',
+    previous: '前を検索',
+    next: '次を検索',
     replace: '置換',
     replaceAll: 'すべて置換',
     matches: '件一致',
     noMatches: '一致なし',
+    invalidRegex: '正規表現エラー',
+    replacedCount: '{n}件置換しました',
   },
   status: {
     saved: '保存済み',

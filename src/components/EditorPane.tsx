@@ -24,6 +24,7 @@ import {
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import type { EditorSettings, ThemeId } from '../types';
+import type { FindMatch, TextRange } from '../utils/findReplace';
 import { htmlToMarkdown } from '../utils/markdown';
 
 export interface EditorHandle {
@@ -36,8 +37,13 @@ export interface EditorHandle {
   setScrollRatio: (ratio: number) => void;
   undoAction: () => void;
   redoAction: () => void;
-  selectRange: (from: number, to: number) => void;
-  replaceRange: (from: number, to: number, text: string) => void;
+  selectRange: (from: number, to: number, options?: { focus?: boolean }) => void;
+  replaceRange: (from: number, to: number, text: string, options?: { selectResult?: boolean }) => void;
+  getSelectionRange: () => TextRange | null;
+  getCursorOffset: () => number;
+  getSelectedText: () => string;
+  setFindScope: (scope: TextRange | null) => void;
+  setFindHighlights: (payload: { matches: FindMatch[]; activeIndex: number } | null) => void;
 }
 
 export interface LineRange {
@@ -56,6 +62,8 @@ interface EditorPaneProps {
   onSmartPasteNotify?: () => void;
   onLineCopyNotify?: () => void;
   onImagePasteOrDrop?: (file: File) => Promise<void>;
+  onFindScopeChange?: (scope: TextRange | null) => void;
+  onEditorSelectionChange?: (range: TextRange) => void;
   syncHighlightRange?: LineRange | null;
   theme: ThemeId;
   settings: EditorSettings;
@@ -85,6 +93,82 @@ const syncLineHighlightField = StateField.define<DecorationSet>({
       }
     }
     return tr.docChanged ? Decoration.none : decos;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+const setFindScopeEffect = StateEffect.define<TextRange | null>();
+const findScopeMark = Decoration.mark({ class: 'cm-find-scope' });
+
+const findScopeField = StateField.define<TextRange | null>({
+  create() {
+    return null;
+  },
+  update(scope, tr) {
+    const docLen = tr.state.doc.length;
+    for (const eff of tr.effects) {
+      if (eff.is(setFindScopeEffect)) {
+        const next = eff.value;
+        if (!next) return null;
+        const from = Math.max(0, Math.min(next.from, docLen));
+        const to = Math.max(0, Math.min(next.to, docLen));
+        return to > from ? { from, to } : null;
+      }
+    }
+    if (tr.docChanged && scope) {
+      const from = Math.max(0, Math.min(tr.changes.mapPos(scope.from, -1), docLen));
+      const to = Math.max(0, Math.min(tr.changes.mapPos(scope.to, 1), docLen));
+      return to > from ? { from, to } : null;
+    }
+    return scope;
+  },
+  provide: (f) =>
+    EditorView.decorations.from(f, (scope) => {
+      if (!scope || scope.to <= scope.from) return Decoration.none;
+      return Decoration.set([findScopeMark.range(scope.from, scope.to)]);
+    }),
+});
+
+const setFindHighlightsEffect = StateEffect.define<{
+  matches: FindMatch[];
+  activeIndex: number;
+} | null>();
+const findMatchDeco = Decoration.mark({ class: 'cm-find-match' });
+const findMatchActiveDeco = Decoration.mark({ class: 'cm-find-match-active' });
+
+const findHighlightField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decos, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setFindHighlightsEffect)) {
+        const payload = eff.value;
+        if (!payload || payload.matches.length === 0) return Decoration.none;
+        const docLen = tr.state.doc.length;
+        const ranges = [];
+        const limit = Math.min(payload.matches.length, 2000);
+        for (let i = 0; i < limit; i++) {
+          const m = payload.matches[i];
+          const from = Math.max(0, Math.min(m.from, docLen));
+          const to = Math.max(0, Math.min(m.to, docLen));
+          if (to <= from) continue;
+          ranges.push(
+            (i === payload.activeIndex ? findMatchActiveDeco : findMatchDeco).range(from, to)
+          );
+        }
+        if (payload.activeIndex >= limit && payload.activeIndex < payload.matches.length) {
+          const m = payload.matches[payload.activeIndex];
+          const from = Math.max(0, Math.min(m.from, docLen));
+          const to = Math.max(0, Math.min(m.to, docLen));
+          if (to > from) {
+            ranges.push(findMatchActiveDeco.range(from, to));
+          }
+        }
+        return Decoration.set(ranges, true);
+      }
+    }
+    return tr.docChanged ? decos.map(tr.changes) : decos;
   },
   provide: (f) => EditorView.decorations.from(f),
 });
@@ -246,6 +330,8 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onSmartPasteNotify,
       onLineCopyNotify,
       onImagePasteOrDrop,
+      onFindScopeChange,
+      onEditorSelectionChange,
       syncHighlightRange,
       theme,
       settings,
@@ -268,6 +354,8 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onSmartPasteNotify,
       onLineCopyNotify,
       onImagePasteOrDrop,
+      onFindScopeChange,
+      onEditorSelectionChange,
       settings,
     });
     callbacksRef.current = {
@@ -278,10 +366,13 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onSmartPasteNotify,
       onLineCopyNotify,
       onImagePasteOrDrop,
+      onFindScopeChange,
+      onEditorSelectionChange,
       settings,
     };
 
     const suppressingExternalRef = useRef(false);
+    const suppressingSelectionNotifyRef = useRef(false);
     const lastDocIdRef = useRef(docId);
 
     const tryOeditLineCopy = (editorView: EditorView): boolean => {
@@ -317,6 +408,8 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             highlightActiveLine(),
             highlightActiveLineGutter(),
             syncLineHighlightField,
+            findScopeField,
+            findHighlightField,
             langComp.current.of(markdown({ base: markdownLanguage, codeLanguages: languages })),
             Prec.high(
               keymap.of([
@@ -402,6 +495,20 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
               if (update.docChanged && !suppressingExternalRef.current) {
                 const next = update.state.doc.toString();
                 callbacksRef.current.onChange(next);
+              }
+              if (update.docChanged) {
+                const prevScope = update.startState.field(findScopeField);
+                const nextScope = update.state.field(findScopeField);
+                if (
+                  (prevScope?.from ?? null) !== (nextScope?.from ?? null) ||
+                  (prevScope?.to ?? null) !== (nextScope?.to ?? null)
+                ) {
+                  callbacksRef.current.onFindScopeChange?.(nextScope);
+                }
+              }
+              if (update.selectionSet && !suppressingSelectionNotifyRef.current && !suppressingExternalRef.current) {
+                const sel = update.state.selection.main;
+                callbacksRef.current.onEditorSelectionChange?.({ from: sel.from, to: sel.to });
               }
               if (update.selectionSet || update.docChanged) {
                 const head = update.state.selection.main.head;
@@ -518,16 +625,26 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       if (tabChanged) {
         lastDocIdRef.current = docId;
       }
-      if (current === value) return;
+      if (current === value) {
+        if (tabChanged) {
+          view.dispatch({
+            effects: [setFindScopeEffect.of(null), setFindHighlightsEffect.of(null)],
+          });
+          callbacksRef.current.onFindScopeChange?.(null);
+        }
+        return;
+      }
 
       suppressingExternalRef.current = true;
       if (tabChanged) {
-        // Reset history on tab switch
+        // Reset history/scope on tab switch
         view.dispatch({
           changes: { from: 0, to: current.length, insert: value },
           selection: { anchor: 0 },
+          effects: [setFindScopeEffect.of(null), setFindHighlightsEffect.of(null)],
         });
         view.scrollDOM.scrollTop = 0;
+        callbacksRef.current.onFindScopeChange?.(null);
       } else {
         const sel = view.state.selection.main;
         const nextAnchor = Math.min(sel.anchor, value.length);
@@ -617,20 +734,68 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       redoAction: () => {
         if (viewRef.current) redo(viewRef.current);
       },
-      selectRange: (from: number, to: number) => {
+      selectRange: (from: number, to: number, options?: { focus?: boolean }) => {
+        const view = viewRef.current;
+        if (!view) return;
+        const docLen = view.state.doc.length;
+        const safeFrom = Math.max(0, Math.min(from, docLen));
+        const safeTo = Math.max(safeFrom, Math.min(to, docLen));
+        suppressingSelectionNotifyRef.current = true;
+        view.dispatch({
+          selection: { anchor: safeFrom, head: safeTo },
+          effects: EditorView.scrollIntoView(safeFrom, { y: 'center' }),
+        });
+        suppressingSelectionNotifyRef.current = false;
+        if (options?.focus) {
+          view.focus();
+        }
+      },
+      replaceRange: (from: number, to: number, text: string, options?: { selectResult?: boolean }) => {
+        const view = viewRef.current;
+        if (!view) return;
+        const docLen = view.state.doc.length;
+        const safeFrom = Math.max(0, Math.min(from, docLen));
+        const safeTo = Math.max(safeFrom, Math.min(to, docLen));
+        const selectResult = options?.selectResult ?? true;
+        suppressingSelectionNotifyRef.current = true;
+        view.dispatch({
+          changes: { from: safeFrom, to: safeTo, insert: text },
+          selection: selectResult
+            ? { anchor: safeFrom, head: safeFrom + text.length }
+            : { anchor: safeFrom + text.length },
+          effects: EditorView.scrollIntoView(safeFrom, { y: 'nearest' }),
+        });
+        suppressingSelectionNotifyRef.current = false;
+      },
+      getSelectionRange: () => {
+        const view = viewRef.current;
+        if (!view) return null;
+        const { from, to } = view.state.selection.main;
+        return { from, to };
+      },
+      getCursorOffset: () => {
+        const view = viewRef.current;
+        if (!view) return 0;
+        return view.state.selection.main.head;
+      },
+      getSelectedText: () => {
+        const view = viewRef.current;
+        if (!view) return '';
+        const { from, to } = view.state.selection.main;
+        return from < to ? view.state.sliceDoc(from, to) : '';
+      },
+      setFindScope: (scope: TextRange | null) => {
         const view = viewRef.current;
         if (!view) return;
         view.dispatch({
-          selection: { anchor: from, head: to },
-          effects: EditorView.scrollIntoView(from, { y: 'center' }),
+          effects: setFindScopeEffect.of(scope),
         });
       },
-      replaceRange: (from: number, to: number, text: string) => {
+      setFindHighlights: (payload: { matches: FindMatch[]; activeIndex: number } | null) => {
         const view = viewRef.current;
         if (!view) return;
         view.dispatch({
-          changes: { from, to, insert: text },
-          selection: { anchor: from, head: from + text.length },
+          effects: setFindHighlightsEffect.of(payload),
         });
       },
     }));

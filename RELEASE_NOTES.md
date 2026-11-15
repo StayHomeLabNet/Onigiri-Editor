@@ -1,14 +1,10 @@
-Onigiri Editor v1.0.0 marks the first major cross-platform release for macOS, Windows, and Linux—combining fast Markdown & code editing, bidirectional live preview, AI assistant & diff preview, project dev-server integration, and automatic OS language detection.
+Onigiri Editor `v1.0.1` fixes Windows CLI execution errors (`os error 193`), improves Antigravity / Codex / Claude / Gemini CLI setup guidance across OSes, expands Web runtime diagnostics, and upgrades Find & Replace with width sensitivity and selection-scoped replacement.
 
-### Highlights
-- **Official Rebrand to Onigiri Editor (`v1.0.0`)**: Updated branding, cross-platform app icons, and repository (`StayHomeLabNet/Onigiri-Editor`).
-- **OS-Aware First-Launch Language**: Automatically launches in Japanese UI + native Japanese menu bar when the OS is Japanese, and English for all other OS locales.
-- **3 UI Modes (`⌘\` / `Ctrl+\`)**: Switch effortlessly between **Simple** (minimal single-pane), **Basic** (bidirectional preview & AI), and **Advanced** (tabs, workspace explorer, snapshots & dev tools).
-- **Session Restore, Draft Recovery & Auto-Save**: Preserves open tabs, unsaved drafts, cursor positions, and workspace state across restarts, with optional 1.5s auto-save for file-backed tabs.
-- **External File Change Detection**: Watches open files modified or deleted outside the editor (or by AI CLIs), auto-reloading clean tabs or displaying a conflict resolution banner (`Reload`, `Compare Diff`, `Keep Mine`, `Save Again`, `Keep as Draft`).
-- **AI Pre-Apply Diff Preview Modal**: Review line-by-line diffs before replacing the active document (with optional automatic snapshot backup) or writing files into the workspace folder.
-- **AI Connection Assistant & Model Picker**: Guided setup, login, and model selection for Codex CLI, Claude Code CLI, Gemini CLI, Antigravity CLI, OpenAI / Anthropic / Gemini APIs, Ollama, and LM Studio.
-- **Project Dev Server Diagnostics & Dual Browser Preview**: Auto-detects Vite, Next.js, Laravel, WordPress, Docker Compose, Python, and static sites, alongside a native embedded WebView browser and external HTTP live preview.
+### Highlights (`v1.0.1`)
+- **Windows CLI Shim Resolution Fix (`os error 193`)**: Skips extensionless POSIX shell scripts in `%APPDATA%\npm` (such as `codex`, `claude`, `gemini`, `npm`) on Windows and resolves `.exe` / `.com` / `.cmd` / `.bat` properly before launching via Node.js.
+- **Antigravity CLI (`agy`) & AI Setup Guidance**: Distinguishes the standalone Antigravity CLI (`agy`) from `Antigravity.app`, improves cross-OS terminal installers (`curl` / `irm` / `winget`), automatically uses `~/.npm-global` on macOS/Linux when global npm prefixes are read-only, and adds per-CLI login hints plus LM Studio / Ollama step-by-step instructions.
+- **Web Runtime & Dependency Diagnostics**: Filters out Windows' empty Microsoft Store `python.exe` stub, detects `wp-config-sample.php` and Laravel SQLite database setup, adds Ruby/Jekyll diagnostics (with macOS `/usr/bin/ruby` protection), Linux `python3-venv` & PHP extension hints, `.env.example` detection, and clearer setup action legends.
+- **Find & Replace Enhancements**: Adds full-width/half-width sensitivity toggle (`Aa` / `Ａａ` matching), **In Selection** search/replace scope with range refresh, literal `$1` preservation when Regex is off, and smoother match navigation.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel)**: `.dmg` / `.app.tar.gz`
@@ -17,19 +13,16 @@ Onigiri Editor v1.0.0 marks the first major cross-platform release for macOS, Wi
 
 ---
 
-Onigiri Editor v1.0.0 は、macOS・Windows・Linux に対応した最初のメジャーリリースです。軽快な Markdown・コード編集、双方向ライブプレビュー、AI アシスタント＆適用前 Diff プレビュー、開発サーバー連携、初回起動時の OS 言語自動判定を 1 つのデスクトップアプリに統合しました。
+Onigiri Editor `v1.0.1` では、Windows 環境での CLI 起動エラー（`os error 193`）の解消、macOS・Windows・Linux 各環境における AI CLI 導入・認証ガイダンスの強化、Web ランタイム環境診断の拡充、および検索・置換機能の機能強化を行いました。
 
-### 主なポイント
-- **「Onigiri Editor」への名称刷新（`v1.0.0`）**: アプリ名・アプリアイコン・リポジトリ（`StayHomeLabNet/Onigiri-Editor`）を刷新しました。
-- **初回起動時の OS 言語自動判定**: OS の言語設定が日本語の場合は日本語 UI・日本語ネイティブメニューで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
-- **3つの UI モード（`⌘\` / `Ctrl+\`）**: 極小単一ペインの **シンプル**、双方向プレビュー＆AI 付きの **標準**、マルチタブ・フォルダ探索・開発連携を備えた **拡張** モードをワンキーで切り替えられます。
-- **セッション復元・未保存ドラフト保護・自動保存**: 開いていたタブ・下書き・カーソル位置・ワークスペース状態を次回起動時に復元でき、ファイル紐付きタブの自動保存（1.5秒）にも対応しました。
-- **外部ファイル変更検知**: 外部エディタや AI CLI による更新・削除を検知し、未編集タブは自動反映、未保存編集がある場合は **再読み込み** / **差分を比較** / **自分の編集を維持** などの解決バナーを表示します。
-- **AI 適用前 Diff プレビューモーダル**: 「本文を置換」（適用前スナップショット保存オプション付き）や「フォルダーへ書き込み」の実行前に、行単位で変更差分を確認できます。
-- **AI CLI 接続サポート＆モデル選択**: Codex CLI / Claude Code CLI / Gemini CLI / Antigravity CLI / OpenAI・Anthropic・Gemini API / Ollama / LM Studio に対応し、導入・ログイン支援を備えています。
-- **開発サーバー診断＆2パターンのブラウザプレビュー**: Vite / Next.js / Laravel / WordPress / Docker / Python / 静的サイト等の自動検出と環境診断、内蔵マルチ WebView ブラウザ＆外部ライブプレビューを利用できます。
+### 主な変更点（`v1.0.1`）
+- **Windows CLI 起動エラー（`os error 193`）の修正**: `%APPDATA%\npm` 配下にある拡張子なしの POSIX 用シェルスクリプト（`codex` / `claude` / `gemini` / `npm` 等）を Windows 実行候補から除外し、`.exe` / `.com` / `.cmd` / `.bat` を正しく解決して起動するよう修正しました。
+- **Antigravity CLI（`agy`）および各 AI CLI セットアップ改善**: `Antigravity.app` 本体と CLI（`agy`）が別配布である点の明記、OS 別インストーラー（`curl` / `irm` / `winget`）の改善、macOS/Linux で権限エラーを防ぐ `~/.npm-global` 自動設定、CLI 別の認証案内・Ollama/LM Studio の手順表示を追加しました。
+- **Web 実行環境・依存パッケージ診断の強化**: Windows Microsoft Store のダミー `python.exe` エイリアス除外、`wp-config-sample.php` や Laravel SQLite の検知、Jekyll/Ruby 診断（macOS 標準 Ruby の保護対応）、Linux `python3-venv`・PHP 拡張案内、`.env.example` 検知、セットアップボタンの役割説明を追加しました。
+- **検索・置換機能の強化**: 全角／半角の区別切り替え、選択範囲内での検索・置換（範囲再取得対応）、正規表現 OFF 時の `$1` 等リテラル維持、一致箇所の移動・ハイライト精度を改善しました。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応）**: `.dmg` / `.app.tar.gz`
 - **Windows（x64）**: `.exe`（インストーラ） / `.msi`
 - **Linux（x64）**: `.AppImage` / `.deb`
+

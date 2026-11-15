@@ -276,6 +276,11 @@ export interface Translations {
     showLogsBtn: string;
     hideLogsBtn: string;
     terminalOpenedMsg: string;
+    actionLegend: string;
+    inAppActionTooltip: string;
+    openTerminalTooltip: string;
+    openDownloadTooltip: string;
+    platformNoteMacos: string;
     platformNoteWindows: string;
     platformNoteLinux: string;
   };
@@ -321,11 +326,21 @@ export interface Translations {
     availableSwitchTitle: string;
     switchToProvider: string;
     notInstalledCli: string;
+    missingCliCodex: string;
+    missingCliClaude: string;
+    missingCliGemini: string;
+    missingCliAntigravity: string;
     notLoggedInCli: string;
+    authHintCodex: string;
+    authHintClaude: string;
+    authHintGemini: string;
+    authHintAntigravity: string;
     ollamaNotRunningDesc: string;
     ollamaNoModelsDesc: string;
+    ollamaNoModelsHint: string;
     ollamaNotInstalledDesc: string;
     lmstudioNotRunningDesc: string;
+    lmstudioServerSteps: string;
     apiKeyMissingDesc: string;
     customCliMissingDesc: string;
     startOllamaBtn: string;
@@ -344,6 +359,7 @@ export interface Translations {
     connectionOk: string;
     nodeRequiredHint: string;
     downloadNodeBtn: string;
+    platformNoteMacos: string;
     platformNoteWindows: string;
     platformNoteLinux: string;
     includeDoc: string;
@@ -377,6 +393,12 @@ export interface Translations {
     findPlaceholder: string;
     replacePlaceholder: string;
     caseSensitive: string;
+    caseSensitiveShort: string;
+    widthSensitive: string;
+    widthSensitiveShort: string;
+    inSelection: string;
+    refreshSelection: string;
+    noSelectionHint: string;
     regex: string;
     wholeWord: string;
     previous: string;
@@ -385,6 +407,8 @@ export interface Translations {
     replaceAll: string;
     matches: string;
     noMatches: string;
+    invalidRegex: string;
+    replacedCount: string;
   };
   status: {
     saved: string;

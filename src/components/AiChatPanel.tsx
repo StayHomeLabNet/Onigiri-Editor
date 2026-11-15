@@ -35,7 +35,6 @@ import {
   assistAiConnection,
   detectAiCapabilities,
   getHostOs,
-  isMacOs,
   listLocalModels,
   listSubscriptionModels,
   readWorkspaceContext,
@@ -769,6 +768,8 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     }
   };
 
+  const hostOs = getHostOs();
+
   const setupInfo = useMemo(() => {
     switch (config.provider) {
       case 'codex-cli':
@@ -796,15 +797,17 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         return {
           installKey: 'antigravity-install',
           loginKey: 'antigravity-login',
-          installCmd: isMacOs() ? 'agy install || open -a Antigravity' : 'agy install',
+          installCmd:
+            hostOs === 'windows'
+              ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://antigravity.google/cli/install.ps1 | iex"'
+              : 'curl -fsSL https://antigravity.google/cli/install.sh | bash && agy',
           loginCmd: 'agy',
         };
       default:
         return null;
     }
-  }, [config.provider]);
+  }, [config.provider, hostOs]);
 
-  const hostOs = getHostOs();
   const ollamaInstallCmd =
     hostOs === 'windows'
       ? 'winget install Ollama.Ollama'
@@ -820,8 +823,13 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     const reason = providerStatus.reason;
 
     let problemText = '';
-    if (reason === 'missing-cli') problemText = t.aiChat.notInstalledCli;
-    else if (reason === 'missing-auth') problemText = t.aiChat.notLoggedInCli;
+    if (reason === 'missing-cli') {
+      if (config.provider === 'codex-cli') problemText = t.aiChat.missingCliCodex;
+      else if (config.provider === 'claude-cli') problemText = t.aiChat.missingCliClaude;
+      else if (config.provider === 'gemini-cli') problemText = t.aiChat.missingCliGemini;
+      else if (config.provider === 'antigravity-cli') problemText = t.aiChat.missingCliAntigravity;
+      else problemText = t.aiChat.notInstalledCli;
+    } else if (reason === 'missing-auth') problemText = t.aiChat.notLoggedInCli;
     else if (reason === 'ollama-not-running') problemText = t.aiChat.ollamaNotRunningDesc;
     else if (reason === 'ollama-no-models') problemText = t.aiChat.ollamaNoModelsDesc;
     else if (reason === 'ollama-not-installed') problemText = t.aiChat.ollamaNotInstalledDesc;
@@ -829,6 +837,17 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     else if (reason === 'missing-apikey') problemText = t.aiChat.apiKeyMissingDesc;
     else if (reason === 'missing-custom-cli') problemText = t.aiChat.customCliMissingDesc;
     else problemText = `${PROVIDER_LABELS[config.provider]} (${providerStatus.text})`;
+
+    const authHint =
+      config.provider === 'codex-cli'
+        ? t.aiChat.authHintCodex
+        : config.provider === 'claude-cli'
+          ? t.aiChat.authHintClaude
+          : config.provider === 'gemini-cli'
+            ? t.aiChat.authHintGemini
+            : config.provider === 'antigravity-cli'
+              ? t.aiChat.authHintAntigravity
+              : null;
 
     return (
       <div className="ai-connect-card">
@@ -898,6 +917,16 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                     <span>{hostOs === 'macos' ? 'Antigravity.app' : 'Antigravity'}</span>
                   </button>
                 )}
+                {config.provider === 'antigravity-cli' && (
+                  <button
+                    type="button"
+                    className="mini-pill-btn"
+                    onClick={() => handleAssistAction('open-url', 'https://antigravity.google/download')}
+                  >
+                    <ExternalLink size={11} />
+                    <span>antigravity.google</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="mini-pill-btn"
@@ -911,27 +940,34 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           )}
 
           {reason === 'missing-auth' && setupInfo && (
-            <div className="ai-connect-btn-row">
-              <button
-                type="button"
-                className="mini-pill-btn is-active"
-                disabled={Boolean(assistBusy)}
-                onClick={() =>
-                  handleAssistAction('run-terminal-setup', setupInfo.loginKey, setupInfo.loginCmd)
-                }
-              >
-                <Terminal size={11} />
-                <span>{t.aiChat.openTerminalLoginBtn}</span>
-              </button>
-              <button
-                type="button"
-                className="mini-pill-btn"
-                onClick={() => handleCopyCommand(setupInfo.loginCmd)}
-              >
-                <ClipboardCopy size={11} />
-                <span>{setupInfo.loginCmd}</span>
-              </button>
-            </div>
+            <>
+              {authHint && (
+                <div className="platform-hint-note">
+                  <span>{authHint}</span>
+                </div>
+              )}
+              <div className="ai-connect-btn-row">
+                <button
+                  type="button"
+                  className="mini-pill-btn is-active"
+                  disabled={Boolean(assistBusy)}
+                  onClick={() =>
+                    handleAssistAction('run-terminal-setup', setupInfo.loginKey, setupInfo.loginCmd)
+                  }
+                >
+                  <Terminal size={11} />
+                  <span>{t.aiChat.openTerminalLoginBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  className="mini-pill-btn"
+                  onClick={() => handleCopyCommand(setupInfo.loginCmd)}
+                >
+                  <ClipboardCopy size={11} />
+                  <span>{setupInfo.loginCmd}</span>
+                </button>
+              </div>
+            </>
           )}
 
           {reason === 'ollama-not-running' && (
@@ -957,38 +993,43 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           )}
 
           {reason === 'ollama-no-models' && (
-            <div className="ai-connect-btn-row">
-              <button
-                type="button"
-                className="mini-pill-btn is-active"
-                disabled={Boolean(assistBusy)}
-                onClick={() =>
-                  handleAssistAction(
-                    'run-terminal-setup',
-                    'ollama-pull-llama3.2',
-                    'ollama pull llama3.2'
-                  )
-                }
-              >
-                <Terminal size={11} />
-                <span>{t.aiChat.pullLlamaBtn}</span>
-              </button>
-              <button
-                type="button"
-                className="mini-pill-btn"
-                disabled={Boolean(assistBusy)}
-                onClick={() =>
-                  handleAssistAction(
-                    'run-terminal-setup',
-                    'ollama-pull-qwen2.5',
-                    'ollama pull qwen2.5:7b'
-                  )
-                }
-              >
-                <Terminal size={11} />
-                <span>{t.aiChat.pullQwenBtn}</span>
-              </button>
-            </div>
+            <>
+              <div className="platform-hint-note">
+                <span>{t.aiChat.ollamaNoModelsHint}</span>
+              </div>
+              <div className="ai-connect-btn-row">
+                <button
+                  type="button"
+                  className="mini-pill-btn is-active"
+                  disabled={Boolean(assistBusy)}
+                  onClick={() =>
+                    handleAssistAction(
+                      'run-terminal-setup',
+                      'ollama-pull-llama3.2',
+                      'ollama pull llama3.2'
+                    )
+                  }
+                >
+                  <Terminal size={11} />
+                  <span>{t.aiChat.pullLlamaBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  className="mini-pill-btn"
+                  disabled={Boolean(assistBusy)}
+                  onClick={() =>
+                    handleAssistAction(
+                      'run-terminal-setup',
+                      'ollama-pull-qwen2.5',
+                      'ollama pull qwen2.5:7b'
+                    )
+                  }
+                >
+                  <Terminal size={11} />
+                  <span>{t.aiChat.pullQwenBtn}</span>
+                </button>
+              </div>
+            </>
           )}
 
           {reason === 'ollama-not-installed' && (
@@ -1013,28 +1054,33 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           )}
 
           {reason === 'lmstudio-not-running' && (
-            <div className="ai-connect-btn-row">
-              {caps?.lmstudioInstalled ? (
-                <button
-                  type="button"
-                  className="mini-pill-btn is-active"
-                  disabled={Boolean(assistBusy)}
-                  onClick={() => handleAssistAction('open-lmstudio')}
-                >
-                  <Play size={11} />
-                  <span>{t.aiChat.openLmStudioBtn}</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="mini-pill-btn is-active"
-                  onClick={() => handleAssistAction('open-url', 'https://lmstudio.ai/')}
-                >
-                  <ExternalLink size={11} />
-                  <span>LM Studio</span>
-                </button>
-              )}
-            </div>
+            <>
+              <div className="platform-hint-note">
+                <span>{t.aiChat.lmstudioServerSteps}</span>
+              </div>
+              <div className="ai-connect-btn-row">
+                {caps?.lmstudioInstalled ? (
+                  <button
+                    type="button"
+                    className="mini-pill-btn is-active"
+                    disabled={Boolean(assistBusy)}
+                    onClick={() => handleAssistAction('open-lmstudio')}
+                  >
+                    <Play size={11} />
+                    <span>{t.aiChat.openLmStudioBtn}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="mini-pill-btn is-active"
+                    onClick={() => handleAssistAction('open-url', 'https://lmstudio.ai/')}
+                  >
+                    <ExternalLink size={11} />
+                    <span>LM Studio</span>
+                  </button>
+                )}
+              </div>
+            </>
           )}
 
           {reason === 'missing-apikey' && (
@@ -1114,16 +1160,17 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         {(reason === 'missing-cli' ||
           reason === 'missing-auth' ||
           reason === 'ollama-not-installed' ||
-          reason === 'ollama-no-models') &&
-          (hostOs === 'windows' || hostOs === 'linux') && (
-            <div className="platform-hint-note">
-              <span>
-                {hostOs === 'windows'
-                  ? t.aiChat.platformNoteWindows
-                  : t.aiChat.platformNoteLinux}
-              </span>
-            </div>
-          )}
+          reason === 'ollama-no-models') && (
+          <div className="platform-hint-note">
+            <span>
+              {hostOs === 'windows'
+                ? t.aiChat.platformNoteWindows
+                : hostOs === 'linux'
+                  ? t.aiChat.platformNoteLinux
+                  : t.aiChat.platformNoteMacos}
+            </span>
+          </div>
+        )}
 
         {/* Quick switch to already-ready providers */}
         {readyAlternatives.length > 0 && (

@@ -81,7 +81,10 @@ export const ProjectSetupCard: React.FC<ProjectSetupCardProps> = ({
       ? t.project.platformNoteWindows
       : hostOs === 'linux'
         ? t.project.platformNoteLinux
-        : null;
+        : t.project.platformNoteMacos;
+  const hasDiagActions = diagnostics.some(
+    (d) => Boolean(d.inAppAction || d.terminalCommand || d.docsUrl)
+  );
 
   const handleCopy = async (id: string, cmd: string) => {
     try {
@@ -171,6 +174,7 @@ export const ProjectSetupCard: React.FC<ProjectSetupCardProps> = ({
                           type="button"
                           className="mini-pill-btn is-active"
                           disabled={setupBusy}
+                          title={t.project.inAppActionTooltip}
                           onClick={() =>
                             onAssistSetup({
                               rootPath: projectInfo.rootPath,
@@ -199,6 +203,7 @@ export const ProjectSetupCard: React.FC<ProjectSetupCardProps> = ({
                           type="button"
                           className="mini-pill-btn"
                           disabled={setupBusy}
+                          title={t.project.openTerminalTooltip}
                           onClick={() =>
                             onAssistSetup({
                               rootPath: projectInfo.rootPath,
@@ -218,6 +223,7 @@ export const ProjectSetupCard: React.FC<ProjectSetupCardProps> = ({
                           type="button"
                           className="mini-pill-btn"
                           disabled={setupBusy}
+                          title={t.project.openDownloadTooltip}
                           onClick={() =>
                             onAssistSetup({
                               rootPath: projectInfo.rootPath,
@@ -236,6 +242,13 @@ export const ProjectSetupCard: React.FC<ProjectSetupCardProps> = ({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {diagnostics.length > 0 && hasDiagActions && (
+        <div className="platform-hint-note">
+          <Info size={12} />
+          <span>{t.project.actionLegend}</span>
         </div>
       )}
 

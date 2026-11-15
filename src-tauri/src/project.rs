@@ -126,6 +126,8 @@ fn extended_path() -> String {
                 ".volta/bin",
                 ".asdf/shims",
                 ".local/share/mise/shims",
+                ".rbenv/shims",
+                ".rvm/bin",
                 ".bun/bin",
                 ".fnm/aliases/default/bin",
                 ".nvm/versions/node/current/bin",
@@ -146,6 +148,21 @@ fn extended_path() -> String {
                     dirs.push(latest);
                 }
             }
+
+            // Scan user gem bin directories (~/.local/share/gem/ruby/*/bin and ~/.gem/ruby/*/bin)
+            for gem_base in [".local/share/gem/ruby", ".gem/ruby"] {
+                if let Ok(read_dir) = fs::read_dir(PathBuf::from(&home).join(gem_base)) {
+                    let mut gem_bins: Vec<PathBuf> = read_dir
+                        .flatten()
+                        .map(|e| e.path().join("bin"))
+                        .filter(|p| p.is_dir())
+                        .collect();
+                    gem_bins.sort();
+                    if let Some(latest) = gem_bins.pop() {
+                        dirs.push(latest);
+                    }
+                }
+            }
         }
 
         #[cfg(target_os = "macos")]
@@ -154,6 +171,8 @@ fn extended_path() -> String {
                 "/Applications/Docker.app/Contents/Resources/bin",
                 "/Applications/OrbStack.app/Contents/MacOS/xbin",
                 "/opt/homebrew/opt/php/bin",
+                "/opt/homebrew/opt/ruby/bin",
+                "/usr/local/opt/ruby/bin",
                 "/opt/homebrew/bin",
                 "/opt/homebrew/sbin",
             ] {
@@ -198,7 +217,6 @@ fn extended_path() -> String {
         if !local_appdata.is_empty() {
             dirs.push(PathBuf::from(&local_appdata).join("pnpm"));
             dirs.push(PathBuf::from(&local_appdata).join(r"Volta\bin"));
-            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
             for py_ver in ["Python313", "Python312", "Python311", "Python310", "Python39"] {
                 let py_base = PathBuf::from(&local_appdata)
                     .join("Programs")
@@ -223,6 +241,15 @@ fn extended_path() -> String {
         dirs.push(PathBuf::from(&program_data).join(r"ComposerSetup\bin"));
         dirs.push(PathBuf::from(r"C:\php"));
         dirs.push(PathBuf::from(r"C:\tools\php"));
+        for ruby_ver in ["Ruby34-x64", "Ruby33-x64", "Ruby32-x64", "Ruby31-x64"] {
+            let ruby_bin = PathBuf::from(r"C:\").join(ruby_ver).join("bin");
+            if ruby_bin.is_dir() {
+                dirs.push(ruby_bin);
+            }
+        }
+        if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
+        }
     }
 
     if let Some(current) = env::var_os("PATH") {
@@ -311,21 +338,71 @@ fn build_project_command(bin: &str, args: &[String]) -> Command {
     new_background_command(bin, args)
 }
 
+#[allow(dead_code)]
+fn has_windows_runnable_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "exe" | "com" | "cmd" | "bat"))
+        .unwrap_or(false)
+}
+
+#[allow(dead_code)]
+fn resolve_windows_executable_candidate(dir: &Path, name: &str) -> Option<PathBuf> {
+    let name_path = Path::new(name);
+    if has_windows_runnable_extension(name_path) {
+        let candidate = dir.join(name);
+        if candidate.exists() && candidate.is_file() {
+            return Some(candidate);
+        }
+        return None;
+    }
+    for ext in ["exe", "com", "cmd", "bat"] {
+        let candidate = dir.join(format!("{}.{}", name, ext));
+        if candidate.exists() && candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn find_executable(names: &[&str]) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    for name in names {
+        let raw = Path::new(name);
+        if name.contains('\\') || name.contains('/') || raw.is_absolute() {
+            if has_windows_runnable_extension(raw) && raw.exists() && raw.is_file() {
+                return Some(raw.to_string_lossy().to_string());
+            }
+            for ext in ["exe", "com", "cmd", "bat"] {
+                let candidate = PathBuf::from(format!("{}.{}", name, ext));
+                if candidate.exists() && candidate.is_file() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    for name in names {
+        let raw = Path::new(name);
+        if (name.contains('/') || raw.is_absolute()) && raw.exists() && raw.is_file() {
+            return Some(raw.to_string_lossy().to_string());
+        }
+    }
+
     let path_var = extended_path();
     for dir in env::split_paths(&path_var) {
         for name in names {
-            let candidate = dir.join(name);
-            if candidate.exists() && candidate.is_file() {
-                return Some(candidate.to_string_lossy().to_string());
-            }
             #[cfg(target_os = "windows")]
             {
-                for ext in ["exe", "cmd", "bat"] {
-                    let c = dir.join(format!("{}.{}", name, ext));
-                    if c.exists() && c.is_file() {
-                        return Some(c.to_string_lossy().to_string());
-                    }
+                if let Some(found) = resolve_windows_executable_candidate(&dir, name) {
+                    return Some(found.to_string_lossy().to_string());
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let candidate = dir.join(name);
+                if candidate.exists() && candidate.is_file() {
+                    return Some(candidate.to_string_lossy().to_string());
                 }
             }
         }
@@ -650,6 +727,37 @@ fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
     None
 }
 
+fn is_usable_python_exe(exe: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        if exe.to_ascii_lowercase().contains(r"\microsoft\windowsapps\") {
+            let mut cmd = std::process::Command::new(exe);
+            cmd.args(["-c", "import sys"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000);
+            }
+            return cmd.status().map(|s| s.success()).unwrap_or(false);
+        }
+    }
+    let _ = exe;
+    true
+}
+
+fn find_usable_python_exe() -> Option<String> {
+    for name in ["python3", "python"] {
+        if let Some(exe) = find_executable(&[name]) {
+            if is_usable_python_exe(&exe) {
+                return Some(exe);
+            }
+        }
+    }
+    None
+}
+
 fn find_python_runner(root: &Path) -> Option<(String, Vec<String>)> {
     for rel in [
         ".venv/bin/python",
@@ -669,7 +777,7 @@ fn find_python_runner(root: &Path) -> Option<(String, Vec<String>)> {
             return Some((uv, vec!["run".to_string(), "python".to_string()]));
         }
     }
-    find_executable(&["python3", "python"]).map(|exe| (exe, Vec::new()))
+    find_usable_python_exe().map(|exe| (exe, Vec::new()))
 }
 
 fn parse_env_app_url(root: &Path) -> Option<String> {
@@ -1393,10 +1501,10 @@ fn linux_install_hint_for_pkg_manager(tool: &str, mgr: &str) -> String {
             _ => "sudo apt-get update && sudo apt-get install -y nodejs npm".to_string(),
         },
         "php" => match mgr {
-            "dnf" => "sudo dnf install -y php php-cli php-mbstring php-xml unzip".to_string(),
+            "dnf" => "sudo dnf install -y php php-cli php-mbstring php-xml php-curl unzip".to_string(),
             "pacman" => "sudo pacman -S --noconfirm php unzip".to_string(),
-            "zypper" => "sudo zypper install -y php8 php8-cli php8-mbstring unzip".to_string(),
-            _ => "sudo apt-get update && sudo apt-get install -y php php-cli php-mbstring php-xml unzip".to_string(),
+            "zypper" => "sudo zypper install -y php8 php8-cli php8-mbstring php8-curl unzip".to_string(),
+            _ => "sudo apt-get update && sudo apt-get install -y php php-cli php-mbstring php-xml php-curl php-zip unzip".to_string(),
         },
         "composer" => match mgr {
             "dnf" => "sudo dnf install -y composer".to_string(),
@@ -1416,6 +1524,12 @@ fn linux_install_hint_for_pkg_manager(tool: &str, mgr: &str) -> String {
             "zypper" => "sudo zypper install -y hugo".to_string(),
             _ => "sudo apt-get update && sudo apt-get install -y hugo".to_string(),
         },
+        "ruby" => match mgr {
+            "dnf" => "sudo dnf install -y ruby ruby-devel gcc make".to_string(),
+            "pacman" => "sudo pacman -S --noconfirm ruby base-devel".to_string(),
+            "zypper" => "sudo zypper install -y ruby ruby-devel gcc make".to_string(),
+            _ => "sudo apt-get update && sudo apt-get install -y ruby-full build-essential".to_string(),
+        },
         "bun" => "curl -fsSL https://bun.sh/install | bash".to_string(),
         other => other.to_string(),
     }
@@ -1431,6 +1545,7 @@ fn os_install_hint(tool: &str) -> String {
             "composer" => "brew install composer".to_string(),
             "python" => "brew install python uv".to_string(),
             "hugo" => "brew install hugo".to_string(),
+            "ruby" => "brew install ruby".to_string(),
             "bun" => "curl -fsSL https://bun.sh/install | bash".to_string(),
             other => other.to_string(),
         }
@@ -1444,7 +1559,8 @@ fn os_install_hint(tool: &str) -> String {
             "composer" => "winget install -e --id Composer.Composer".to_string(),
             "python" => "winget install -e --id Python.Python.3.12".to_string(),
             "hugo" => "winget install -e --id Hugo.Hugo.Extended".to_string(),
-            "bun" => "powershell -c \"irm bun.sh/install.ps1 | iex\"".to_string(),
+            "ruby" => "winget install -e --id RubyInstallerTeam.RubyWithDevKit.3.3".to_string(),
+            "bun" => "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://bun.sh/install.ps1 | iex\"".to_string(),
             other => other.to_string(),
         }
     }
@@ -1477,14 +1593,14 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                     title_ja: "Docker がインストールされていません".to_string(),
                     title_en: "Docker is not installed".to_string(),
                     description_ja: if has_app {
-                        "Docker Desktop アプリは見つかりましたが、CLI が有効化されていません。Docker アプリを一度起動して初期設定を完了してください。".to_string()
+                        "Docker アプリは見つかりましたが、docker CLI がまだ有効化されていません。「Docker を起動」または手動で Docker Desktop を起動して初期設定を完了してください（初回起動は 10〜30 秒かかる場合があります）。".to_string()
                     } else {
-                        "このプロジェクトは Docker Compose を使ってアプリやデータベースを起動します。Docker Desktop をインストールして起動してください。".to_string()
+                        "このプロジェクトは Docker Compose でアプリやデータベースを起動します。「Terminal で実行」または公式サイトから Docker Desktop を導入してください（Windows では WSL 2 の有効化、初回コンテナ起動時はイメージ取得に数分かかる場合があります）。".to_string()
                     },
                     description_en: if has_app {
-                        "Docker app was found, but the docker CLI is not ready. Launch Docker Desktop to finish setup.".to_string()
+                        "Docker app was found, but the docker CLI is not ready yet. Launch Docker Desktop to finish initialization (startup can take 10–30s).".to_string()
                     } else {
-                        "This project uses Docker Compose to run its app and database. Install and launch Docker Desktop.".to_string()
+                        "This project uses Docker Compose to run its app and services. Install Docker Desktop via Terminal or the official download page (Windows requires WSL 2; first image pull may take a few minutes).".to_string()
                     },
                     command_preview: if has_app {
                         None
@@ -1525,14 +1641,14 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                         title_ja: "Docker が起動していません".to_string(),
                         title_en: "Docker daemon is not running".to_string(),
                         description_ja: if has_linux_engine {
-                            "Docker コマンドはインストール済みですが、バックグラウンドの Docker Engine（docker.service）が停止しているか権限がありません。サービスを起動してください（権限エラーが出る場合は docker グループへの追加も必要です）。".to_string()
+                            "Docker コマンドはインストール済みですが、バックグラウンドの Docker Engine（docker.service）が停止しているか権限がありません。サービスを起動してください（権限エラーが出る場合は `sudo usermod -aG docker $USER` 後に再ログインが必要です）。".to_string()
                         } else {
-                            "Docker コマンドはインストール済みですが、バックグラウンドのエンジンが停止中です。Docker Desktop を起動してからお試しください。".to_string()
+                            "Docker コマンドはインストール済みですが、バックグラウンドのエンジンが停止中です。「Docker を起動」または Docker Desktop を起動し、10〜20秒ほど待ってから「環境を再チェック」を押してください。".to_string()
                         },
                         description_en: if has_linux_engine {
-                            "Docker CLI is installed, but Docker Engine (docker.service) is stopped or inaccessible. Start the service (you may also need membership in the docker group).".to_string()
+                            "Docker CLI is installed, but Docker Engine (docker.service) is stopped or inaccessible. Start the service (if permission is denied, run `sudo usermod -aG docker $USER` and re-login).".to_string()
                         } else {
-                            "Docker CLI is available, but the Docker daemon is stopped. Start Docker Desktop first.".to_string()
+                            "Docker CLI is available, but the Docker daemon is stopped. Launch Docker Desktop, wait 10–20 seconds for it to become ready, then click Re-check Environment.".to_string()
                         },
                         command_preview: if has_linux_engine {
                             Some("sudo systemctl start docker".to_string())
@@ -1596,8 +1712,16 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                 },
                 title_ja: "Node.js がインストールされていません".to_string(),
                 title_en: "Node.js is not installed".to_string(),
-                description_ja: "このプロジェクトの開発サーバーやパッケージ管理を動かすには Node.js が必要です。下のボタンから公式サイト（インストーラー）で簡単に導入できます。".to_string(),
-                description_en: "Node.js is required to install packages and start this project's dev server.".to_string(),
+                description_ja: if info.kind == "laravel" {
+                    "この Laravel プロジェクトは Vite で CSS/JS をビルドしています（`public/build/manifest.json` がまだありません）。Node.js 20 LTS 以上を導入すると開発時の自動ビルド（HMR）も同時起動できます（「Terminal で実行」または公式サイトから導入可能）。".to_string()
+                } else {
+                    "このプロジェクトの開発サーバーやパッケージ管理を動かすには Node.js（20 LTS 以上推奨）が必要です。「Terminal で実行」または公式サイトのインストーラーから導入し、完了後に「環境を再チェック」を押してください（Linux の apt 版が古い場合は公式サイトまたは nvm を推奨）。".to_string()
+                },
+                description_en: if info.kind == "laravel" {
+                    "This Laravel project uses Vite for frontend assets (and `public/build/manifest.json` is not built yet). Install Node.js 20 LTS+ via Terminal or the official website to run Vite HMR alongside PHP.".to_string()
+                } else {
+                    "Node.js (20 LTS+ recommended) is required to install packages and start this project's dev server. Install it via \"Run in Terminal\" or the official installer, then click Re-check Environment (if a Linux distro package is too old, use the official installer or nvm).".to_string()
+                },
                 command_preview: Some(install_cmd.clone()),
                 in_app_action: None,
                 action_target: None,
@@ -1610,6 +1734,7 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
             let has_npm = find_executable(&["npm"]).is_some();
             let can_install_via_npm = has_npm && matches!(pm, "pnpm" | "yarn");
             let bun_cmd = os_install_hint("bun");
+            let missing_npm_for_pm = !has_npm && matches!(pm, "npm" | "pnpm" | "yarn");
             diags.push(ProjectDiagnostic {
                 id: "missing-pm".to_string(),
                 severity: if info.kind == "laravel" {
@@ -1619,14 +1744,42 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                 },
                 title_ja: format!("パッケージマネージャー ({}) が見つかりません", pm),
                 title_en: format!("Package manager ({}) not found", pm),
-                description_ja: format!(
-                    "このプロジェクトは {} で管理されています。先に {} をインストールしてください。",
-                    pm, pm
-                ),
-                description_en: format!(
-                    "This project uses {}, which is not currently installed on PATH.",
-                    pm
-                ),
+                description_ja: if pm == "bun" {
+                    "このプロジェクトは Bun（bun.lock）で管理されています。下のコマンドまたは「Terminal で実行」で Bun を導入してください（Windows では PowerShell 経由で導入されます）。".to_string()
+                } else if can_install_via_npm {
+                    format!(
+                        "このプロジェクトは {} で管理されています（ロックファイルを検出）。「{} を自動インストール」または `corepack enable` で導入できます。",
+                        pm, pm
+                    )
+                } else if missing_npm_for_pm {
+                    format!(
+                        "このプロジェクトは {} で管理されていますが、npm が PATH 上に見つかりません。Node.js（npm 同梱）を再インストールするか公式サイトから導入してください。",
+                        pm
+                    )
+                } else {
+                    format!(
+                        "このプロジェクトは {} で管理されています。先に {} をインストールしてください。",
+                        pm, pm
+                    )
+                },
+                description_en: if pm == "bun" {
+                    "This project uses Bun (bun.lock detected). Install Bun using the command below or \"Run in Terminal\" (uses PowerShell on Windows).".to_string()
+                } else if can_install_via_npm {
+                    format!(
+                        "This project uses {} (lockfile detected). Click \"Install {}\" below or enable Corepack (`corepack enable`).",
+                        pm, pm
+                    )
+                } else if missing_npm_for_pm {
+                    format!(
+                        "This project uses {}, but npm was not found on PATH. Reinstall Node.js (with npm) from the official download page.",
+                        pm
+                    )
+                } else {
+                    format!(
+                        "This project uses {}, which is not currently installed on PATH.",
+                        pm
+                    )
+                },
                 command_preview: if can_install_via_npm {
                     Some(format!("npm install -g {}", pm))
                 } else if pm == "bun" {
@@ -1673,8 +1826,28 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                 },
                 title_ja: "依存パッケージ（node_modules）が未インストールです".to_string(),
                 title_en: "Dependencies (node_modules) are not installed".to_string(),
-                description_ja: "プロジェクトを最初に開いたときや新しい PC では、最初にライブラリ一式をダウンロードする必要があります。ボタンひとつで自動インストールできます。".to_string(),
-                description_en: "JavaScript dependencies have not been installed yet. Click below to install them automatically.".to_string(),
+                description_ja: if info.kind == "laravel" {
+                    format!(
+                        "フロントエンド（Vite）用の JavaScript ライブラリが未導入です。「{} install を実行」を押すと `node_modules/` を作成し、PHP と同時に Vite も起動できます（所要時間: 数十秒〜数分）。",
+                        pm
+                    )
+                } else {
+                    format!(
+                        "プロジェクトを最初に開いたときや新しい PC では、最初にライブラリ一式を `node_modules/` へダウンロードする必要があります。「{} install を実行」で自動導入できます（ネットワーク状況により数十秒〜数分かかります）。",
+                        pm
+                    )
+                },
+                description_en: if info.kind == "laravel" {
+                    format!(
+                        "Frontend (Vite) JavaScript packages are not installed in `node_modules/` yet. Click \"Run {} install\" to enable Vite HMR alongside PHP.",
+                        pm
+                    )
+                } else {
+                    format!(
+                        "JavaScript dependencies in package.json are not installed in `node_modules/` yet. Click \"Run {} install\" to download them automatically (may take a minute).",
+                        pm
+                    )
+                },
                 command_preview: Some(format!("{} install", pm)),
                 in_app_action: Some("install-node-deps".to_string()),
                 action_target: Some(pm.to_string()),
@@ -1695,8 +1868,8 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                 severity: "error".to_string(),
                 title_ja: "PHP がインストールされていません".to_string(),
                 title_en: "PHP is not installed".to_string(),
-                description_ja: "このプロジェクトをローカルサーバーで動かすには PHP が必要です。ターミナルからインストールするか、Docker Compose 環境を用意してください。".to_string(),
-                description_en: "PHP is required to start the local server for this project.".to_string(),
+                description_ja: "このプロジェクトをローカルサーバーで動かすには PHP（8.1 以上推奨・mbstring / xml / curl / pdo 拡張含む）が必要です。「Terminal で実行」または公式サイトから導入するか、Docker Compose 環境を用意してください。".to_string(),
+                description_en: "PHP (8.1+ recommended with mbstring/xml/curl/pdo extensions) is required to run the local server. Install via \"Run in Terminal\" or the official download page, or add a Docker Compose setup.".to_string(),
                 command_preview: Some(install_cmd.clone()),
                 in_app_action: None,
                 action_target: None,
@@ -1716,8 +1889,8 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                     severity: "error".to_string(),
                     title_ja: "PHP パッケージ（vendor）が未インストールです".to_string(),
                     title_en: "PHP dependencies (vendor) are not installed".to_string(),
-                    description_ja: "composer.json に書かれた PHP ライブラリ（vendor フォルダー）がまだ入っていません。ボタンひとつで導入できます。".to_string(),
-                    description_en: "PHP packages defined in composer.json are not installed in vendor/ yet.".to_string(),
+                    description_ja: "composer.json に書かれた PHP ライブラリ（vendor フォルダー）がまだ入っていません。「composer install を実行」で自動導入できます（失敗する場合は PHP 拡張の curl / mbstring / xml / zip や PHP バージョン要件をログで確認してください）。".to_string(),
+                    description_en: "PHP packages defined in composer.json are not installed in vendor/ yet. Click \"Run composer install\" below (if it fails, check logs for missing PHP extensions such as curl, mbstring, xml, or zip).".to_string(),
                     command_preview: Some("composer install".to_string()),
                     in_app_action: Some("install-composer-deps".to_string()),
                     action_target: None,
@@ -1733,8 +1906,8 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                     severity: "error".to_string(),
                     title_ja: "Composer がインストールされていません".to_string(),
                     title_en: "Composer is not installed".to_string(),
-                    description_ja: "vendor フォルダーを作成する PHP パッケージ管理ツール「Composer」が見つかりません。".to_string(),
-                    description_en: "Composer is required to install PHP packages into vendor/.".to_string(),
+                    description_ja: "vendor フォルダーを作成する PHP パッケージ管理ツール「Composer」が見つかりません。「Terminal で実行」または公式サイトから導入し、続けて `composer install` を実行してください。".to_string(),
+                    description_en: "Composer (the PHP package manager used to populate vendor/) was not found on PATH. Install it via Terminal or the official download page, then run `composer install`.".to_string(),
                     command_preview: Some(install_cmd.clone()),
                     in_app_action: None,
                     action_target: None,
@@ -1757,8 +1930,8 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                 severity: "warning".to_string(),
                 title_ja: ".env 設定ファイルが未作成です".to_string(),
                 title_en: ".env configuration file is missing".to_string(),
-                description_ja: "Laravel を動かすには .env ファイルが必要です。.env.example から自動作成し、暗号化キー（APP_KEY）を設定できます。".to_string(),
-                description_en: "Laravel requires a .env file. Copy .env.example to .env and generate APP_KEY.".to_string(),
+                description_ja: "Laravel を動かすには .env ファイルが必要です。「.env を自動作成」で .env.example をコピーし暗号化キー（APP_KEY）を生成できます（その後、必要に応じて .env の DB_CONNECTION 設定や `php artisan migrate` を実行してください）。".to_string(),
+                description_en: "Laravel requires a .env file. Click \"Create .env & Key\" to copy .env.example and generate APP_KEY (configure DB_CONNECTION in .env and run `php artisan migrate` if your app uses a database).".to_string(),
                 command_preview: Some(env_cmd.to_string()),
                 in_app_action: Some("setup-laravel-env".to_string()),
                 action_target: None,
@@ -1767,16 +1940,67 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                 terminal_command: Some(env_cmd.to_string()),
                 docs_url: None,
             });
+        } else if info.kind == "laravel" && root.join(".env").is_file() {
+            if let Ok(env_raw) = fs::read_to_string(root.join(".env")) {
+                let uses_sqlite = env_raw.lines().any(|line| {
+                    let t = line.trim();
+                    !t.starts_with('#') && t.starts_with("DB_CONNECTION=") && t.contains("sqlite")
+                });
+                let uses_memory = env_raw.lines().any(|line| {
+                    let t = line.trim();
+                    !t.starts_with('#') && t.starts_with("DB_DATABASE=") && t.contains(":memory:")
+                });
+                let sqlite_path = root.join("database/database.sqlite");
+                if uses_sqlite && !uses_memory && root.join("database").is_dir() && !sqlite_path.is_file() {
+                    let sqlite_cmd = if cfg!(target_os = "windows") {
+                        "type nul > database\\database.sqlite && php artisan migrate"
+                    } else {
+                        "touch database/database.sqlite && php artisan migrate"
+                    };
+                    diags.push(ProjectDiagnostic {
+                        id: "missing-laravel-sqlite".to_string(),
+                        severity: "info".to_string(),
+                        title_ja: "SQLite データベースファイルが未作成の可能性があります".to_string(),
+                        title_en: "SQLite database file may need to be created".to_string(),
+                        description_ja: ".env で SQLite が指定されていますが `database/database.sqlite` がまだ存在しません。起動後に DB エラーが出る場合は Terminal で SQLite ファイルを作成しマイグレーションを実行してください。".to_string(),
+                        description_en: ".env sets DB_CONNECTION=sqlite, but `database/database.sqlite` does not exist yet. If the app shows a database error, create it and run migrations in Terminal.".to_string(),
+                        command_preview: Some(sqlite_cmd.to_string()),
+                        in_app_action: None,
+                        action_target: None,
+                        in_app_label_ja: None,
+                        in_app_label_en: None,
+                        terminal_command: Some(sqlite_cmd.to_string()),
+                        docs_url: None,
+                    });
+                }
+            }
         }
 
         if info.kind == "wordpress" {
+            if !root.join("wp-config.php").is_file() && root.join("wp-config-sample.php").is_file() {
+                diags.push(ProjectDiagnostic {
+                    id: "missing-wp-config".to_string(),
+                    severity: "warning".to_string(),
+                    title_ja: "wp-config.php が未作成です".to_string(),
+                    title_en: "wp-config.php is missing".to_string(),
+                    description_ja: "`wp-config-sample.php` は見つかりましたが `wp-config.php` がまだありません。コピーして DB_NAME / DB_USER / DB_PASSWORD / DB_HOST を設定するか、サーバー起動後にブラウザ上のセットアップ画面で設定してください。".to_string(),
+                    description_en: "`wp-config-sample.php` exists, but `wp-config.php` has not been created yet. Copy it and fill in DB_NAME / DB_USER / DB_PASSWORD / DB_HOST, or complete the browser installer after starting the server.".to_string(),
+                    command_preview: None,
+                    in_app_action: None,
+                    action_target: None,
+                    in_app_label_ja: None,
+                    in_app_label_en: None,
+                    terminal_command: None,
+                    docs_url: None,
+                });
+            }
             diags.push(ProjectDiagnostic {
                 id: "wordpress-db-info".to_string(),
                 severity: "info".to_string(),
                 title_ja: "WordPress にはデータベース接続が必要です".to_string(),
                 title_en: "WordPress requires a database connection".to_string(),
-                description_ja: "MAMP / Local / MySQL 等のデータベースが起動しており、wp-config.php に接続先が設定されている必要があります（Docker Compose 構成を追加すると DB も自動起動できます）。".to_string(),
-                description_en: "Ensure MySQL/MariaDB (e.g. MAMP or Local) is running and configured in wp-config.php.".to_string(),
+                description_ja: "MAMP / Local / MySQL / MariaDB 等のデータベースが起動しており、`wp-config.php` の DB_HOST・DB_NAME・ユーザー名・パスワードが一致している必要があります（Docker Compose 構成を追加すると DB も自動起動できます）。".to_string(),
+                description_en: "Ensure MySQL/MariaDB (e.g. MAMP, Local, or Docker) is running and matches DB_HOST / DB_NAME / credentials in `wp-config.php`.".to_string(),
                 command_preview: None,
                 in_app_action: None,
                 action_target: None,
@@ -1809,8 +2033,8 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                         severity: "error".to_string(),
                         title_ja: "Python 3 がインストールされていません".to_string(),
                         title_en: "Python 3 is not installed".to_string(),
-                        description_ja: "このプロジェクトを実行するには Python 3（または uv）が必要です。".to_string(),
-                        description_en: "Python 3 (or uv) is required to run this project.".to_string(),
+                        description_ja: "このプロジェクトを実行するには Python 3（3.10 以上推奨、または uv）が必要です。「Terminal で実行」または公式サイトから導入してください（Windows では Microsoft Store のダミーエイリアスではなく公式インストーラー / winget を推奨、Linux Ubuntu/Debian では `python3-venv` も必要です）。".to_string(),
+                        description_en: "Python 3 (3.10+ recommended, or uv) is required to run this project. Install via \"Run in Terminal\" or the official download page (on Windows, avoid the empty Microsoft Store python.exe alias and use winget/official installer; Debian/Ubuntu also needs `python3-venv`).".to_string(),
                         command_preview: Some(install_cmd.clone()),
                         in_app_action: None,
                         action_target: None,
@@ -1876,8 +2100,16 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                             severity: "error".to_string(),
                             title_ja: "Python パッケージ（仮想環境 .venv）が不足しています".to_string(),
                             title_en: "Python packages / virtual environment (.venv) missing".to_string(),
-                            description_ja: "このプロジェクトに必要な Python ライブラリが見つかりません。ボタンひとつでプロジェクト専用の仮想環境（.venv）を作成してインストールできます。".to_string(),
-                            description_en: "Required Python libraries are not installed yet. Click below to create .venv and install dependencies.".to_string(),
+                            description_ja: if has_uv {
+                                "このプロジェクトに必要な Python ライブラリが見つかりません。「仮想環境を作成して導入」を押すと `uv sync` でプロジェクト直下に `.venv/` を作成し依存関係を導入します（PC 本体の Python 環境は汚しません）。".to_string()
+                            } else {
+                                "このプロジェクトに必要な Python ライブラリが見つかりません。「仮想環境を作成して導入」を押すとプロジェクト直下に専用仮想環境（`.venv/`）を作成しパッケージをインストールします（Linux で `ensurepip` エラーが出る場合は `python3-venv` パッケージを追加してください）。".to_string()
+                            },
+                            description_en: if has_uv {
+                                "Required Python libraries are not installed yet. Click \"Create .venv & Install\" to run `uv sync` and isolate dependencies inside `.venv/`.".to_string()
+                            } else {
+                                "Required Python libraries are not installed yet. Click \"Create .venv & Install\" to create a project-local `.venv/` and install dependencies without affecting system Python (on Debian/Ubuntu, install `python3-venv` if venv creation fails).".to_string()
+                            },
                             command_preview: Some(preview.clone()),
                             in_app_action: Some("install-python-deps".to_string()),
                             action_target: Some(info.kind.clone()),
@@ -1900,8 +2132,8 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
             severity: "error".to_string(),
             title_ja: "Hugo がインストールされていません".to_string(),
             title_en: "Hugo is not installed".to_string(),
-            description_ja: "Hugo サイトをプレビューするには hugo コマンドのインストールが必要です。".to_string(),
-            description_en: "Hugo CLI is required to serve and preview this site.".to_string(),
+            description_ja: "Hugo サイトをプレビューするには hugo コマンドの導入が必要です。SCSS/Sass を使うテーマでは Hugo Extended 版が推奨されます（Linux の distro 版が古い場合は公式サイトのバイナリ / Homebrew を推奨）。".to_string(),
+            description_en: "Hugo CLI is required to serve and preview this site. Hugo Extended is recommended for themes using SCSS/Sass (if a Linux distro package is outdated, download the Extended binary from the official site).".to_string(),
             command_preview: Some(install_cmd.clone()),
             in_app_action: None,
             action_target: None,
@@ -1914,22 +2146,56 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
 
     // Jekyll
     if info.kind == "jekyll" {
+        let ruby = find_executable(&["ruby"]);
         let bundle = find_executable(&["bundle"]);
         let jekyll = find_executable(&["jekyll"]);
-        if bundle.is_none() && jekyll.is_none() {
+
+        if ruby.is_none() {
+            let install_cmd = os_install_hint("ruby");
+            diags.push(ProjectDiagnostic {
+                id: "missing-ruby".to_string(),
+                severity: "error".to_string(),
+                title_ja: "Ruby がインストールされていません".to_string(),
+                title_en: "Ruby is not installed".to_string(),
+                description_ja: "Jekyll サイトを起動するには Ruby（3.0 以上推奨）と Bundler / Jekyll が必要です。「Terminal で実行」または公式サイトから Ruby を導入してください。".to_string(),
+                description_en: "Ruby (3.0+ recommended) is required before installing Bundler and Jekyll. Install Ruby via \"Run in Terminal\" or the official installation guide.".to_string(),
+                command_preview: Some(install_cmd.clone()),
+                in_app_action: None,
+                action_target: None,
+                in_app_label_ja: None,
+                in_app_label_en: None,
+                terminal_command: Some(install_cmd),
+                docs_url: Some("https://jekyllrb.com/docs/installation/".to_string()),
+            });
+        } else if bundle.is_none() && jekyll.is_none() {
+            let is_apple_system_ruby = cfg!(target_os = "macos")
+                && ruby.as_deref() == Some("/usr/bin/ruby");
+            let gem_cmd = if is_apple_system_ruby {
+                "gem install --user-install bundler jekyll".to_string()
+            } else {
+                "gem install bundler jekyll".to_string()
+            };
             diags.push(ProjectDiagnostic {
                 id: "missing-jekyll".to_string(),
                 severity: "error".to_string(),
                 title_ja: "Bundler / Jekyll が見つかりません".to_string(),
                 title_en: "Bundler / Jekyll is not installed".to_string(),
-                description_ja: "Jekyll サイトを起動するには Ruby と Bundler / Jekyll が必要です。".to_string(),
-                description_en: "Ruby, Bundler, and Jekyll are required to start the preview server.".to_string(),
-                command_preview: Some("gem install bundler jekyll".to_string()),
+                description_ja: if is_apple_system_ruby {
+                    "macOS 標準の `/usr/bin/ruby` は書き込み保護されており通常の `gem install` が権限エラーになるため、`--user-install` または Homebrew 版 Ruby（`brew install ruby`）での導入を推奨します。".to_string()
+                } else {
+                    "Ruby は見つかりましたが、Bundler / Jekyll がまだインストールされていません。「Terminal で実行」から gem を導入してください。".to_string()
+                },
+                description_en: if is_apple_system_ruby {
+                    "Apple's built-in `/usr/bin/ruby` is system-protected and rejects global `gem install`. Use `--user-install` or install Homebrew Ruby (`brew install ruby`).".to_string()
+                } else {
+                    "Ruby is installed, but Bundler / Jekyll was not found on PATH. Run the gem install command in Terminal.".to_string()
+                },
+                command_preview: Some(gem_cmd.clone()),
                 in_app_action: None,
                 action_target: None,
                 in_app_label_ja: None,
                 in_app_label_en: None,
-                terminal_command: Some("gem install bundler jekyll".to_string()),
+                terminal_command: Some(gem_cmd),
                 docs_url: Some("https://jekyllrb.com/docs/installation/".to_string()),
             });
         } else if root.join("Gemfile").is_file() {
@@ -1940,8 +2206,8 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                         severity: "error".to_string(),
                         title_ja: "Ruby パッケージ（Gem）が未インストールです".to_string(),
                         title_en: "Ruby gems in Gemfile are not installed".to_string(),
-                        description_ja: "Gemfile に記載されたライブラリをインストールするとサイトを起動できます。".to_string(),
-                        description_en: "Install required Ruby gems from Gemfile before starting Jekyll.".to_string(),
+                        description_ja: "Gemfile に記載されたライブラリをインストールするとサイトを起動できます。「bundle install を実行」を押してください（ネイティブ拡張のビルドに C コンパイラが必要な場合があります）。".to_string(),
+                        description_en: "Install required Ruby gems listed in Gemfile before starting Jekyll (some gems with native extensions may require C build tools).".to_string(),
                         command_preview: Some("bundle install".to_string()),
                         in_app_action: Some("install-ruby-gems".to_string()),
                         action_target: None,
@@ -1952,6 +2218,50 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                     });
                 }
             }
+        }
+    }
+
+    // Generic .env template hint for Node / Python Web projects
+    if !matches!(
+        info.kind.as_str(),
+        "laravel" | "php" | "wordpress" | "static" | "none"
+    ) {
+        let missing_env_from_example = root.join(".env.example").is_file()
+            && !root.join(".env").is_file()
+            && !root.join(".env.local").is_file();
+        let missing_local_from_example = root.join(".env.local.example").is_file()
+            && !root.join(".env.local").is_file();
+        if missing_env_from_example || missing_local_from_example {
+            let (src_name, dst_name) = if missing_local_from_example {
+                (".env.local.example", ".env.local")
+            } else {
+                (".env.example", ".env")
+            };
+            diags.push(ProjectDiagnostic {
+                id: "missing-env-example-hint".to_string(),
+                severity: "info".to_string(),
+                title_ja: format!("環境変数テンプレート（{}）が見つかりました", src_name),
+                title_en: format!("Environment variable template ({}) detected", src_name),
+                description_ja: format!(
+                    "このプロジェクトには `{}` がありますが `{}` は未作成です。API キーやデータベース接続先が必要なアプリの場合は、コピーして値を設定してください（不要な場合はこのまま起動できます）。",
+                    src_name, dst_name
+                ),
+                description_en: format!(
+                    "`{}` exists without `{}`. If this app requires API keys or database URLs, copy it to `{}` and fill in your values (optional if defaults work).",
+                    src_name, dst_name, dst_name
+                ),
+                command_preview: Some(if cfg!(target_os = "windows") {
+                    format!("copy {} {}", src_name, dst_name)
+                } else {
+                    format!("cp {} {}", src_name, dst_name)
+                }),
+                in_app_action: None,
+                action_target: None,
+                in_app_label_ja: None,
+                in_app_label_en: None,
+                terminal_command: None,
+                docs_url: None,
+            });
         }
     }
 
@@ -2553,7 +2863,7 @@ fn resolve_runner(
         let (py_exe, mut prefix_args) = if spec.uses_uv_ok {
             find_python_runner(root)
         } else {
-            find_executable(&["python3", "python"]).map(|e| (e, Vec::new()))
+            find_usable_python_exe().map(|e| (e, Vec::new()))
         }
         .ok_or_else(|| "Command not found: python3 / uv. Please install Python or create .venv.".to_string())?;
         prefix_args.extend(spec.args);
@@ -3453,6 +3763,8 @@ fi
                     "https://getcomposer.org/download/"
                 } else if cmd_str.contains("Hugo.Hugo") {
                     "https://gohugo.io/installation/windows/"
+                } else if cmd_str.contains("RubyInstallerTeam") {
+                    "https://rubyinstaller.org/downloads/"
                 } else {
                     "https://aka.ms/getwinget"
                 };
@@ -3667,8 +3979,8 @@ fi
                 }
             }
 
-            let py_exe = find_executable(&["python3", "python"]).ok_or_else(|| {
-                "Command not found: python3. Please install Python 3 first.".to_string()
+            let py_exe = find_usable_python_exe().ok_or_else(|| {
+                "Command not found: usable Python 3 (3.10+). On Windows, avoid the empty Microsoft Store python.exe alias and install Python from python.org or winget.".to_string()
             })?;
 
             let venv_dir = root.join(".venv");
@@ -3947,13 +4259,14 @@ mod tests {
             .unwrap();
 
         rt.block_on(async {
-            // 1. Vite project without node_modules
+            // 1. Vite project without node_modules + .env.example hint
             let vite = make_temp_dir("diag_vite");
             fs::write(
                 vite.join("package.json"),
                 r#"{"name":"sample","scripts":{"dev":"vite"},"devDependencies":{"vite":"^6.0.0"}}"#,
             )
             .unwrap();
+            fs::write(vite.join(".env.example"), "VITE_API_URL=http://localhost:3000\n").unwrap();
             let mut vite_info = inspect_root_dir(&vite).unwrap();
             diagnose_project(&mut vite_info).await;
             let ids: Vec<&str> = vite_info.diagnostics.iter().map(|d| d.id.as_str()).collect();
@@ -3962,6 +4275,7 @@ mod tests {
             } else {
                 assert!(ids.contains(&"missing-node") || ids.contains(&"missing-pm"));
             }
+            assert!(ids.contains(&"missing-env-example-hint"), "got {:?}", ids);
             let _ = fs::remove_dir_all(&vite);
 
             // 2. Laravel without .env and without vendor
@@ -3978,9 +4292,55 @@ mod tests {
                 "got {:?}",
                 lar_ids
             );
+
+            // Laravel with .env specifying sqlite without database.sqlite
+            fs::create_dir_all(lar.join("database")).unwrap();
+            fs::write(lar.join(".env"), "APP_NAME=Test\nDB_CONNECTION=sqlite\n").unwrap();
+            let mut lar_sqlite_info = inspect_root_dir(&lar).unwrap();
+            diagnose_project(&mut lar_sqlite_info).await;
+            let lar_sqlite_ids: Vec<&str> =
+                lar_sqlite_info.diagnostics.iter().map(|d| d.id.as_str()).collect();
+            assert!(
+                lar_sqlite_ids.contains(&"missing-laravel-sqlite"),
+                "got {:?}",
+                lar_sqlite_ids
+            );
             let _ = fs::remove_dir_all(&lar);
 
-            // 3. Static project emits zero diagnostics
+            // 3. WordPress with wp-config-sample.php and without wp-config.php
+            let wp = make_temp_dir("diag_wp");
+            fs::create_dir_all(wp.join("wp-includes")).unwrap();
+            fs::write(wp.join("wp-includes/version.php"), "<?php $wp_version = '6.7';").unwrap();
+            fs::write(wp.join("wp-config-sample.php"), "<?php define('DB_NAME', 'wp');").unwrap();
+            let mut wp_info = inspect_root_dir(&wp).unwrap();
+            diagnose_project(&mut wp_info).await;
+            let wp_ids: Vec<&str> = wp_info.diagnostics.iter().map(|d| d.id.as_str()).collect();
+            assert!(wp_ids.contains(&"missing-wp-config"), "got {:?}", wp_ids);
+            assert!(wp_ids.contains(&"wordpress-db-info"), "got {:?}", wp_ids);
+            let _ = fs::remove_dir_all(&wp);
+
+            // 4. Jekyll project diagnostics (missing-ruby / missing-jekyll / missing-jekyll-gems)
+            let jk = make_temp_dir("diag_jekyll");
+            fs::write(jk.join("_config.yml"), "title: Docs\n").unwrap();
+            fs::write(
+                jk.join("Gemfile"),
+                "source \"https://rubygems.org\"\ngem \"jekyll\"\ngem \"nonexistent_onigiri_test_gem\"\n",
+            )
+            .unwrap();
+            let mut jk_info = inspect_root_dir(&jk).unwrap();
+            assert_eq!(jk_info.kind, "jekyll");
+            diagnose_project(&mut jk_info).await;
+            let jk_ids: Vec<&str> = jk_info.diagnostics.iter().map(|d| d.id.as_str()).collect();
+            if find_executable(&["ruby"]).is_none() {
+                assert!(jk_ids.contains(&"missing-ruby"), "got {:?}", jk_ids);
+            } else if find_executable(&["bundle"]).is_none() && find_executable(&["jekyll"]).is_none() {
+                assert!(jk_ids.contains(&"missing-jekyll"), "got {:?}", jk_ids);
+            } else if find_executable(&["bundle"]).is_some() {
+                assert!(jk_ids.contains(&"missing-jekyll-gems"), "got {:?}", jk_ids);
+            }
+            let _ = fs::remove_dir_all(&jk);
+
+            // 5. Static project emits zero diagnostics
             let st = make_temp_dir("diag_static");
             fs::write(st.join("index.html"), "<h1>Static</h1>").unwrap();
             let mut st_info = inspect_root_dir(&st).unwrap();
@@ -3995,7 +4355,7 @@ mod tests {
         let joined = extended_path();
         let split_count = env::split_paths(&joined).count();
         assert!(split_count >= 3, "expected multiple PATH entries, got {}", joined);
-        for tool in ["docker", "node", "php", "composer", "python", "hugo", "bun"] {
+        for tool in ["docker", "node", "php", "composer", "python", "hugo", "ruby", "bun"] {
             assert!(!os_install_hint(tool).trim().is_empty());
         }
     }
@@ -4021,5 +4381,31 @@ mod tests {
         assert!(linux_install_hint_for_pkg_manager("node", "pacman").contains("pacman"));
         assert!(linux_install_hint_for_pkg_manager("node", "zypper").contains("zypper"));
         assert!(linux_install_hint_for_pkg_manager("docker", "pacman").contains("pacman"));
+    }
+
+    #[test]
+    fn resolves_windows_executable_skipping_extensionless_shims() {
+        let dir = env::temp_dir().join(format!("onigiri_win_exec_proj_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        fs::write(dir.join("npm"), "#!/bin/sh\n").unwrap();
+        fs::write(dir.join("npm.cmd"), "@echo off\r\n").unwrap();
+        assert_eq!(
+            resolve_windows_executable_candidate(&dir, "npm"),
+            Some(dir.join("npm.cmd"))
+        );
+
+        fs::write(dir.join("composer"), "#!/bin/sh\n").unwrap();
+        fs::write(dir.join("composer.bat"), "@echo off\r\n").unwrap();
+        assert_eq!(
+            resolve_windows_executable_candidate(&dir, "composer"),
+            Some(dir.join("composer.bat"))
+        );
+
+        fs::write(dir.join("posix_only"), "#!/bin/sh\n").unwrap();
+        assert_eq!(resolve_windows_executable_candidate(&dir, "posix_only"), None);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

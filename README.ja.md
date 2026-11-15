@@ -10,13 +10,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v100-の更新内容">v1.0.0 の更新内容</a> ・
+    <a href="#v101-の更新内容">v1.0.1 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.0.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -38,7 +38,7 @@
 
 初回起動時は OS の言語設定を自動判定し、日本語環境では日本語 UI・日本語ネイティブメニューで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
 
-現在のバージョン: `v1.0.0`
+現在のバージョン: `v1.0.1`
 
 ## 主な機能
 
@@ -95,7 +95,15 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.0.0 の更新内容
+## v1.0.1 の更新内容
+
+- **Windows CLI 起動エラー（`os error 193`）の修正**: `%APPDATA%\npm` 内の拡張子なし POSIX シェルスクリプト（`codex` / `claude` / `gemini` / `npm` 等）を Windows 実行候補から除外し、`.exe` / `.com` / `.cmd` / `.bat` を正しく解決して起動するようにしました。
+- **AI CLI・ローカル LLM 接続サポート強化**: Antigravity CLI（`agy`）がデスクトップアプリ本体とは別配布である点の明記と OS 別インストーラー（`curl` / `irm`）、macOS/Linux の `~/.npm-global` 自動設定による権限エラー回避、CLI 別の認証案内・Ollama/LM Studio 詳細手順を追加しました。
+- **Web 実行環境・依存パッケージ診断の拡充**: Windows Microsoft Store のダミー `python.exe` 除外、`wp-config-sample.php` / Laravel SQLite / Ruby・Jekyll / `.env.example` の診断、Linux `python3-venv`・PHP 拡張案内、ボタンの役割説明を追加しました。
+- **検索・置換機能の強化**: 全角／半角の区別切り替え、選択範囲内での検索・置換（範囲再取得対応）、正規表現 OFF 時の `$1` 等リテラル維持、一致箇所ナビゲーションを改善しました。
+
+<details>
+<summary>以前のリリース: v1.0.0</summary>
 
 - アプリ名を **Onigiri Editor** へ正式刷新し、macOS / Windows / Linux 向けアイコンを更新しました。
 - **初回起動時の OS 言語自動判定** を追加しました（日本語 OS は日本語 UI・メニュー、それ以外は英語 UI・メニューで起動）。
@@ -105,6 +113,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **AI CLI 接続サポート＆モデル選択**（Codex / Claude Code / Gemini / Antigravity / Ollama / LM Studio / Cloud API）を強化しました。
 - **プロジェクト環境診断＆開発サーバー連携**（Vite / Next.js / Laravel / WordPress / Docker / Python / PHP 等）とコード／Web ページプレビューを追加しました。
 - **Windows / Linux / macOS 間のクロスプラットフォーム互換性**（`.cmd` シム対応、単一インスタンス起動引数処理、OS 別ガイド表示など）を改善しました。
+
+</details>
 
 ## 基本的な使い方
 

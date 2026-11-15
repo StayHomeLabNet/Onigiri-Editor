@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.0.0)'
+        description: 'Release tag (e.g. v1.0.1)'
         required: true
-        default: 'v1.0.0'
+        default: 'v1.0.1'
 
 permissions:
   contents: write
@@ -120,46 +120,11 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           ls -lh all-binaries/
 
-          cat << EOF > release-notes.md
-          ## English
-
-          ### Onigiri Editor \`$TAG\`
-
-          **Onigiri Editor** is a cross-platform Markdown, code & dev-preview desktop editor built for the AI era on **macOS, Windows, and Linux**—with **Simple / Basic / Advanced** UI modes, bidirectional active line/block indicators, 100+ language syntax highlighting with custom colors, OS-aware first-launch language detection, session restore & auto-save, external file change conflict detection, AI pre-apply diff preview, AI CLI connection support, project dev-server diagnostics, and dual browser preview options.
-
-          #### Highlights
-          - **OS-Aware First-Launch Language**: Automatically starts in Japanese on Japanese OS locales and English on all other OS locales (with native localized menu bar).
-          - **Session Restore, Draft Recovery & Auto-Save**: Restores open tabs, unsaved drafts, cursor positions, and workspace folders across launches, plus optional 1.5s auto-save.
-          - **External File Change Detection**: Auto-reloads clean tabs changed on disk and shows a conflict banner (\`Reload\`, \`Compare Diff\`, \`Keep Mine\`, \`Save Again\`, \`Keep as Draft\`) for edited or deleted files.
-          - **AI Pre-Apply Diff Preview**: Inspect line-by-line diffs before replacing document text (with automatic snapshot option) or writing workspace files.
-          - **AI Chat, Dev Server Diagnostics & Dual Browser Preview**: Supports Codex / Claude Code / Gemini / Antigravity CLIs, Cloud APIs, Ollama, LM Studio, built-in multi-WebView browser, and external HTTP live preview.
-
-          #### Downloads
-          - **macOS (Universal: Apple Silicon & Intel)**: \`.dmg\` / \`.app.tar.gz\`
-          - **Windows (x64)**: \`.exe\` (NSIS installer) / \`.msi\`
-          - **Linux (x64)**: \`.AppImage\` / \`.deb\`
-
-          ---
-
-          ## 日本語
-
-          ### Onigiri Editor \`$TAG\`
-
-          **Onigiri Editor** は、**macOS・Windows・Linux** に対応した AI 時代向けの Markdown・コード・Web 開発プレビュー統合デスクトップエディタです。**シンプル / 標準 / 拡張** の 3 モード切替、双方向編集中行ハイライト、100言語以上のシンタックスハイライト＋色カスタマイズ、初回起動時の OS 言語自動判定、セッション復元・自動保存、外部ファイル変更検知、AI 適用前 Diff プレビュー、AI CLI 接続サポート、開発サーバー診断、内蔵 Web ブラウザ＆外部ライブプレビューを備えています。
-
-          #### 主なポイント
-          - **初回起動時の OS 言語自動判定**: 日本語 OS では日本語 UI・日本語メニューバーで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
-          - **セッション復元・未保存ドラフト保護・自動保存**: 開いていたタブ・下書き・カーソル位置・ワークスペースを次回起動時に復元し、1.5秒デバウンスの自動保存にも対応します。
-          - **外部ファイル変更検知**: 外部ツールや AI CLI による変更・削除を検知し、未編集タブは自動反映、未保存編集がある場合は **再読み込み / 差分比較 / 編集維持** 等の解決バナーを表示します。
-          - **AI 適用前 Diff プレビューモーダル**: 「本文を置換」（スナップショット自動保存オプション付き）や「フォルダーへ書き込み」の実行前に、行単位の差分を確認できます。
-          - **AI チャット・開発サーバー診断・2パターンのブラウザ連携**: Codex / Claude Code / Gemini / Antigravity CLI・各種 Cloud API・Ollama・LM Studio・内蔵マルチ WebView ブラウザ・外部ライブプレビューに対応しています。
-
-          #### ダウンロード（バイナリ一覧）
-          - **macOS（Universal: Apple Silicon / Intel 両対応）**: \`.dmg\` / \`.app.tar.gz\`
-          - **Windows（x64）**: \`.exe\`（インストーラ） / \`.msi\`
-          - **Linux（x64）**: \`.AppImage\` / \`.deb\`
-          EOF
-          sed -i 's/^          //' release-notes.md
+          if [ -f RELEASE_NOTES.md ]; then
+            cp RELEASE_NOTES.md release-notes.md
+          else
+            echo "Onigiri Editor $TAG" > release-notes.md
+          fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "Onigiri Editor $TAG" --notes-file release-notes.md

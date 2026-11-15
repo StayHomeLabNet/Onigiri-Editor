@@ -85,7 +85,7 @@ import { CodePreviewPane } from './components/CodePreviewPane';
 import { RightBrowserPane } from './components/RightBrowserPane';
 import { type ProjectSetupActionParams } from './components/ProjectSetupCard';
 import { InspectorDrawer } from './components/InspectorDrawer';
-import { FindReplaceBar } from './components/FindReplaceBar';
+import { FindReplaceBar, type FindReplaceBarHandle } from './components/FindReplaceBar';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { StatusBar } from './components/StatusBar';
 import { AboutModal } from './components/AboutModal';
@@ -361,6 +361,7 @@ export function App() {
 
   const editorRef = useRef<EditorHandle | null>(null);
   const previewRef = useRef<PreviewHandle | null>(null);
+  const findBarRef = useRef<FindReplaceBarHandle | null>(null);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollSyncLock = useRef<'editor' | 'preview' | null>(null);
   const activePaneRef = useRef<'code' | 'visual'>('code');
@@ -1394,6 +1395,24 @@ export function App() {
   }, []);
 
   // Toolbar Actions (routed to active pane: left CodeMirror OR right TipTap visual editor)
+  const openFindBar = useCallback(
+    (opts?: { target?: 'find' | 'replace'; toggleIfEmpty?: boolean }) => {
+      const sel = editorRef.current?.getSelectionRange() ?? null;
+      const selectedText = editorRef.current?.getSelectedText() ?? '';
+      if (opts?.toggleIfEmpty && showFind && !selectedText) {
+        setShowFind(false);
+        return;
+      }
+      setShowFind(true);
+      findBarRef.current?.openWithSeed({
+        target: opts?.target ?? 'find',
+        selectedText,
+        selectionRange: sel,
+      });
+    },
+    [showFind]
+  );
+
   const handleToolbarAction = useCallback(
     (action: string) => {
       if (action === 'image') {
@@ -1409,7 +1428,7 @@ export function App() {
         return;
       }
       if (action === 'find') {
-        setShowFind((v) => !v);
+        openFindBar({ target: 'find', toggleIfEmpty: true });
         return;
       }
 
@@ -2072,7 +2091,17 @@ export function App() {
         setShowPalette((v) => !v);
       } else if (meta && e.key.toLowerCase() === 'f' && !e.shiftKey) {
         e.preventDefault();
-        setShowFind((v) => !v);
+        openFindBar({ target: e.altKey ? 'replace' : 'find' });
+      } else if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        openFindBar({ target: 'replace' });
+      } else if (showFind && (e.key === 'F3' || (meta && e.key.toLowerCase() === 'g'))) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          findBarRef.current?.findPrevious();
+        } else {
+          findBarRef.current?.findNext();
+        }
       } else if (meta && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleZenMode();
@@ -2090,7 +2119,10 @@ export function App() {
       } else if (e.key === 'Escape') {
         if (diffPreview) return;
         if (showSettings) setShowSettings(false);
-        else if (zenMode) toggleZenMode();
+        else if (showFind) {
+          setShowFind(false);
+          editorRef.current?.focus();
+        } else if (zenMode) toggleZenMode();
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -2104,8 +2136,10 @@ export function App() {
     toggleZenMode,
     zenMode,
     showSettings,
+    showFind,
     diffPreview,
     handleToolbarAction,
+    openFindBar,
   ]);
 
   // Listen to native macOS/Win/Linux menu bar actions
@@ -2121,7 +2155,7 @@ export function App() {
     'export-html': handleExportHtml,
     'export-pdf': handleExportPdf,
     'close-tab': () => handleCloseTab(activeTab.id),
-    find: () => setShowFind((v) => !v),
+    find: () => openFindBar({ target: 'find' }),
     'mode-simple': () => handleModeChange('simple'),
     'mode-basic': () => handleModeChange('basic'),
     'mode-advanced': () => handleModeChange('advanced'),
@@ -2293,7 +2327,7 @@ export function App() {
         category: 'Edit',
         label: t.actions.findReplace,
         shortcut: formatShortcut('⌘F'),
-        action: () => setShowFind(true),
+        action: () => openFindBar({ target: 'find' }),
       },
       {
         id: 'lang-toggle',
@@ -2344,6 +2378,7 @@ export function App() {
     handleExportPdf,
     toggleZenMode,
     openPathInTab,
+    openFindBar,
   ]);
 
   const handleJumpToHeading = (h: HeadingItem) => {
@@ -2488,13 +2523,44 @@ export function App() {
 
         <div className="center-stage" ref={splitContainerRef}>
           <FindReplaceBar
+            ref={findBarRef}
             t={t}
             open={showFind}
-            onClose={() => setShowFind(false)}
+            docId={activeTab.id}
+            onClose={() => {
+              setShowFind(false);
+              editorRef.current?.focus();
+            }}
             documentText={activeTab.content}
-            onSelectMatch={(from, to) => editorRef.current?.selectRange(from, to)}
-            onReplaceRange={(from, to, text) => editorRef.current?.replaceRange(from, to, text)}
-            onReplaceAllText={updateActiveContent}
+            getEditorSelection={() => editorRef.current?.getSelectionRange() ?? null}
+            getCursorOffset={() => editorRef.current?.getCursorOffset() ?? 0}
+            onSelectMatch={(from, to, opts) => editorRef.current?.selectRange(from, to, opts)}
+            onReplaceRange={(from, to, text) => {
+              if (editorRef.current) {
+                editorRef.current.replaceRange(from, to, text);
+              } else {
+                const cur = activeTab.content;
+                updateActiveContent(cur.slice(0, from) + text + cur.slice(to));
+              }
+            }}
+            onReplaceAll={({ scopeFrom, scopeTo, replacedSlice, nextText, count }) => {
+              if (editorRef.current) {
+                editorRef.current.replaceRange(scopeFrom, scopeTo, replacedSlice, {
+                  selectResult: false,
+                });
+              } else {
+                updateActiveContent(nextText);
+                if (scopeTo > scopeFrom) {
+                  findBarRef.current?.onScopeMapped({
+                    from: scopeFrom,
+                    to: scopeFrom + replacedSlice.length,
+                  });
+                }
+              }
+              notify(t.find.replacedCount.replace('{n}', String(count)));
+            }}
+            onSyncScope={(scope) => editorRef.current?.setFindScope(scope)}
+            onSyncHighlights={(payload) => editorRef.current?.setFindHighlights(payload)}
           />
 
           {activeTab.externalStatus && (
@@ -2593,6 +2659,8 @@ export function App() {
                   onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
                   onLineCopyNotify={() => notify(t.toasts.copiedLine)}
                   onImagePasteOrDrop={handleImageFileInput}
+                  onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
+                  onEditorSelectionChange={(range) => findBarRef.current?.onEditorSelection(range)}
                   syncHighlightRange={activePane === 'visual' ? previewSyncLineRange : null}
                   theme={theme}
                   settings={settings}

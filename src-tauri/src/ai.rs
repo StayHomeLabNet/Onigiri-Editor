@@ -83,6 +83,7 @@ fn extended_path() -> String {
         if !home.is_empty() {
             for rel in [
                 ".local/bin",
+                ".antigravity/bin",
                 ".cargo/bin",
                 ".npm-global/bin",
                 ".volta/bin",
@@ -153,11 +154,11 @@ fn extended_path() -> String {
             dirs.push(PathBuf::from(&appdata).join("nvm"));
         }
         if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"agy\bin"));
             dirs.push(PathBuf::from(&local_appdata).join("pnpm"));
             dirs.push(PathBuf::from(&local_appdata).join(r"Volta\bin"));
             dirs.push(PathBuf::from(&local_appdata).join(r"Programs\Antigravity\bin"));
             dirs.push(PathBuf::from(&local_appdata).join(r"Programs\Ollama"));
-            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
             for py_ver in ["Python313", "Python312", "Python311", "Python310", "Python39"] {
                 let py_base = PathBuf::from(&local_appdata)
                     .join("Programs")
@@ -178,6 +179,9 @@ fn extended_path() -> String {
         dirs.push(PathBuf::from(&program_files).join("PHP"));
         dirs.push(PathBuf::from(&program_files).join(r"Docker\Docker\resources\bin"));
         dirs.push(PathBuf::from(&program_files).join(r"Antigravity\bin"));
+        if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
+        }
     }
 
     if let Some(current) = env::var_os("PATH") {
@@ -267,21 +271,71 @@ fn build_cli_command(bin: &str, args: &[String]) -> Command {
     new_background_command(bin, args)
 }
 
+#[allow(dead_code)]
+fn has_windows_runnable_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "exe" | "com" | "cmd" | "bat"))
+        .unwrap_or(false)
+}
+
+#[allow(dead_code)]
+fn resolve_windows_executable_candidate(dir: &Path, name: &str) -> Option<PathBuf> {
+    let name_path = Path::new(name);
+    if has_windows_runnable_extension(name_path) {
+        let candidate = dir.join(name);
+        if candidate.exists() && candidate.is_file() {
+            return Some(candidate);
+        }
+        return None;
+    }
+    for ext in ["exe", "com", "cmd", "bat"] {
+        let candidate = dir.join(format!("{}.{}", name, ext));
+        if candidate.exists() && candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 fn find_executable(names: &[&str]) -> Option<String> {
+    #[cfg(target_os = "windows")]
+    for name in names {
+        let raw = Path::new(name);
+        if name.contains('\\') || name.contains('/') || raw.is_absolute() {
+            if has_windows_runnable_extension(raw) && raw.exists() && raw.is_file() {
+                return Some(raw.to_string_lossy().to_string());
+            }
+            for ext in ["exe", "com", "cmd", "bat"] {
+                let candidate = PathBuf::from(format!("{}.{}", name, ext));
+                if candidate.exists() && candidate.is_file() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    for name in names {
+        let raw = Path::new(name);
+        if (name.contains('/') || raw.is_absolute()) && raw.exists() && raw.is_file() {
+            return Some(raw.to_string_lossy().to_string());
+        }
+    }
+
     let path_var = extended_path();
     for dir in env::split_paths(&path_var) {
         for name in names {
-            let candidate = dir.join(name);
-            if candidate.exists() && candidate.is_file() {
-                return Some(candidate.to_string_lossy().to_string());
-            }
             #[cfg(target_os = "windows")]
             {
-                for ext in ["exe", "cmd", "bat"] {
-                    let c = dir.join(format!("{}.{}", name, ext));
-                    if c.exists() && c.is_file() {
-                        return Some(c.to_string_lossy().to_string());
-                    }
+                if let Some(found) = resolve_windows_executable_candidate(&dir, name) {
+                    return Some(found.to_string_lossy().to_string());
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let candidate = dir.join(name);
+                if candidate.exists() && candidate.is_file() {
+                    return Some(candidate.to_string_lossy().to_string());
                 }
             }
         }
@@ -947,7 +1001,7 @@ pub async fn detect_ai_capabilities() -> AiCapabilities {
     let codex_cli = find_executable(&["codex"]);
     let claude_cli = find_executable(&["claude"]);
     let gemini_cli = find_executable(&["gemini"]);
-    let antigravity_cli = find_executable(&["agy", "antigravity"]);
+    let antigravity_cli = find_executable(&["agy"]);
     let antigravity_app = find_antigravity_app_path().is_some();
 
     let ollama_installed =
@@ -1037,7 +1091,7 @@ pub async fn list_subscription_models(provider: String) -> Result<Vec<String>, S
             })
         }
         "antigravity-cli" => {
-            let agy_cli = find_executable(&["agy", "antigravity"]);
+            let agy_cli = find_executable(&["agy"]);
             let models = read_agy_models(agy_cli.as_deref()).await;
             Ok(if models.is_empty() {
                 curated_antigravity_models()
@@ -1216,13 +1270,13 @@ pub async fn assist_ai_connection(
                 "gemini-install" => "npm install -g @google/gemini-cli && gemini",
                 "antigravity-login" => "agy",
                 "antigravity-install" => {
-                    #[cfg(target_os = "macos")]
+                    #[cfg(target_os = "windows")]
                     {
-                        "agy install || open -a Antigravity"
+                        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://antigravity.google/cli/install.ps1 | iex\""
                     }
-                    #[cfg(not(target_os = "macos"))]
+                    #[cfg(not(target_os = "windows"))]
                     {
-                        "agy install"
+                        "curl -fsSL https://antigravity.google/cli/install.sh | bash && agy"
                     }
                 }
                 "ollama-pull-llama3.2" => "ollama pull llama3.2",
@@ -1253,20 +1307,40 @@ pub async fn assist_ai_connection(
     exit 1
   fi
 fi
+NPM_GLOBAL_PREFIX="$(npm prefix -g 2>/dev/null || true)"
+if [ -n "$NPM_GLOBAL_PREFIX" ] && [ ! -w "$NPM_GLOBAL_PREFIX" ] && [ ! -w "$NPM_GLOBAL_PREFIX/lib" ]; then
+  echo "npm のグローバル保存先に書き込み権限がないため、~/.npm-global を使うよう設定します..."
+  mkdir -p "$HOME/.npm-global"
+  npm config set prefix "$HOME/.npm-global"
+  export PATH="$HOME/.npm-global/bin:$PATH"
+fi
 "#
                 } else if key == "antigravity-install" {
                     r#"if ! command -v agy >/dev/null 2>&1; then
-  if [ -d "/Applications/Antigravity.app" ]; then
-    echo "Antigravity.app を開きます。コマンドパレットから 'Install agy command in PATH' を実行してください。"
-    open -a Antigravity
-  elif [ -d "/Applications/Antigravity IDE.app" ]; then
-    echo "Antigravity IDE.app を開きます。コマンドパレットから 'Install agy command in PATH' を実行してください。"
-    open -a "Antigravity IDE"
+  echo "Antigravity CLI (agy) を公式インストーラーでインストールします..."
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL https://antigravity.google/cli/install.sh | bash
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- https://antigravity.google/cli/install.sh | bash
   else
-    echo "Antigravity アプリが見つからないため、ダウンロードページを開きます..."
-    open "https://antigravity.google/"
+    echo "curl / wget が見つからないためダウンロードページを開きます..."
+    open "https://antigravity.google/download"
+    exit 1
   fi
-  exit 0
+  export PATH="$HOME/.local/bin:$HOME/.antigravity/bin:$PATH"
+  rehash 2>/dev/null || hash -r 2>/dev/null || true
+else
+  echo "Antigravity CLI (agy) は既に導入済みです: $(command -v agy)"
+  agy install || true
+fi
+if command -v agy >/dev/null 2>&1; then
+  echo ""
+  echo "続けて agy を起動します（初回は案内に従ってサインインしてください）..."
+  agy
+else
+  echo "Antigravity CLI の自動セットアップに失敗しました。公式ページを開きます..."
+  open "https://antigravity.google/download"
+  exit 1
 fi
 "#
                 } else {
@@ -1277,9 +1351,9 @@ fi
                 let script_body = format!(
                     "#!/bin/zsh\nexport PATH=\"{}\"\necho \"=== Onigiri Editor AI Setup ===\"\necho \"> {}\"\necho \"\"\n{}\n{}\necho \"\"\necho \"完了したら Onigiri Editor に戻り「再検出」をクリックしてください。\"\n",
                     extended_path().replace('"', "\\\""),
-                    shell_cmd,
+                    shell_cmd.replace('"', "\\\""),
                     prereq_block,
-                    shell_cmd
+                    if key == "antigravity-install" { "" } else { shell_cmd }
                 );
                 std::fs::write(&script_path, script_body)
                     .map_err(|e| format!("Failed to write setup script: {}", e))?;
@@ -1330,15 +1404,22 @@ if errorlevel 1 (
                 } else if key == "antigravity-install" {
                     r#"where agy >nul 2>nul
 if errorlevel 1 (
-  if exist "%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe" (
-    echo Opening Antigravity. Run "Install agy command in PATH" from Command Palette.
-    start "" "%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe"
-  ) else (
-    echo Antigravity not found. Opening https://antigravity.google/ ...
-    start "" "https://antigravity.google/"
-  )
-  exit /b 0
+  echo Installing Antigravity CLI ^(agy.exe^) via official PowerShell installer...
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://antigravity.google/cli/install.ps1 | iex"
+  set "PATH=%LOCALAPPDATA%\agy\bin;%USERPROFILE%\.local\bin;%PATH%"
+) else (
+  echo Antigravity CLI is already installed. Updating PATH integration...
+  call agy install
 )
+where agy >nul 2>nul
+if errorlevel 1 (
+  echo Automatic installation failed. Opening https://antigravity.google/download ...
+  start "" "https://antigravity.google/download"
+  exit /b 1
+)
+echo Starting agy ^(complete sign-in if prompted^)...
+call agy
+exit /b 0
 "#
                 } else {
                     ""
@@ -1359,7 +1440,7 @@ if errorlevel 1 (
                     "gemini-login" => "call gemini",
                     "gemini-install" => "call npm install -g @google/gemini-cli && call gemini",
                     "antigravity-login" => "call agy",
-                    "antigravity-install" => "call agy install",
+                    "antigravity-install" => "",
                     _ => shell_cmd,
                 };
                 let script_path = env::temp_dir().join(format!("onigiri_ai_setup_{}.cmd", key));
@@ -1406,17 +1487,38 @@ if errorlevel 1 (
     exit 1
   fi
 fi
+NPM_GLOBAL_PREFIX="$(npm prefix -g 2>/dev/null || true)"
+if [ -n "$NPM_GLOBAL_PREFIX" ] && [ ! -w "$NPM_GLOBAL_PREFIX" ] && [ ! -w "$NPM_GLOBAL_PREFIX/lib" ]; then
+  echo "Global npm prefix ($NPM_GLOBAL_PREFIX) is not writable without root; configuring user-local ~/.npm-global..."
+  mkdir -p "$HOME/.npm-global"
+  npm config set prefix "$HOME/.npm-global"
+  export PATH="$HOME/.npm-global/bin:$PATH"
+fi
 "#
                 } else if key == "antigravity-install" {
                     r#"if ! command -v agy >/dev/null 2>&1; then
-  if command -v antigravity >/dev/null 2>&1; then
-    echo "Opening Antigravity. Run 'Install agy command in PATH' from Command Palette."
-    antigravity >/dev/null 2>&1 &
+  echo "Installing Antigravity CLI (agy) via official installer..."
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL https://antigravity.google/cli/install.sh | bash
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- https://antigravity.google/cli/install.sh | bash
   else
-    echo "Antigravity was not found. Opening https://antigravity.google/ ..."
-    xdg-open "https://antigravity.google/" >/dev/null 2>&1 || true
+    echo "Neither curl nor wget found. Opening https://antigravity.google/download ..."
+    xdg-open "https://antigravity.google/download" >/dev/null 2>&1 || true
+    exit 1
   fi
-  exit 0
+  export PATH="$HOME/.local/bin:$HOME/.antigravity/bin:$PATH"
+  hash -r 2>/dev/null || true
+else
+  echo "Antigravity CLI is already installed: $(command -v agy)"
+  agy install || true
+fi
+if command -v agy >/dev/null 2>&1; then
+  agy
+else
+  echo "Automatic installation failed. Opening https://antigravity.google/download ..."
+  xdg-open "https://antigravity.google/download" >/dev/null 2>&1 || true
+  exit 1
 fi
 "#
                 } else {
@@ -1429,7 +1531,7 @@ fi
                     extended_path().replace('"', "\\\""),
                     shell_cmd.replace('"', "\\\""),
                     prereq_block,
-                    shell_cmd
+                    if key == "antigravity-install" { "" } else { shell_cmd }
                 );
                 std::fs::write(&script_path, script_body)
                     .map_err(|e| format!("Failed to write setup script: {}", e))?;
@@ -1569,8 +1671,9 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
 
     match provider {
         "codex-cli" => {
-            let bin = find_executable(&["codex"])
-                .ok_or_else(|| "Codex CLI (`codex`) was not found on PATH.".to_string())?;
+            let bin = find_executable(&["codex"]).ok_or_else(|| {
+                "Codex CLI (`codex`) was not found on PATH. Click \"Setup in Terminal\" or run `npm install -g @openai/codex && codex login` (requires Node.js 18+).".to_string()
+            })?;
             let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
             let out_file = std::env::temp_dir().join(format!(
                 "onigiri_codex_{}.txt",
@@ -1625,7 +1728,7 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
 
         "claude-cli" => {
             let bin = find_executable(&["claude"]).ok_or_else(|| {
-                "Claude Code CLI (`claude`) was not found on PATH.".to_string()
+                "Claude Code CLI (`claude`) was not found on PATH. Click \"Setup in Terminal\" or run `npm install -g @anthropic-ai/claude-code && claude` (requires Node.js 18+).".to_string()
             })?;
             let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
             let mut args = vec!["-p".to_string()];
@@ -1657,7 +1760,7 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
 
         "gemini-cli" => {
             let bin = find_executable(&["gemini"]).ok_or_else(|| {
-                "Gemini CLI (`gemini`) was not found on PATH.".to_string()
+                "Gemini CLI (`gemini`) was not found on PATH. Click \"Setup in Terminal\" or run `npm install -g @google/gemini-cli && gemini` (requires Node.js 20+).".to_string()
             })?;
             let has_adc = env::var("GOOGLE_APPLICATION_CREDENTIALS")
                 .map(|v| !v.trim().is_empty())
@@ -1702,8 +1805,8 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
         }
 
         "antigravity-cli" => {
-            let bin = find_executable(&["agy", "antigravity"]).ok_or_else(|| {
-                "Antigravity CLI (`agy`) was not found on PATH.".to_string()
+            let bin = find_executable(&["agy"]).ok_or_else(|| {
+                "Antigravity CLI (`agy`) was not found on PATH. Click \"Setup in Terminal\" (macOS/Linux: curl -fsSL https://antigravity.google/cli/install.sh | bash, Windows: irm https://antigravity.google/cli/install.ps1 | iex).".to_string()
             })?;
             let raw_prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
             let prompt = if cfg!(target_os = "windows") {
@@ -2174,5 +2277,37 @@ endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\node_
         let clamped = clamp_utf16_prompt(jp, 6);
         assert!(clamped.starts_with("あいうえお"));
         assert!(clamped.contains("truncated"));
+    }
+
+    #[test]
+    fn resolves_windows_executable_skipping_extensionless_shims() {
+        let dir = env::temp_dir().join(format!("onigiri_win_exec_ai_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Simulate `%APPDATA%\npm` having extensionless POSIX script `codex`, `codex.ps1`, and `codex.cmd`
+        std::fs::write(dir.join("codex"), "#!/bin/sh\nnode \"$basedir/node_modules/@openai/codex/bin/codex.js\" \"$@\"\n").unwrap();
+        std::fs::write(dir.join("codex.ps1"), "# ps1 shim\n").unwrap();
+        std::fs::write(dir.join("codex.cmd"), "@echo off\r\n").unwrap();
+
+        assert_eq!(
+            resolve_windows_executable_candidate(&dir, "codex"),
+            Some(dir.join("codex.cmd"))
+        );
+
+        // When `.exe` also exists alongside extensionless + `.cmd`, prefer `.exe`
+        std::fs::write(dir.join("claude"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.join("claude.cmd"), "@echo off\r\n").unwrap();
+        std::fs::write(dir.join("claude.exe"), b"MZ").unwrap();
+        assert_eq!(
+            resolve_windows_executable_candidate(&dir, "claude"),
+            Some(dir.join("claude.exe"))
+        );
+
+        // Extensionless-only file must never be matched on Windows
+        std::fs::write(dir.join("posix_only"), "#!/bin/sh\n").unwrap();
+        assert_eq!(resolve_windows_executable_candidate(&dir, "posix_only"), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

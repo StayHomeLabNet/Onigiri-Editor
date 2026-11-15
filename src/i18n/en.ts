@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.0.0',
+  versionLabel: 'v1.0.1',
   modes: {
     simple: 'Simple',
     basic: 'Basic',
@@ -284,6 +284,13 @@ export const en: Translations = {
     showLogsBtn: 'Show Logs',
     hideLogsBtn: 'Hide Logs',
     terminalOpenedMsg: 'Opened setup in Terminal. Click Re-check Environment once complete.',
+    actionLegend:
+      'Blue button = runs automatically in Onigiri Editor · Run in Terminal = interactive OS terminal · Download Page = manual installer',
+    inAppActionTooltip: 'Run automatically inside Onigiri Editor in the background',
+    openTerminalTooltip: 'Open your OS Terminal to run interactive installation or setup commands',
+    openDownloadTooltip: 'Open the official download or installation guide in your browser',
+    platformNoteMacos:
+      'macOS tip: If Homebrew is not installed yet, Terminal setup may prompt for your password and Xcode Command Line Tools (first-time setup can take a few minutes). Click "Re-check Environment" afterward.',
     platformNoteWindows:
       'Windows tip: Click "Re-check Environment" after setup. If a newly added tool on PATH is not recognized yet, restart Onigiri Editor once (if winget is missing, the official download page opens instead).',
     platformNoteLinux:
@@ -331,11 +338,31 @@ export const en: Translations = {
     availableSwitchTitle: 'Available AI connections found',
     switchToProvider: 'Switch to',
     notInstalledCli: 'CLI was not found on PATH.',
+    missingCliCodex:
+      'Codex CLI (codex) was not found on PATH. Requires Node.js 18+ (20 LTS recommended) and npm. Click "Setup in Terminal" to install automatically.',
+    missingCliClaude:
+      'Claude Code CLI (claude) was not found on PATH. Requires Node.js 18+ (20 LTS recommended) and npm. Click "Setup in Terminal" to install automatically.',
+    missingCliGemini:
+      'Gemini CLI (gemini) was not found on PATH. Requires Node.js 20+ and npm. Click "Setup in Terminal" to install automatically.',
+    missingCliAntigravity:
+      'Antigravity CLI (agy) was not found on PATH. Note that the CLI is packaged separately from the Antigravity desktop app — run "Setup in Terminal" (no Node.js required) or install it from antigravity.google.',
     notLoggedInCli: 'CLI is installed, but sign-in is required.',
+    authHintCodex:
+      'Click "Sign in via Terminal" and complete browser/CLI authentication with your ChatGPT subscription (or OpenAI API key), then click "Re-detect".',
+    authHintClaude:
+      'Click "Sign in via Terminal" to launch claude and follow the interactive login flow with your Claude Pro/Max or Console account, then click "Re-detect".',
+    authHintGemini:
+      'Click "Sign in via Terminal" to launch gemini, finish Google account browser sign-in (or API key setup), and click "Re-detect".',
+    authHintAntigravity:
+      'Click "Sign in via Terminal" to launch agy, complete Google account sign-in and first-run setup, and click "Re-detect".',
     ollamaNotRunningDesc: 'Ollama is installed, but its local server is not running.',
     ollamaNoModelsDesc: 'Ollama is running, but no models are pulled yet.',
+    ollamaNoModelsHint:
+      'First-time model pulls download several GB and may take a few minutes. Pull a starter model via Terminal below or run `ollama pull <model>`, then click "Re-detect".',
     ollamaNotInstalledDesc: 'Install Ollama to run local models privately.',
     lmstudioNotRunningDesc: 'LM Studio local server (127.0.0.1:1234) is not running.',
+    lmstudioServerSteps:
+      'In LM Studio: 1) Download and load a model, 2) Open the Developer tab and turn on "Start Server" (port 1234), 3) Click "Re-detect" here.',
     apiKeyMissingDesc: 'Enter your API key below to start using this provider.',
     customCliMissingDesc: 'Configure a custom CLI command in Connection Settings.',
     startOllamaBtn: 'Start Ollama',
@@ -354,10 +381,12 @@ export const en: Translations = {
     connectionOk: 'Connected successfully',
     nodeRequiredHint: 'Node.js (npm) is required to install this CLI. "Setup in Terminal" can auto-install Node.js (Homebrew on macOS, winget on Windows, or your Linux package manager), or you can download Node.js directly below.',
     downloadNodeBtn: 'Download Node.js',
+    platformNoteMacos:
+      'macOS tip: First-time CLI setup may install Homebrew / Xcode Command Line Tools and prompt for your password. Click "Re-detect" when finished.',
     platformNoteWindows:
       'Windows tip: Click "Re-detect" after setup. If a newly installed CLI on PATH is not recognized yet, restart Onigiri Editor once.',
     platformNoteLinux:
-      'Linux tip: If global package installation requires elevated permissions, follow the sudo prompt in the opened Terminal and click "Re-detect" afterward.',
+      'Linux tip: To avoid permission errors, Terminal setup configures a user-writable npm prefix (~/.npm-global) automatically and only uses sudo when needed. Click "Re-detect" afterward.',
     includeDoc: 'Include current document context',
     includeFolder: 'Include open folder context',
     folderBadgeDisabled: 'Folder AI: OFF',
@@ -389,14 +418,22 @@ export const en: Translations = {
     findPlaceholder: 'Find...',
     replacePlaceholder: 'Replace with...',
     caseSensitive: 'Match Case',
-    regex: 'Regex',
+    caseSensitiveShort: 'Match Case',
+    widthSensitive: 'Distinguish Full/Half-Width Alphanumerics',
+    widthSensitiveShort: 'Full/Half Width',
+    inSelection: 'In Selection',
+    refreshSelection: 'Re-capture current editor selection',
+    noSelectionHint: 'Select a range in editor',
+    regex: 'Regular Expression',
     wholeWord: 'Whole Word',
-    previous: 'Previous',
-    next: 'Next',
+    previous: 'Find Previous',
+    next: 'Find Next',
     replace: 'Replace',
     replaceAll: 'Replace All',
     matches: 'matches',
     noMatches: 'No matches',
+    invalidRegex: 'Invalid regex',
+    replacedCount: 'Replaced {n} occurrence(s)',
   },
   status: {
     saved: 'Saved',
