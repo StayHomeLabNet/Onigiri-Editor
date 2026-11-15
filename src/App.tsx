@@ -1,13 +1,28 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'katex/dist/katex.min.css';
+import {
+  AlertTriangle,
+  Eye,
+  ExternalLink,
+  GitCompare,
+  Globe,
+  RefreshCw,
+  Save,
+  Square,
+} from 'lucide-react';
 import type {
   AiCleanOptions,
+  AiProviderConfig,
   AppMode,
   DocumentTab,
   EditorSettings,
   HeadingItem,
   InspectorTab,
   Locale,
+  ProjectInfo,
+  ProjectServerStatus,
+  ProjectSetupProgress,
+  RightPaneMode,
   SearchMatch,
   SidebarTab,
   Snapshot,
@@ -15,39 +30,95 @@ import type {
   ViewLayout,
   WorkspaceEntry,
 } from './types';
-import { detectInitialLocale, getTranslations } from './i18n';
+import { detectInitialLocale, getTranslations, hasSavedLocalePreference } from './i18n';
 import {
   cleanAiMarkdown,
   computeStats,
+  escapeHtmlText,
   exportStandaloneHtml,
   extractHeadings,
+  getDocumentPreviewKind,
   htmlToMarkdown,
-  toggleTaskCheckboxAtLine,
+  renderMarkdownToHtml,
 } from './utils/markdown';
+import { resolveSyntaxColors, syntaxColorsToCssVars, SYNTAX_PRESETS } from './utils/syntaxThemes';
 import {
+  assistProjectSetup,
+  browserClose,
+  browserNavAction,
+  checkFilesSync,
   createFileInDir,
+  formatShortcut,
+  getOsLocale,
+  getProjectDevServerStatus,
+  inspectProjectForPath,
+  inspectWorkspaceProject,
   isTauri,
   openFolderDialog,
+  openInExternalBrowser,
   openMarkdownFileDialog,
   readFileByPath,
+  rebuildAppMenu,
   saveExportFile,
+  saveImageAsset,
   saveMarkdownFile,
+  savePastedImage,
   scanWorkspaceDir,
   searchWorkspaceDir,
   setWindowFullscreen,
   setWindowTitle,
+  startExternalPreview,
+  startProjectDevServer,
+  stopExternalPreview,
+  stopProjectDevServer,
+  updateExternalPreview,
+  writeFileSilently,
 } from './utils/platform';
 import { TopBar } from './components/TopBar';
 import { FormatToolbar } from './components/FormatToolbar';
 import { TabBar } from './components/TabBar';
 import { Sidebar } from './components/Sidebar';
-import { EditorPane, type EditorHandle } from './components/EditorPane';
+import { EditorPane, type EditorHandle, type LineRange } from './components/EditorPane';
 import { PreviewPane, type PreviewHandle } from './components/PreviewPane';
+import { WebPagePreviewPane } from './components/WebPagePreviewPane';
+import { CodePreviewPane } from './components/CodePreviewPane';
+import { RightBrowserPane } from './components/RightBrowserPane';
+import { type ProjectSetupActionParams } from './components/ProjectSetupCard';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { FindReplaceBar } from './components/FindReplaceBar';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { StatusBar } from './components/StatusBar';
 import { AboutModal } from './components/AboutModal';
+import { ImageModal } from './components/ImageModal';
+import { SettingsModal } from './components/SettingsModal';
+import {
+  AiDiffPreviewModal,
+  type DiffPreviewRequest,
+} from './components/AiDiffPreviewModal';
+
+const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
+
+interface PersistedTabRecord {
+  id: string;
+  title: string;
+  filePath?: string;
+  eol?: '\n' | '\r\n';
+  dirty: boolean;
+  content?: string;
+  savedContent?: string;
+  cursorLine: number;
+  cursorCol: number;
+  snapshots?: Snapshot[];
+  updatedAt: number;
+  diskModifiedMs?: number;
+}
+
+interface PersistedSession {
+  version: 1;
+  activeTabId: string;
+  workspaceRoot: string | null;
+  tabs: PersistedTabRecord[];
+}
 
 const DEFAULT_SETTINGS: EditorSettings = {
   fontSize: 15,
@@ -63,6 +134,19 @@ const DEFAULT_SETTINGS: EditorSettings = {
   showFrontmatterCard: true,
   wordGoal: 0,
   customCss: '',
+  activeLineSyncHighlight: true,
+  oeditLineCopyEnabled: true,
+  oeditLineCopyTrigger: 'eol-only',
+  oeditLineCopyIncludeNewline: true,
+  syntaxPreset: 'auto',
+  customSyntaxColors: SYNTAX_PRESETS.github,
+  aiFolderMode: 'read-write-approve',
+  builtinBrowserEnabled: false,
+  builtinBrowserDefaultUrl: 'https://www.google.com',
+  externalBrowserPreviewEnabled: true,
+  externalBrowserPort: 49123,
+  restoreSessionEnabled: true,
+  autoSaveEnabled: false,
 };
 
 const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
@@ -75,6 +159,16 @@ const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
   normalizeQuotes: false,
 };
 
+const DEFAULT_AI_CONFIG: AiProviderConfig = {
+  provider: 'codex-cli',
+  model: '',
+  apiKeys: {},
+  baseUrls: {},
+  customCliCmd: '',
+  includeDocContext: true,
+  includeFolderContext: true,
+};
+
 function loadJson<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -85,30 +179,114 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
-function makeTab(title: string, content: string, filePath?: string): DocumentTab {
+function makeTab(
+  title: string,
+  rawContent: string,
+  filePath?: string,
+  diskModifiedMs?: number
+): DocumentTab {
+  const eol: '\n' | '\r\n' = rawContent.includes('\r\n') ? '\r\n' : '\n';
+  const content = eol === '\r\n' ? rawContent.replace(/\r\n/g, '\n') : rawContent;
   return {
     id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     title,
     filePath,
     content,
     savedContent: content,
+    eol,
     dirty: false,
     cursorLine: 1,
     cursorCol: 1,
     snapshots: [],
     updatedAt: Date.now(),
+    diskModifiedMs,
+    externalStatus: null,
+  };
+}
+
+function buildInitialSessionState(
+  restoreEnabled: boolean,
+  welcomeTitle: string,
+  welcomeContent: string
+): {
+  tabs: DocumentTab[];
+  activeTabId: string;
+  workspaceRoot: string | null;
+  pendingHydrationIds: string[];
+  restoredSession: boolean;
+} {
+  try {
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as PersistedSession;
+      if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
+        const desktop = isTauri();
+        const candidateRecords = restoreEnabled
+          ? parsed.tabs
+          : parsed.tabs.filter((tb) => tb.dirty);
+
+        if (candidateRecords.length > 0) {
+          const pendingHydrationIds: string[] = [];
+          const restoredTabs: DocumentTab[] = candidateRecords.map((rec) => {
+            const needsDiskLoad = desktop && Boolean(rec.filePath) && !rec.dirty && rec.content === undefined;
+            if (needsDiskLoad) pendingHydrationIds.push(rec.id);
+            const content = rec.content ?? '';
+            const savedContent = rec.savedContent ?? content;
+            return {
+              id: rec.id || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              title: rec.title || welcomeTitle,
+              filePath: rec.filePath,
+              eol: rec.eol || '\n',
+              content,
+              savedContent,
+              dirty: Boolean(rec.dirty),
+              cursorLine: rec.cursorLine || 1,
+              cursorCol: rec.cursorCol || 1,
+              snapshots: Array.isArray(rec.snapshots) ? rec.snapshots : [],
+              updatedAt: rec.updatedAt || Date.now(),
+              diskModifiedMs: rec.diskModifiedMs,
+              externalStatus: null,
+            };
+          });
+          const activeExists = restoredTabs.some((tb) => tb.id === parsed.activeTabId);
+          return {
+            tabs: restoredTabs,
+            activeTabId: activeExists ? parsed.activeTabId : restoredTabs[0].id,
+            workspaceRoot: restoreEnabled && desktop ? parsed.workspaceRoot || null : null,
+            pendingHydrationIds,
+            restoredSession: true,
+          };
+        }
+      }
+    }
+  } catch {
+    // ignore corrupt session storage
+  }
+  const fallback = makeTab(welcomeTitle, welcomeContent);
+  return {
+    tabs: [fallback],
+    activeTabId: fallback.id,
+    workspaceRoot: null,
+    pendingHydrationIds: [],
+    restoredSession: false,
   };
 }
 
 export function App() {
-  const [locale, setLocale] = useState<Locale>(() => detectInitialLocale());
+  const hasSavedLocaleOnStartRef = useRef<boolean>(hasSavedLocalePreference());
+  const [locale, setLocaleState] = useState<Locale>(() => detectInitialLocale());
   const t = useMemo(() => getTranslations(locale), [locale]);
 
   const [mode, setMode] = useState<AppMode>(() => {
     const saved = localStorage.getItem('onigiri-markdown.mode');
-    return saved === 'advanced' ? 'advanced' : 'basic';
+    if (saved === 'simple' || saved === 'basic' || saved === 'advanced') return saved;
+    return 'basic';
   });
-  const [layout, setLayout] = useState<ViewLayout>('split');
+  const [layout, setLayout] = useState<ViewLayout>(() => {
+    const saved = localStorage.getItem('onigiri-markdown.mode');
+    return saved === 'simple' ? 'editor' : 'split';
+  });
+  const preSimpleLayoutRef = useRef<ViewLayout>('split');
   const [theme, setTheme] = useState<ThemeId>(() => {
     const saved = localStorage.getItem('onigiri-markdown.theme') as ThemeId | null;
     if (saved && ['light', 'dark', 'sepia', 'midnight'].includes(saved)) return saved;
@@ -121,29 +299,62 @@ export function App() {
   const [cleanOptions, setCleanOptions] = useState<AiCleanOptions>(() =>
     loadJson('onigiri-markdown.cleanOpts', DEFAULT_CLEAN_OPTS)
   );
+  const [aiConfig, setAiConfig] = useState<AiProviderConfig>(() =>
+    loadJson('onigiri-markdown.aiConfig', DEFAULT_AI_CONFIG)
+  );
 
-  const [tabs, setTabs] = useState<DocumentTab[]>(() => [
-    makeTab(
+  const initialSessionRef = useRef<ReturnType<typeof buildInitialSessionState> | null>(null);
+  if (!initialSessionRef.current) {
+    initialSessionRef.current = buildInitialSessionState(
+      settings.restoreSessionEnabled,
       locale === 'ja' ? 'ようこそ.md' : 'Welcome.md',
       getTranslations(locale).sampleDocument
-    ),
-  ]);
-  const [activeTabId, setActiveTabId] = useState<string>(() => tabs[0].id);
+    );
+  }
+  const initialSession = initialSessionRef.current;
+
+  const [tabs, setTabs] = useState<DocumentTab[]>(() => initialSession.tabs);
+  const [activeTabId, setActiveTabId] = useState<string>(() => initialSession.activeTabId);
 
   const [showSidebar, setShowSidebar] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('outline');
   const [showInspector, setShowInspector] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('ai');
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>('chat');
   const [showFind, setShowFind] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [diffPreview, setDiffPreview] = useState<DiffPreviewRequest | null>(null);
   const [zenMode, setZenMode] = useState(false);
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
 
-  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(null);
+  const [activePane, setActivePane] = useState<'code' | 'visual'>('code');
+  const [previewSyncLineRange, setPreviewSyncLineRange] = useState<LineRange | null>(null);
+
+  const [rightPaneMode, setRightPaneMode] = useState<RightPaneMode>('markdown');
+  const [browserUrl, setBrowserUrl] = useState<string>(
+    () => settings.builtinBrowserDefaultUrl || 'https://www.google.com'
+  );
+  const [externalPreviewUrl, setExternalPreviewUrl] = useState<string | null>(null);
+
+  const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(
+    () => initialSession.workspaceRoot
+  );
   const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntry[]>([]);
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
+  const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
+  const [projectServer, setProjectServer] = useState<ProjectServerStatus | null>(null);
+  const [projectSetupBusy, setProjectSetupBusy] = useState(false);
+  const [projectSetupActionId, setProjectSetupActionId] = useState<string | null>(null);
+  const [projectSetupLogs, setProjectSetupLogs] = useState<string[]>([]);
+  const [projectSetupFeedback, setProjectSetupFeedback] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+  const [projectRechecking, setProjectRechecking] = useState(false);
+  const pendingBrowseTargetRef = useRef<'builtin' | 'external' | null>(null);
 
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -152,6 +363,17 @@ export function App() {
   const previewRef = useRef<PreviewHandle | null>(null);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollSyncLock = useRef<'editor' | 'preview' | null>(null);
+  const activePaneRef = useRef<'code' | 'visual'>('code');
+
+  const tabsRef = useRef<DocumentTab[]>(tabs);
+  tabsRef.current = tabs;
+  const activeTabIdRef = useRef<string>(activeTabId);
+  activeTabIdRef.current = activeTabId;
+  const workspaceRootRef = useRef<string | null>(workspaceRoot);
+  workspaceRootRef.current = workspaceRoot;
+  const savingPathsRef = useRef<Set<string>>(new Set());
+  const sessionHydratedRef = useRef<boolean>(initialSession.pendingHydrationIds.length === 0);
+  const syncLockRef = useRef<boolean>(false);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) || tabs[0],
@@ -164,9 +386,77 @@ export function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
 
-  // Persist prefs
+  const setLocale = useCallback((next: React.SetStateAction<Locale>) => {
+    setLocaleState((prev) => {
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      try {
+        localStorage.setItem('onigiri-markdown.locale', resolved);
+      } catch {
+        // ignore
+      }
+      hasSavedLocaleOnStartRef.current = true;
+      return resolved;
+    });
+  }, []);
+
+  // On first launch without a saved user preference, align UI + untouched welcome doc with actual OS language
   useEffect(() => {
-    localStorage.setItem('onigiri-markdown.locale', locale);
+    if (hasSavedLocaleOnStartRef.current) return;
+    let cancelled = false;
+    getOsLocale()
+      .then((osLoc) => {
+        if (cancelled) return;
+        setLocaleState((prev) => {
+          if (prev !== osLoc) {
+            setTabs((prevTabs) => {
+              if (
+                prevTabs.length === 1 &&
+                !prevTabs[0].filePath &&
+                !prevTabs[0].dirty &&
+                prevTabs[0].content === getTranslations(prev).sampleDocument
+              ) {
+                const updatedWelcome = makeTab(
+                  osLoc === 'ja' ? 'ようこそ.md' : 'Welcome.md',
+                  getTranslations(osLoc).sampleDocument
+                );
+                setActiveTabId(updatedWelcome.id);
+                return [updatedWelcome];
+              }
+              return prevTabs;
+            });
+          }
+          return osLoc;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleModeChange = useCallback(
+    (nextMode: AppMode) => {
+      setMode((prev) => {
+        if (prev === nextMode) return prev;
+        if (nextMode === 'simple') {
+          if (layout !== 'editor') preSimpleLayoutRef.current = layout;
+          setLayout('editor');
+          setShowInspector(false);
+        } else if (prev === 'simple') {
+          setLayout(preSimpleLayoutRef.current || 'split');
+        }
+        return nextMode;
+      });
+    },
+    [layout]
+  );
+
+  // Sync native menu bar on locale change (only persist to localStorage when user changed it)
+  useEffect(() => {
+    if (hasSavedLocaleOnStartRef.current) {
+      localStorage.setItem('onigiri-markdown.locale', locale);
+    }
+    rebuildAppMenu(locale);
   }, [locale]);
 
   useEffect(() => {
@@ -186,11 +476,206 @@ export function App() {
     localStorage.setItem('onigiri-markdown.cleanOpts', JSON.stringify(cleanOptions));
   }, [cleanOptions]);
 
+  useEffect(() => {
+    localStorage.setItem('onigiri-markdown.aiConfig', JSON.stringify(aiConfig));
+  }, [aiConfig]);
+
+  const persistSessionNow = useCallback(() => {
+    if (!sessionHydratedRef.current) return;
+    const records: PersistedTabRecord[] = tabsRef.current.map((tb) => {
+      const storeBody = tb.dirty || !tb.filePath || !isTauri();
+      const maxLen = 400_000;
+      const trimmedContent =
+        storeBody && tb.content.length <= maxLen ? tb.content : storeBody ? tb.content.slice(0, maxLen) : undefined;
+      const trimmedSaved =
+        storeBody && tb.savedContent.length <= maxLen
+          ? tb.savedContent
+          : storeBody
+            ? tb.savedContent.slice(0, maxLen)
+            : undefined;
+      return {
+        id: tb.id,
+        title: tb.title,
+        filePath: tb.filePath,
+        eol: tb.eol,
+        dirty: tb.dirty,
+        content: trimmedContent,
+        savedContent: trimmedSaved,
+        cursorLine: tb.cursorLine,
+        cursorCol: tb.cursorCol,
+        snapshots: tb.snapshots.slice(0, 3),
+        updatedAt: tb.updatedAt,
+        diskModifiedMs: tb.diskModifiedMs,
+      };
+    });
+    const payload: PersistedSession = {
+      version: 1,
+      activeTabId: activeTabIdRef.current,
+      workspaceRoot: workspaceRootRef.current,
+      tabs: records,
+    };
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      try {
+        const compact: PersistedSession = {
+          ...payload,
+          tabs: records.map((r) => ({ ...r, snapshots: [], savedContent: undefined })),
+        };
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(compact));
+      } catch {
+        // ignore quota errors
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(persistSessionNow, 450);
+    return () => window.clearTimeout(timer);
+  }, [tabs, activeTabId, workspaceRoot, persistSessionNow]);
+
+  useEffect(() => {
+    const flush = () => persistSessionNow();
+    window.addEventListener('beforeunload', flush);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('beforeunload', flush);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [persistSessionNow]);
+
+  // Hydrate restored file-backed tabs + workspace folder on startup
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const init = initialSessionRef.current;
+      if (!init) return;
+
+      if (init.workspaceRoot && isTauri()) {
+        scanWorkspaceDir(init.workspaceRoot)
+          .then((list) => {
+            if (!cancelled) setWorkspaceEntries(list);
+          })
+          .catch(() => {});
+      }
+
+      if (init.pendingHydrationIds.length > 0 && isTauri()) {
+        const pendingSet = new Set(init.pendingHydrationIds);
+        const targetTabs = tabsRef.current.filter((tb) => pendingSet.has(tb.id) && tb.filePath);
+        const paths = targetTabs.map((tb) => tb.filePath!);
+        const syncList = await checkFilesSync(paths).catch(() => []);
+        const syncMap = new Map(syncList.map((s) => [s.path, s]));
+
+        const loadedById = new Map<string, { content: string; eol: '\n' | '\r\n'; modifiedMs?: number }>();
+        const missingIds = new Set<string>();
+
+        for (const tb of targetTabs) {
+          const path = tb.filePath!;
+          const syncInfo = syncMap.get(path);
+          if (syncInfo && !syncInfo.exists) {
+            missingIds.add(tb.id);
+            continue;
+          }
+          try {
+            const res = await readFileByPath(path);
+            const eol: '\n' | '\r\n' = res.content.includes('\r\n') ? '\r\n' : '\n';
+            const norm = eol === '\r\n' ? res.content.replace(/\r\n/g, '\n') : res.content;
+            loadedById.set(tb.id, {
+              content: norm,
+              eol,
+              modifiedMs: syncInfo?.modifiedMs,
+            });
+          } catch {
+            missingIds.add(tb.id);
+          }
+        }
+
+        if (!cancelled) {
+          setTabs((prev) => {
+            const next = prev
+              .filter((tb) => !missingIds.has(tb.id))
+              .map((tb) => {
+                const loaded = loadedById.get(tb.id);
+                if (!loaded) return tb;
+                return {
+                  ...tb,
+                  content: loaded.content,
+                  savedContent: loaded.content,
+                  eol: loaded.eol,
+                  dirty: false,
+                  diskModifiedMs: loaded.modifiedMs ?? tb.diskModifiedMs,
+                };
+              });
+            if (next.length === 0) {
+              const fallback = makeTab(
+                locale === 'ja' ? 'ようこそ.md' : 'Welcome.md',
+                getTranslations(locale).sampleDocument
+              );
+              setActiveTabId(fallback.id);
+              return [fallback];
+            }
+            if (!next.some((tb) => tb.id === activeTabIdRef.current)) {
+              setActiveTabId(next[0].id);
+            }
+            return next;
+          });
+        }
+      } else if (isTauri()) {
+        // Record diskModifiedMs for restored dirty tabs that have filePaths
+        const dirtyWithPaths = tabsRef.current.filter((tb) => tb.filePath && !tb.diskModifiedMs);
+        if (dirtyWithPaths.length > 0) {
+          const syncList = await checkFilesSync(dirtyWithPaths.map((tb) => tb.filePath!)).catch(
+            () => []
+          );
+          const syncMap = new Map(syncList.map((s) => [s.path, s]));
+          if (!cancelled && syncMap.size > 0) {
+            setTabs((prev) =>
+              prev.map((tb) => {
+                if (!tb.filePath) return tb;
+                const info = syncMap.get(tb.filePath);
+                if (!info) return tb;
+                if (!info.exists) return { ...tb, externalStatus: 'deleted' };
+                return { ...tb, diskModifiedMs: info.modifiedMs };
+              })
+            );
+          }
+        }
+      }
+
+      sessionHydratedRef.current = true;
+      if (!cancelled && init.restoredSession) {
+        notify(getTranslations(detectInitialLocale()).toasts.sessionRestored);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Close native browser webview if built-in browser gets disabled
+  useEffect(() => {
+    if (!settings.builtinBrowserEnabled) {
+      setRightPaneMode('markdown');
+      browserClose();
+    }
+  }, [settings.builtinBrowserEnabled]);
+
   // Update native window title
   useEffect(() => {
     const prefix = activeTab.dirty ? '● ' : '';
-    setWindowTitle(`${prefix}${activeTab.title} — Onigiri-Markdown v0.1.0`);
-  }, [activeTab.title, activeTab.dirty]);
+    setWindowTitle(`${prefix}${activeTab.title} — Onigiri Editor ${t.versionLabel}`);
+  }, [activeTab.title, activeTab.dirty, t.versionLabel]);
+
+  const resolvedSyntaxColors = useMemo(
+    () => resolveSyntaxColors(settings.syntaxPreset, theme, settings.customSyntaxColors),
+    [settings.syntaxPreset, theme, settings.customSyntaxColors]
+  );
+  const syntaxCssVars = useMemo(
+    () => syntaxColorsToCssVars(resolvedSyntaxColors) as React.CSSProperties,
+    [resolvedSyntaxColors]
+  );
 
   // Stats & headings
   const stats = useMemo(() => computeStats(activeTab.content), [activeTab.content]);
@@ -214,26 +699,376 @@ export function App() {
     [activeTab.id]
   );
 
+  const insertImageIntoActivePane = useCallback(
+    (src: string, alt = '') => {
+      const targetVisual =
+        layout === 'preview' || (layout === 'split' && activePaneRef.current === 'visual');
+      if (targetVisual && previewRef.current) {
+        previewRef.current.insertImage(src, alt);
+      } else {
+        editorRef.current?.insertText(`\n![${alt}](${src})\n`);
+      }
+      notify(t.toasts.imageInserted);
+    },
+    [layout, notify, t.toasts.imageInserted]
+  );
+
+  const handleImageFileInput = useCallback(
+    async (file: File) => {
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error('Failed to read image file'));
+          reader.readAsDataURL(file);
+        });
+        const extMatch = file.name.match(/\.([a-zA-Z0-9]+)$/);
+        const mimeExt = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+        const ext = extMatch ? extMatch[1] : mimeExt;
+        const savedPath = await savePastedImage(dataUrl, ext, activeTab.filePath);
+        const alt = file.name.replace(/\.[^.]+$/, '');
+        insertImageIntoActivePane(savedPath, alt);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [activeTab.filePath, insertImageIntoActivePane, notify, t.toasts.errorPrefix]
+  );
+
   const openPathInTab = useCallback(
     async (filePath: string) => {
-      const existing = tabs.find((tb) => tb.filePath === filePath);
+      const existing = tabsRef.current.find((tb) => tb.filePath === filePath);
       if (existing) {
         setActiveTabId(existing.id);
         return;
       }
       try {
         const res = await readFileByPath(filePath);
-        const created = makeTab(res.name, res.content, res.path);
-        setTabs((prev) => [...prev, created]);
+        const syncInfo = await checkFilesSync([res.path]).catch(() => []);
+        const modifiedMs = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : undefined;
+        const created = makeTab(res.name, res.content, res.path, modifiedMs);
+        setTabs((prev) => {
+          if (prev.some((tb) => tb.filePath === res.path)) return prev;
+          return [...prev, created];
+        });
         setActiveTabId(created.id);
       } catch (err) {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
       }
     },
-    [tabs, notify, t.toasts.errorPrefix]
+    [notify, t.toasts.errorPrefix]
   );
 
-  // Tauri initial opened files + macOS Finder Open With + native drag-drop
+  const syncOpenTabsWithDisk = useCallback(async () => {
+    if (!isTauri() || syncLockRef.current) return;
+    const candidatePaths = Array.from(
+      new Set(
+        tabsRef.current
+          .map((tb) => tb.filePath)
+          .filter((p): p is string => Boolean(p) && !savingPathsRef.current.has(p!))
+      )
+    );
+    if (candidatePaths.length === 0) return;
+
+    syncLockRef.current = true;
+    try {
+      const infos = await checkFilesSync(candidatePaths);
+      const infoMap = new Map(infos.map((item) => [item.path, item]));
+      const changedContents = new Map<string, { content: string; modifiedMs: number }>();
+
+      for (const tab of tabsRef.current) {
+        if (!tab.filePath || savingPathsRef.current.has(tab.filePath)) continue;
+        const info = infoMap.get(tab.filePath);
+        if (!info || !info.exists) continue;
+        if (
+          tab.diskModifiedMs &&
+          info.modifiedMs > 0 &&
+          info.modifiedMs !== tab.diskModifiedMs &&
+          !changedContents.has(tab.filePath)
+        ) {
+          try {
+            const loaded = await readFileByPath(tab.filePath);
+            const norm = loaded.content.includes('\r\n')
+              ? loaded.content.replace(/\r\n/g, '\n')
+              : loaded.content;
+            changedContents.set(tab.filePath, {
+              content: norm,
+              modifiedMs: info.modifiedMs,
+            });
+          } catch {
+            // ignore transient read failure while external process is mid-write
+          }
+        }
+      }
+
+      let activeAutoReloaded = false;
+      let anyDiskDelta = false;
+
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (!tab.filePath || savingPathsRef.current.has(tab.filePath)) return tab;
+          const info = infoMap.get(tab.filePath);
+          if (!info) return tab;
+
+          if (!info.exists) {
+            if (tab.externalStatus === 'deleted') return tab;
+            anyDiskDelta = true;
+            return { ...tab, externalStatus: 'deleted' };
+          }
+
+          if (!tab.diskModifiedMs && info.modifiedMs > 0) {
+            return {
+              ...tab,
+              diskModifiedMs: info.modifiedMs,
+              externalStatus: tab.externalStatus === 'deleted' ? null : tab.externalStatus,
+            };
+          }
+
+          const changed = changedContents.get(tab.filePath);
+          if (!changed) {
+            return tab.externalStatus === 'deleted' ? { ...tab, externalStatus: null } : tab;
+          }
+
+          anyDiskDelta = true;
+          if (changed.content === tab.content) {
+            return {
+              ...tab,
+              savedContent: changed.content,
+              dirty: false,
+              diskModifiedMs: changed.modifiedMs,
+              externalStatus: null,
+              externalContent: undefined,
+            };
+          }
+
+          if (!tab.dirty) {
+            if (tab.id === activeTabIdRef.current) {
+              activeAutoReloaded = true;
+            }
+            return {
+              ...tab,
+              content: changed.content,
+              savedContent: changed.content,
+              dirty: false,
+              diskModifiedMs: changed.modifiedMs,
+              externalStatus: null,
+              externalContent: undefined,
+              updatedAt: Date.now(),
+            };
+          }
+
+          return {
+            ...tab,
+            diskModifiedMs: changed.modifiedMs,
+            externalStatus: 'modified',
+            externalContent: changed.content,
+          };
+        })
+      );
+
+      if (activeAutoReloaded) {
+        notify(t.toasts.reloadedExternal);
+      }
+      if (anyDiskDelta && workspaceRootRef.current) {
+        scanWorkspaceDir(workspaceRootRef.current)
+          .then(setWorkspaceEntries)
+          .catch(() => {});
+      }
+    } catch {
+      // ignore polling errors
+    } finally {
+      syncLockRef.current = false;
+    }
+  }, [notify, t.toasts.reloadedExternal]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void syncOpenTabsWithDisk();
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void syncOpenTabsWithDisk();
+      }
+    }, 3000);
+    return () => {
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      window.clearInterval(interval);
+    };
+  }, [syncOpenTabsWithDisk]);
+
+  // Auto-save file-backed tabs when enabled and conflict-free
+  useEffect(() => {
+    if (!settings.autoSaveEnabled || !isTauri()) return;
+    if (!activeTab.filePath || !activeTab.dirty || activeTab.externalStatus) return;
+
+    const targetTabId = activeTab.id;
+    const targetPath = activeTab.filePath;
+    const contentSnapshot = activeTab.content;
+    const eolSnapshot = activeTab.eol;
+
+    const timer = window.setTimeout(async () => {
+      savingPathsRef.current.add(targetPath);
+      try {
+        const diskText =
+          eolSnapshot === '\r\n'
+            ? contentSnapshot.replace(/\n/g, '\r\n')
+            : contentSnapshot;
+        await writeFileSilently(targetPath, diskText);
+        const syncRes = await checkFilesSync([targetPath]).catch(() => []);
+        const newMtime = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
+        setTabs((prev) =>
+          prev.map((tb) =>
+            tb.id === targetTabId
+              ? {
+                  ...tb,
+                  savedContent: contentSnapshot,
+                  dirty: tb.content !== contentSnapshot,
+                  diskModifiedMs: newMtime ?? tb.diskModifiedMs,
+                  externalStatus: null,
+                  externalContent: undefined,
+                }
+              : tb
+          )
+        );
+      } catch {
+        // leave dirty if auto-save fails
+      } finally {
+        savingPathsRef.current.delete(targetPath);
+      }
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    settings.autoSaveEnabled,
+    activeTab.id,
+    activeTab.filePath,
+    activeTab.content,
+    activeTab.dirty,
+    activeTab.eol,
+    activeTab.externalStatus,
+  ]);
+
+  const handleReloadFromDisk = useCallback(
+    async (tabId: string) => {
+      const target = tabsRef.current.find((tb) => tb.id === tabId);
+      if (!target || !target.filePath) return;
+      try {
+        let nextText = target.externalContent;
+        let nextMtime = target.diskModifiedMs;
+        if (nextText === undefined) {
+          const res = await readFileByPath(target.filePath);
+          nextText = res.content.includes('\r\n')
+            ? res.content.replace(/\r\n/g, '\n')
+            : res.content;
+        }
+        const syncRes = await checkFilesSync([target.filePath]).catch(() => []);
+        if (syncRes[0]?.exists) nextMtime = syncRes[0].modifiedMs;
+
+        setTabs((prev) =>
+          prev.map((tb) => {
+            if (tb.id !== tabId) return tb;
+            const backupSnap: Snapshot | null = tb.dirty
+              ? {
+                  id: `snap-${Date.now()}`,
+                  label: `Pre-Reload (${new Date().toLocaleTimeString()})`,
+                  content: tb.content,
+                  timestamp: Date.now(),
+                }
+              : null;
+            return {
+              ...tb,
+              content: nextText!,
+              savedContent: nextText!,
+              dirty: false,
+              diskModifiedMs: nextMtime,
+              externalStatus: null,
+              externalContent: undefined,
+              snapshots: backupSnap ? [backupSnap, ...tb.snapshots] : tb.snapshots,
+              updatedAt: Date.now(),
+            };
+          })
+        );
+        notify(t.toasts.reloadedExternal);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [notify, t.toasts.errorPrefix, t.toasts.reloadedExternal]
+  );
+
+  const handleKeepMine = useCallback((tabId: string) => {
+    setTabs((prev) =>
+      prev.map((tb) =>
+        tb.id === tabId
+          ? { ...tb, externalStatus: null, externalContent: undefined }
+          : tb
+      )
+    );
+  }, []);
+
+  const handleKeepAsDraft = useCallback((tabId: string) => {
+    setTabs((prev) =>
+      prev.map((tb) =>
+        tb.id === tabId
+          ? {
+              ...tb,
+              filePath: undefined,
+              diskModifiedMs: undefined,
+              externalStatus: null,
+              externalContent: undefined,
+              dirty: true,
+            }
+          : tb
+      )
+    );
+  }, []);
+
+  const handleCompareExternalDiff = useCallback(
+    (tab: DocumentTab) => {
+      if (tab.externalContent === undefined) return;
+      setDiffPreview({
+        title: t.aiDiffModal.compareExternalTitle,
+        targetPath: tab.filePath || tab.title,
+        originalText: tab.content,
+        proposedText: tab.externalContent,
+        originalLabel: t.externalChange.keepMineBtn,
+        proposedLabel: t.externalChange.reloadBtn,
+        showSnapshotOption: false,
+        confirmLabel: t.externalChange.reloadBtn,
+        onConfirm: async () => {
+          await handleReloadFromDisk(tab.id);
+        },
+        secondaryActionLabel: t.externalChange.keepMineBtn,
+        onSecondaryAction: () => {
+          handleKeepMine(tab.id);
+        },
+      });
+    },
+    [t, handleReloadFromDisk, handleKeepMine]
+  );
+
+  const dropHelpersRef = useRef({
+    docPath: activeTab.filePath,
+    insertImageIntoActivePane,
+    openPathInTab,
+    notify,
+    errorPrefix: t.toasts.errorPrefix,
+  });
+  dropHelpersRef.current = {
+    docPath: activeTab.filePath,
+    insertImageIntoActivePane,
+    openPathInTab,
+    notify,
+    errorPrefix: t.toasts.errorPrefix,
+  };
+
+  // Tauri initial opened files + macOS Finder Open With + native drag-drop (Markdown + Images)
   useEffect(() => {
     if (!isTauri()) return;
     let unlistenOpen: (() => void) | null = null;
@@ -248,13 +1083,13 @@ export function App() {
         const initial = await invoke<string[]>('take_initial_files');
         if (initial.length > 0) {
           for (const p of initial) {
-            await openPathInTab(p);
+            await dropHelpersRef.current.openPathInTab(p);
           }
         }
 
         unlistenOpen = await listen<string[]>('open-files', async (event) => {
           for (const p of event.payload || []) {
-            await openPathInTab(p);
+            await dropHelpersRef.current.openPathInTab(p);
           }
         });
 
@@ -267,8 +1102,20 @@ export function App() {
             setIsDraggingFile(false);
             const paths = event.payload.paths || [];
             for (const p of paths) {
-              if (/\.(md|markdown|mdown|mdx|txt)$/i.test(p)) {
-                await openPathInTab(p);
+              if (/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p)) {
+                try {
+                  const savedSrc = await saveImageAsset(p, dropHelpersRef.current.docPath);
+                  const baseName = (p.split(/[/\\]/).pop() || 'image').replace(/\.[^.]+$/, '');
+                  dropHelpersRef.current.insertImageIntoActivePane(savedSrc, baseName);
+                } catch (err) {
+                  dropHelpersRef.current.notify(
+                    `${dropHelpersRef.current.errorPrefix} ${(err as Error).message}`
+                  );
+                }
+              } else if (
+                !/\.(pdf|zip|tar|gz|dmg|exe|msi|app|bin|wasm|mp4|mov|mp3|wav)$/i.test(p)
+              ) {
+                await dropHelpersRef.current.openPathInTab(p);
               }
             }
           }
@@ -282,12 +1129,12 @@ export function App() {
       unlistenOpen?.();
       unlistenDrop?.();
     };
-  }, [openPathInTab]);
+  }, []);
 
   // File actions
   const handleNewFile = useCallback(() => {
     const created = makeTab(t.dialogs.untitledName, '# \n');
-    if (mode === 'basic') {
+    if (mode !== 'advanced') {
       if (activeTab.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
       setTabs([created]);
       setActiveTabId(created.id);
@@ -302,13 +1149,15 @@ export function App() {
     try {
       const opened = await openMarkdownFileDialog();
       if (!opened) return;
-      const existing = tabs.find((tb) => tb.filePath && tb.filePath === opened.path);
+      const existing = tabsRef.current.find((tb) => tb.filePath && tb.filePath === opened.path);
       if (existing) {
         setActiveTabId(existing.id);
         return;
       }
-      const created = makeTab(opened.name, opened.content, opened.path);
-      if (mode === 'basic') {
+      const syncInfo = await checkFilesSync([opened.path]).catch(() => []);
+      const modifiedMs = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : undefined;
+      const created = makeTab(opened.name, opened.content, opened.path, modifiedMs);
+      if (mode !== 'advanced') {
         if (activeTab.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
         setTabs([created]);
         setActiveTabId(created.id);
@@ -319,17 +1168,29 @@ export function App() {
     } catch (err) {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     }
-  }, [tabs, mode, activeTab.dirty, notify, t.dialogs.unsavedCloseConfirm, t.toasts.errorPrefix]);
+  }, [mode, activeTab.dirty, notify, t.dialogs.unsavedCloseConfirm, t.toasts.errorPrefix]);
 
   const handleSave = useCallback(
     async (forceSaveAs = false) => {
+      const savedSnapshot = activeTab.content;
+      const prevPath = activeTab.filePath;
+      if (!forceSaveAs && prevPath) {
+        savingPathsRef.current.add(prevPath);
+      }
       try {
+        const contentToWrite =
+          activeTab.eol === '\r\n'
+            ? savedSnapshot.replace(/\n/g, '\r\n')
+            : savedSnapshot;
         const res = await saveMarkdownFile(
-          activeTab.content,
+          contentToWrite,
           forceSaveAs ? undefined : activeTab.filePath,
           activeTab.title
         );
         if (!res) return;
+        savingPathsRef.current.add(res.path);
+        const syncRes = await checkFilesSync([res.path]).catch(() => []);
+        const newMtime = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
         setTabs((prev) =>
           prev.map((tab) =>
             tab.id === activeTab.id
@@ -337,18 +1198,55 @@ export function App() {
                   ...tab,
                   title: res.name,
                   filePath: res.path,
-                  savedContent: tab.content,
-                  dirty: false,
+                  savedContent: savedSnapshot,
+                  dirty: tab.content !== savedSnapshot,
+                  diskModifiedMs: newMtime ?? tab.diskModifiedMs,
+                  externalStatus: null,
+                  externalContent: undefined,
                 }
               : tab
           )
         );
         notify(t.toasts.savedSuccess);
+        if (
+          isTauri() &&
+          settings.builtinBrowserEnabled &&
+          rightPaneMode === 'browser' &&
+          projectServer?.running &&
+          [
+            'laravel',
+            'php',
+            'wordpress',
+            'docker',
+            'static',
+            'django',
+            'flask',
+            'fastapi',
+          ].includes(projectServer.kind || '')
+        ) {
+          browserNavAction('reload').catch(() => {});
+        }
       } catch (err) {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      } finally {
+        if (prevPath) savingPathsRef.current.delete(prevPath);
+        if (activeTab.filePath) savingPathsRef.current.delete(activeTab.filePath);
+        // Clear any Save-As path lock cleanly on next tick
+        window.setTimeout(() => {
+          savingPathsRef.current.clear();
+        }, 100);
       }
     },
-    [activeTab, notify, t.toasts.errorPrefix, t.toasts.savedSuccess]
+    [
+      activeTab,
+      notify,
+      t.toasts.errorPrefix,
+      t.toasts.savedSuccess,
+      settings.builtinBrowserEnabled,
+      rightPaneMode,
+      projectServer?.running,
+      projectServer?.kind,
+    ]
   );
 
   const handleCloseTab = useCallback(
@@ -387,9 +1285,9 @@ export function App() {
     setWorkspaceRoot(dir);
     setSidebarTab('files');
     setShowSidebar(true);
-    if (mode === 'basic') setMode('advanced');
+    if (mode !== 'advanced') handleModeChange('advanced');
     await refreshWorkspace(dir);
-  }, [mode, refreshWorkspace]);
+  }, [mode, handleModeChange, refreshWorkspace]);
 
   const handleCreateFileInFolder = useCallback(
     async (fileName: string) => {
@@ -398,7 +1296,9 @@ export function App() {
         const starter = `# ${fileName.replace(/\.md$/i, '')}\n\n`;
         const fullPath = await createFileInDir(workspaceRoot, fileName, starter);
         await refreshWorkspace(workspaceRoot);
-        const created = makeTab(fileName, starter, fullPath);
+        const syncRes = await checkFilesSync([fullPath]).catch(() => []);
+        const modifiedMs = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
+        const created = makeTab(fileName, starter, fullPath, modifiedMs);
         setTabs((prev) => [...prev, created]);
         setActiveTabId(created.id);
       } catch (err) {
@@ -432,10 +1332,10 @@ export function App() {
   }, [activeTab.content, cleanOptions, updateActiveContent, notify, t.toasts.aiCleaned]);
 
   const handleCopyRichText = useCallback(async () => {
-    const el = previewRef.current?.getRenderedElement();
-    if (!el) return;
-    const htmlStr = el.innerHTML;
-    const plainStr = el.innerText;
+    const htmlStr = await renderMarkdownToHtml(activeTab.content);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = htmlStr;
+    const plainStr = tmp.innerText || activeTab.content;
     try {
       if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
         await navigator.clipboard.write([
@@ -452,14 +1352,13 @@ export function App() {
       await navigator.clipboard.writeText(plainStr);
       notify(t.toasts.copiedRichText);
     }
-  }, [notify, t.toasts.copiedRichText]);
+  }, [activeTab.content, notify, t.toasts.copiedRichText]);
 
   const handleCopyHtml = useCallback(async () => {
-    const el = previewRef.current?.getRenderedElement();
-    if (!el) return;
-    await navigator.clipboard.writeText(el.innerHTML);
+    const htmlStr = await renderMarkdownToHtml(activeTab.content);
+    await navigator.clipboard.writeText(htmlStr);
     notify(t.toasts.copiedHtml);
-  }, [notify, t.toasts.copiedHtml]);
+  }, [activeTab.content, notify, t.toasts.copiedHtml]);
 
   const handlePasteHtmlAsMd = useCallback(async () => {
     try {
@@ -483,21 +1382,46 @@ export function App() {
   }, [notify, t.toasts.htmlPasted, t.toasts.noClipboardHtml]);
 
   const handleExportHtml = useCallback(async () => {
-    const el = previewRef.current?.getRenderedElement();
-    const htmlBody = el?.innerHTML || '';
+    const htmlBody = await renderMarkdownToHtml(activeTab.content);
     const full = exportStandaloneHtml(activeTab.title, htmlBody, theme, settings.customCss);
     const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '');
     const ok = await saveExportFile(full, `${baseName}.html`, 'HTML', ['html'], 'text/html');
     if (ok) notify(t.toasts.exportedSuccess);
-  }, [activeTab.title, theme, settings.customCss, notify, t.toasts.exportedSuccess]);
+  }, [activeTab.content, activeTab.title, theme, settings.customCss, notify, t.toasts.exportedSuccess]);
 
   const handleExportPdf = useCallback(() => {
     window.print();
   }, []);
 
-  // Toolbar Actions
+  // Toolbar Actions (routed to active pane: left CodeMirror OR right TipTap visual editor)
   const handleToolbarAction = useCallback(
     (action: string) => {
+      if (action === 'image') {
+        setShowImageModal(true);
+        return;
+      }
+      if (action === 'aiClean') {
+        handleAiClean();
+        return;
+      }
+      if (action === 'copyRich') {
+        handleCopyRichText();
+        return;
+      }
+      if (action === 'find') {
+        setShowFind((v) => !v);
+        return;
+      }
+
+      const useVisual =
+        layout === 'preview' ||
+        (layout === 'split' && (activePaneRef.current === 'visual' || previewRef.current?.isFocused()));
+
+      if (useVisual && previewRef.current) {
+        previewRef.current.applyFormat(action);
+        return;
+      }
+
       const ed = editorRef.current;
       switch (action) {
         case 'undo':
@@ -564,18 +1488,9 @@ export function App() {
         case 'callout':
           ed?.insertText('\n> [!NOTE]\n> Important note here.\n');
           break;
-        case 'aiClean':
-          handleAiClean();
-          break;
-        case 'copyRich':
-          handleCopyRichText();
-          break;
-        case 'find':
-          setShowFind((v) => !v);
-          break;
       }
     },
-    [handleAiClean, handleCopyRichText]
+    [layout, handleAiClean, handleCopyRichText]
   );
 
   // Snapshots
@@ -672,6 +1587,467 @@ export function App() {
     window.addEventListener('mouseup', onUp);
   };
 
+  const previewKind = useMemo(
+    () => getDocumentPreviewKind(activeTab.title, activeTab.filePath),
+    [activeTab.title, activeTab.filePath]
+  );
+
+  const buildExternalPreviewPayload = useCallback(async () => {
+    if (previewKind === 'webpage') {
+      return { bodyHtml: activeTab.content, isRawPage: true };
+    }
+    if (previewKind === 'code') {
+      return {
+        bodyHtml: `<pre><code>${escapeHtmlText(activeTab.content)}</code></pre>`,
+        isRawPage: false,
+      };
+    }
+    return {
+      bodyHtml: await renderMarkdownToHtml(activeTab.content),
+      isRawPage: false,
+    };
+  }, [previewKind, activeTab.content]);
+
+  // External Live Preview controller
+  const handleToggleExternalPreview = useCallback(async () => {
+    try {
+      if (externalPreviewUrl) {
+        await stopExternalPreview();
+        setExternalPreviewUrl(null);
+      } else {
+        const res = await startExternalPreview(settings.externalBrowserPort, true);
+        setExternalPreviewUrl(res.url);
+        const { bodyHtml, isRawPage } = await buildExternalPreviewPayload();
+        const docDir = activeTab.filePath
+          ? activeTab.filePath.replace(/[/\\][^/\\]+$/, '')
+          : workspaceRoot || null;
+        await updateExternalPreview({
+          title: activeTab.title,
+          bodyHtml,
+          theme,
+          customCss: settings.customCss,
+          docDir,
+          workspaceRoot: workspaceRoot || projectInfo?.rootPath || null,
+          isRawPage,
+        });
+        notify(t.toasts.externalPreviewStarted);
+      }
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    }
+  }, [
+    externalPreviewUrl,
+    settings.externalBrowserPort,
+    settings.customCss,
+    activeTab.title,
+    activeTab.filePath,
+    workspaceRoot,
+    projectInfo?.rootPath,
+    theme,
+    buildExternalPreviewPayload,
+    notify,
+    t.toasts.externalPreviewStarted,
+    t.toasts.errorPrefix,
+  ]);
+
+  // Push debounced HTML updates to external live preview server
+  useEffect(() => {
+    if (!externalPreviewUrl) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const { bodyHtml, isRawPage } = await buildExternalPreviewPayload();
+        if (cancelled) return;
+        const docDir = activeTab.filePath
+          ? activeTab.filePath.replace(/[/\\][^/\\]+$/, '')
+          : workspaceRoot || null;
+        await updateExternalPreview({
+          title: activeTab.title,
+          bodyHtml,
+          theme,
+          customCss: settings.customCss,
+          docDir,
+          workspaceRoot: workspaceRoot || projectInfo?.rootPath || null,
+          isRawPage,
+        });
+      } catch {
+        // ignore
+      }
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    externalPreviewUrl,
+    activeTab.title,
+    activeTab.filePath,
+    workspaceRoot,
+    projectInfo?.rootPath,
+    theme,
+    settings.customCss,
+    buildExternalPreviewPayload,
+  ]);
+
+  const refreshProjectInfo = useCallback(async (): Promise<ProjectInfo | null> => {
+    if (!isTauri()) {
+      setProjectInfo(null);
+      return null;
+    }
+    let info: ProjectInfo | null = null;
+    if (workspaceRoot) {
+      info = await inspectWorkspaceProject(workspaceRoot);
+    } else if (activeTab.filePath && /[/\\]/.test(activeTab.filePath)) {
+      info = await inspectProjectForPath(activeTab.filePath);
+    }
+    setProjectInfo(info);
+    if (info?.alreadyRunning && info.defaultUrl) {
+      setProjectServer((prev) => {
+        if (prev?.running && prev.rootPath === info.rootPath) return prev;
+        if (prev?.running && !prev.external) return prev;
+        return {
+          running: true,
+          starting: false,
+          external: true,
+          rootPath: info.rootPath,
+          kind: info.kind,
+          url: info.defaultUrl,
+          commandLabel: info.devCommandLabel,
+          logs: [`Connected to already-running server at ${info.defaultUrl}`],
+          error: null,
+        };
+      });
+    }
+    return info;
+  }, [workspaceRoot, activeTab.filePath]);
+
+  // Inspect project structure from workspace folder or active file path
+  useEffect(() => {
+    if (!isTauri()) {
+      setProjectInfo(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      let info: ProjectInfo | null = null;
+      if (workspaceRoot) {
+        info = await inspectWorkspaceProject(workspaceRoot);
+      } else if (activeTab.filePath && /[/\\]/.test(activeTab.filePath)) {
+        info = await inspectProjectForPath(activeTab.filePath);
+      }
+      if (!cancelled) {
+        setProjectInfo(info);
+        if (info?.alreadyRunning && info.defaultUrl) {
+          setProjectServer((prev) => {
+            if (prev?.running && prev.rootPath === info.rootPath) return prev;
+            if (prev?.running && !prev.external) return prev;
+            return {
+              running: true,
+              starting: false,
+              external: true,
+              rootPath: info.rootPath,
+              kind: info.kind,
+              url: info.defaultUrl,
+              commandLabel: info.devCommandLabel,
+              logs: [`Connected to already-running server at ${info.defaultUrl}`],
+              error: null,
+            };
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceRoot, activeTab.filePath]);
+
+  // Clear setup logs & feedback when switching projects
+  useEffect(() => {
+    setProjectSetupLogs([]);
+    setProjectSetupFeedback(null);
+    setProjectSetupActionId(null);
+  }, [projectInfo?.rootPath]);
+
+  const handleRefreshProjectInfo = useCallback(async () => {
+    setProjectRechecking(true);
+    try {
+      const info = await refreshProjectInfo();
+      if (!info?.diagnostics || info.diagnostics.length === 0) {
+        setProjectSetupLogs([]);
+        setProjectSetupFeedback(null);
+      }
+    } finally {
+      setProjectRechecking(false);
+    }
+  }, [refreshProjectInfo]);
+
+  const handleOpenProjectUrl = useCallback(
+    async (url: string, target: 'builtin' | 'external') => {
+      let targetUrl = url;
+      if (projectInfo?.kind === 'static' && activeTab.filePath && projectInfo.rootPath) {
+        try {
+          const parsed = new URL(url);
+          if (parsed.pathname === '/' || parsed.pathname === '') {
+            const normRoot = projectInfo.rootPath.replace(/\\/g, '/').replace(/\/+$/, '');
+            const normFile = activeTab.filePath.replace(/\\/g, '/');
+            if (
+              normFile.startsWith(`${normRoot}/`) &&
+              /\.(html?|htm)$/i.test(normFile)
+            ) {
+              const rel = normFile.slice(normRoot.length + 1);
+              if (rel && rel.toLowerCase() !== 'index.html') {
+                const encodedRel = rel.split('/').map(encodeURIComponent).join('/');
+                targetUrl = `${url.replace(/\/+$/, '')}/${encodedRel}`;
+              }
+            }
+          }
+        } catch {
+          // keep original url
+        }
+      }
+      if (target === 'external') {
+        try {
+          await openInExternalBrowser(targetUrl);
+        } catch (err) {
+          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        }
+        return;
+      }
+      if (mode === 'simple') handleModeChange('basic');
+      if (layout === 'editor') setLayout('split');
+      setSettings((s) => ({ ...s, builtinBrowserEnabled: true }));
+      setBrowserUrl(targetUrl);
+      setRightPaneMode('browser');
+    },
+    [
+      projectInfo?.kind,
+      projectInfo?.rootPath,
+      activeTab.filePath,
+      mode,
+      layout,
+      handleModeChange,
+      notify,
+      t.toasts.errorPrefix,
+    ]
+  );
+
+  const openProjectUrlRef = useRef(handleOpenProjectUrl);
+  openProjectUrlRef.current = handleOpenProjectUrl;
+
+  // Listen to project dev server status updates
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      try {
+        const initial = await getProjectDevServerStatus();
+        if (initial) setProjectServer(initial);
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<ProjectServerStatus>('project-server-update', (ev) => {
+          const st = ev.payload;
+          setProjectServer(st);
+          if (st?.url && pendingBrowseTargetRef.current) {
+            const target = pendingBrowseTargetRef.current;
+            pendingBrowseTargetRef.current = null;
+            openProjectUrlRef.current(st.url, target);
+            notify(t.toasts.devServerStarted);
+          } else if (st?.error && pendingBrowseTargetRef.current) {
+            pendingBrowseTargetRef.current = null;
+            notify(`${t.toasts.errorPrefix} ${st.error}`);
+          }
+        });
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, [notify, t.toasts.devServerStarted, t.toasts.errorPrefix]);
+
+  // Listen to project setup streaming logs
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<ProjectSetupProgress>('project-setup-progress', (ev) => {
+          const p = ev.payload;
+          if (!p) return;
+          if (p.line) {
+            setProjectSetupLogs((prev) => [...prev.slice(-150), p.line!]);
+          }
+          if (p.done) {
+            setProjectSetupBusy(false);
+            setProjectSetupActionId(null);
+            if (p.message) {
+              setProjectSetupFeedback({ ok: Boolean(p.ok), text: p.message });
+            }
+          }
+        });
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  const handleAssistProjectSetup = useCallback(
+    async (params: ProjectSetupActionParams) => {
+      if (params.action === 'open-url') {
+        try {
+          await assistProjectSetup(params);
+        } catch (err) {
+          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        }
+        return;
+      }
+
+      setProjectSetupBusy(true);
+      setProjectSetupActionId(`${params.diagId || params.action}:${params.action}`);
+      setProjectSetupLogs([]);
+      setProjectSetupFeedback(null);
+
+      try {
+        const res = await assistProjectSetup(params);
+        if (res.output && res.output.length > 0) {
+          setProjectSetupLogs((prev) => (prev.length > 0 ? prev : res.output));
+        }
+        setProjectSetupFeedback({ ok: res.ok, text: res.message });
+        if (res.ok) {
+          notify(res.message);
+          if (params.action !== 'run-terminal-command') {
+            const updated = await refreshProjectInfo();
+            if (!updated?.diagnostics || updated.diagnostics.length === 0) {
+              setProjectSetupLogs([]);
+              setProjectSetupFeedback(null);
+            }
+          }
+          if (params.action === 'launch-docker') {
+            window.setTimeout(() => {
+              void refreshProjectInfo();
+            }, 3000);
+          }
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        setProjectSetupFeedback({ ok: false, text: msg });
+        notify(`${t.toasts.errorPrefix} ${msg}`);
+      } finally {
+        setProjectSetupBusy(false);
+        setProjectSetupActionId(null);
+      }
+    },
+    [notify, refreshProjectInfo, t.toasts.errorPrefix]
+  );
+
+  const handleStartProjectAndBrowse = useCallback(
+    async (target: 'builtin' | 'external') => {
+      const root = projectInfo?.rootPath || workspaceRoot;
+      if (!root) return;
+      if (projectServer?.starting && projectServer.rootPath === root) {
+        pendingBrowseTargetRef.current = target;
+        return;
+      }
+      if (projectServer?.running && projectServer.rootPath === root && projectServer.url) {
+        await handleOpenProjectUrl(projectServer.url, target);
+        return;
+      }
+      try {
+        pendingBrowseTargetRef.current = target;
+        const st = await startProjectDevServer(root, projectInfo?.devScript);
+        setProjectServer(st);
+        if (st.url && pendingBrowseTargetRef.current) {
+          const dest = pendingBrowseTargetRef.current;
+          pendingBrowseTargetRef.current = null;
+          await handleOpenProjectUrl(st.url, dest);
+          notify(t.toasts.devServerStarted);
+        }
+      } catch (err) {
+        pendingBrowseTargetRef.current = null;
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [
+      projectInfo,
+      projectServer,
+      workspaceRoot,
+      handleOpenProjectUrl,
+      notify,
+      t.toasts.devServerStarted,
+      t.toasts.errorPrefix,
+    ]
+  );
+
+  const handleStopProjectServer = useCallback(async () => {
+    try {
+      pendingBrowseTargetRef.current = null;
+      const st = await stopProjectDevServer();
+      setProjectServer(st);
+      notify(t.toasts.devServerStopped);
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    }
+  }, [notify, t.toasts.devServerStopped, t.toasts.errorPrefix]);
+
+  const handleServeDistPreview = useCallback(
+    async (target: 'builtin' | 'external') => {
+      try {
+        const distPath = projectInfo?.distIndexPath;
+        let htmlContent = activeTab.content;
+        let docDir = activeTab.filePath
+          ? activeTab.filePath.replace(/[/\\][^/\\]+$/, '')
+          : workspaceRoot || null;
+        let title = activeTab.title;
+
+        if (distPath && distPath !== activeTab.filePath) {
+          const loaded = await readFileByPath(distPath);
+          htmlContent = loaded.content;
+          docDir = distPath.replace(/[/\\][^/\\]+$/, '');
+          title = loaded.name;
+        }
+
+        const res = await startExternalPreview(
+          settings.externalBrowserPort,
+          target === 'external'
+        );
+        await updateExternalPreview({
+          title,
+          bodyHtml: htmlContent,
+          theme,
+          customCss: settings.customCss,
+          docDir,
+          workspaceRoot: workspaceRoot || projectInfo?.rootPath || null,
+          isRawPage: true,
+        });
+        if (target === 'builtin' && res.url) {
+          await handleOpenProjectUrl(res.url, 'builtin');
+        } else if (target === 'external') {
+          notify(t.toasts.externalPreviewStarted);
+        }
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [
+      projectInfo,
+      activeTab.content,
+      activeTab.filePath,
+      activeTab.title,
+      workspaceRoot,
+      settings.externalBrowserPort,
+      settings.customCss,
+      theme,
+      handleOpenProjectUrl,
+      notify,
+      t.toasts.externalPreviewStarted,
+      t.toasts.errorPrefix,
+    ]
+  );
+
   // Global keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -688,6 +2064,9 @@ export function App() {
       } else if (meta && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         handleNewFile();
+      } else if (meta && e.key === ',') {
+        e.preventDefault();
+        setShowSettings((v) => !v);
       } else if (meta && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'p')) {
         e.preventDefault();
         setShowPalette((v) => !v);
@@ -699,43 +2078,157 @@ export function App() {
         toggleZenMode();
       } else if (meta && e.key === '\\') {
         e.preventDefault();
-        setMode((m) => (m === 'basic' ? 'advanced' : 'basic'));
+        const nextMode: AppMode =
+          mode === 'simple' ? 'basic' : mode === 'basic' ? 'advanced' : 'simple';
+        handleModeChange(nextMode);
       } else if (meta && e.key.toLowerCase() === 'b') {
         e.preventDefault();
-        editorRef.current?.wrapSelection('**', '**', 'bold');
+        handleToolbarAction('bold');
       } else if (meta && e.key.toLowerCase() === 'i') {
         e.preventDefault();
-        editorRef.current?.wrapSelection('*', '*', 'italic');
-      } else if (e.key === 'Escape' && zenMode) {
-        toggleZenMode();
+        handleToolbarAction('italic');
+      } else if (e.key === 'Escape') {
+        if (diffPreview) return;
+        if (showSettings) setShowSettings(false);
+        else if (zenMode) toggleZenMode();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleSave, handleOpenFile, handleNewFile, toggleZenMode, zenMode]);
+  }, [
+    mode,
+    handleModeChange,
+    handleSave,
+    handleOpenFile,
+    handleNewFile,
+    toggleZenMode,
+    zenMode,
+    showSettings,
+    diffPreview,
+    handleToolbarAction,
+  ]);
+
+  // Listen to native macOS/Win/Linux menu bar actions
+  const menuActionsRef = useRef<Record<string, () => void>>({});
+  menuActionsRef.current = {
+    'open-about': () => setShowAbout(true),
+    'open-settings': () => setShowSettings(true),
+    'new-file': handleNewFile,
+    'open-file': handleOpenFile,
+    'open-folder': handleOpenFolder,
+    save: () => handleSave(false),
+    'save-as': () => handleSave(true),
+    'export-html': handleExportHtml,
+    'export-pdf': handleExportPdf,
+    'close-tab': () => handleCloseTab(activeTab.id),
+    find: () => setShowFind((v) => !v),
+    'mode-simple': () => handleModeChange('simple'),
+    'mode-basic': () => handleModeChange('basic'),
+    'mode-advanced': () => handleModeChange('advanced'),
+    palette: () => setShowPalette((v) => !v),
+    'toggle-inspector': () => {
+      if (mode === 'simple') handleModeChange('basic');
+      setShowInspector((v) => !v);
+    },
+    'external-preview': handleToggleExternalPreview,
+    'toggle-zen': toggleZenMode,
+  };
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<string>('menu-action', (event) => {
+          const fn = menuActionsRef.current[event.payload];
+          fn?.();
+        });
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   // Command Palette commands
   const paletteCommands: PaletteCommand[] = useMemo(() => {
     const list: PaletteCommand[] = [
       {
-        id: 'mode-toggle',
+        id: 'open-settings',
+        category: 'Settings',
+        label: t.actions.settings,
+        shortcut: formatShortcut('⌘,'),
+        action: () => setShowSettings(true),
+      },
+      {
+        id: 'mode-simple',
         category: 'Mode',
-        label: mode === 'basic' ? t.modes.advanced : t.modes.basic,
-        shortcut: '⌘\\',
-        action: () => setMode((m) => (m === 'basic' ? 'advanced' : 'basic')),
+        label: t.modes.simple,
+        action: () => handleModeChange('simple'),
+      },
+      {
+        id: 'mode-basic',
+        category: 'Mode',
+        label: t.modes.basic,
+        action: () => handleModeChange('basic'),
+      },
+      {
+        id: 'mode-advanced',
+        category: 'Mode',
+        label: t.modes.advanced,
+        action: () => handleModeChange('advanced'),
+      },
+      {
+        id: 'toggle-right-browser',
+        category: 'Browser',
+        label:
+          rightPaneMode === 'browser' ? t.browser.modePreview : t.browser.modeBrowser,
+        action: () => {
+          if (mode === 'simple') handleModeChange('basic');
+          if (layout === 'editor') setLayout('split');
+          setSettings((s) => ({ ...s, builtinBrowserEnabled: true }));
+          setRightPaneMode((m) => (m === 'browser' ? 'markdown' : 'browser'));
+        },
+      },
+      {
+        id: 'toggle-external-preview',
+        category: 'Browser',
+        label: externalPreviewUrl
+          ? t.actions.stopExternalPreview
+          : t.actions.openExternalPreview,
+        action: handleToggleExternalPreview,
+      },
+      {
+        id: 'ai-chat-panel',
+        category: 'AI',
+        label: t.actions.optionsPanel,
+        action: () => {
+          if (mode === 'simple') handleModeChange('basic');
+          setInspectorTab('chat');
+          setShowInspector((v) => !v);
+        },
+      },
+      {
+        id: 'insert-image',
+        category: 'Edit',
+        label: t.toolbar.image,
+        action: () => setShowImageModal(true),
       },
       {
         id: 'new-file',
         category: 'File',
         label: t.actions.newFile,
-        shortcut: '⌘N',
+        shortcut: formatShortcut('⌘N'),
         action: handleNewFile,
       },
       {
         id: 'open-file',
         category: 'File',
         label: t.actions.openFile,
-        shortcut: '⌘O',
+        shortcut: formatShortcut('⌘O'),
         action: handleOpenFile,
       },
       {
@@ -748,14 +2241,14 @@ export function App() {
         id: 'save-file',
         category: 'File',
         label: t.actions.save,
-        shortcut: '⌘S',
+        shortcut: formatShortcut('⌘S'),
         action: () => handleSave(false),
       },
       {
         id: 'save-as',
         category: 'File',
         label: t.actions.saveAs,
-        shortcut: '⌘⇧S',
+        shortcut: formatShortcut('⌘⇧S'),
         action: () => handleSave(true),
       },
       {
@@ -792,14 +2285,14 @@ export function App() {
         id: 'zen',
         category: 'View',
         label: zenMode ? t.actions.exitZen : t.actions.zenMode,
-        shortcut: '⌘⇧F',
+        shortcut: formatShortcut('⌘⇧F'),
         action: toggleZenMode,
       },
       {
         id: 'find',
         category: 'Edit',
         label: t.actions.findReplace,
-        shortcut: '⌘F',
+        shortcut: formatShortcut('⌘F'),
         action: () => setShowFind(true),
       },
       {
@@ -831,10 +2324,15 @@ export function App() {
     return list;
   }, [
     mode,
+    layout,
+    rightPaneMode,
+    externalPreviewUrl,
     t,
     locale,
     zenMode,
     workspaceEntries,
+    handleModeChange,
+    handleToggleExternalPreview,
     handleNewFile,
     handleOpenFile,
     handleOpenFolder,
@@ -858,17 +2356,40 @@ export function App() {
     if (isTauri()) return;
     e.preventDefault();
     setIsDraggingFile(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const created = makeTab(file.name, text, file.name);
-    setTabs((prev) => [...prev, created]);
-    setActiveTabId(created.id);
+    const files = Array.from(e.dataTransfer.files || []);
+    for (const file of files) {
+      if (file.type.startsWith('image/')) {
+        await handleImageFileInput(file);
+      } else {
+        const text = await file.text();
+        const created = makeTab(file.name, text, file.name);
+        setTabs((prev) => [...prev, created]);
+        setActiveTabId(created.id);
+      }
+    }
   };
+
+  const anyModalOpen =
+    showSettings ||
+    showAbout ||
+    showImageModal ||
+    showPalette ||
+    Boolean(diffPreview) ||
+    isDraggingFile;
+  const showRightBrowser = settings.builtinBrowserEnabled && rightPaneMode === 'browser';
+  const nativeBrowserVisible =
+    layout !== 'editor' &&
+    mode !== 'simple' &&
+    !zenMode &&
+    showRightBrowser &&
+    !anyModalOpen;
+  const showRightPaneHeader =
+    settings.builtinBrowserEnabled || settings.externalBrowserPreviewEnabled;
 
   return (
     <div
       className={`app-shell mode-${mode} ${zenMode ? 'is-zen' : ''}`}
+      style={syntaxCssVars}
       onDragOver={(e) => {
         if (!isTauri()) {
           e.preventDefault();
@@ -885,7 +2406,7 @@ export function App() {
           <TopBar
             t={t}
             mode={mode}
-            onModeChange={setMode}
+            onModeChange={handleModeChange}
             layout={layout}
             onLayoutChange={setLayout}
             theme={theme}
@@ -904,11 +2425,14 @@ export function App() {
             onExportPdf={handleExportPdf}
             onOpenCommandPalette={() => setShowPalette(true)}
             onToggleZen={toggleZenMode}
+            onOpenSettings={() => setShowSettings(true)}
             onOpenAbout={() => setShowAbout(true)}
             isDirty={activeTab.dirty}
             activeTitle={activeTab.title}
           />
-          <FormatToolbar t={t} mode={mode} onAction={handleToolbarAction} />
+          {mode !== 'simple' && (
+            <FormatToolbar t={t} mode={mode} onAction={handleToolbarAction} />
+          )}
         </>
       )}
 
@@ -947,6 +2471,18 @@ export function App() {
             currentLine={activeTab.cursorLine}
             onJumpToHeading={handleJumpToHeading}
             onInsertSnippet={(content) => editorRef.current?.insertText(content)}
+            projectInfo={projectInfo}
+            projectServer={projectServer}
+            setupBusy={projectSetupBusy}
+            setupActionId={projectSetupActionId}
+            setupLogs={projectSetupLogs}
+            setupFeedback={projectSetupFeedback}
+            recheckingEnv={projectRechecking}
+            onStartProjectAndBrowse={handleStartProjectAndBrowse}
+            onStopProjectServer={handleStopProjectServer}
+            onOpenProjectUrl={handleOpenProjectUrl}
+            onAssistProjectSetup={handleAssistProjectSetup}
+            onRecheckProjectEnv={handleRefreshProjectInfo}
           />
         )}
 
@@ -961,6 +2497,73 @@ export function App() {
             onReplaceAllText={updateActiveContent}
           />
 
+          {activeTab.externalStatus && (
+            <div
+              className={`external-change-banner ${
+                activeTab.externalStatus === 'deleted' ? 'is-deleted' : ''
+              }`}
+              role="status"
+            >
+              <span className="external-change-banner-msg">
+                <AlertTriangle size={15} />
+                <span>
+                  {activeTab.externalStatus === 'deleted'
+                    ? t.externalChange.deletedTitle
+                    : t.externalChange.modifiedTitle}
+                </span>
+              </span>
+              <div className="external-change-banner-actions">
+                {activeTab.externalStatus === 'modified' ? (
+                  <>
+                    <button
+                      type="button"
+                      className="mini-pill-btn is-primary"
+                      onClick={() => void handleReloadFromDisk(activeTab.id)}
+                    >
+                      <RefreshCw size={12} />
+                      <span>{t.externalChange.reloadBtn}</span>
+                    </button>
+                    {activeTab.externalContent !== undefined && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn"
+                        onClick={() => handleCompareExternalDiff(activeTab)}
+                      >
+                        <GitCompare size={12} />
+                        <span>{t.externalChange.compareBtn}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="mini-pill-btn"
+                      onClick={() => handleKeepMine(activeTab.id)}
+                    >
+                      <span>{t.externalChange.keepMineBtn}</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="mini-pill-btn is-primary"
+                      onClick={() => void handleSave(false)}
+                    >
+                      <Save size={12} />
+                      <span>{t.externalChange.saveAgainBtn}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mini-pill-btn"
+                      onClick={() => handleKeepAsDraft(activeTab.id)}
+                    >
+                      <span>{t.externalChange.keepDraftBtn}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className={`panes-container layout-${layout}`}>
             {layout !== 'preview' && (
               <div
@@ -970,8 +2573,13 @@ export function App() {
                 <EditorPane
                   ref={editorRef}
                   docId={activeTab.id}
+                  fileName={activeTab.title}
                   value={activeTab.content}
                   onChange={updateActiveContent}
+                  onFocusPane={() => {
+                    activePaneRef.current = 'code';
+                    setActivePane('code');
+                  }}
                   onCursorChange={(line, col) =>
                     setTabs((prev) =>
                       prev.map((tb) =>
@@ -983,6 +2591,9 @@ export function App() {
                   }
                   onScrollRatio={handleEditorScroll}
                   onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
+                  onLineCopyNotify={() => notify(t.toasts.copiedLine)}
+                  onImagePasteOrDrop={handleImageFileInput}
+                  syncHighlightRange={activePane === 'visual' ? previewSyncLineRange : null}
                   theme={theme}
                   settings={settings}
                 />
@@ -1005,35 +2616,162 @@ export function App() {
                   layout === 'split' ? { width: `${(1 - splitRatio) * 100}%` } : undefined
                 }
               >
-                <PreviewPane
-                  ref={previewRef}
-                  markdown={activeTab.content}
-                  theme={theme}
-                  settings={settings}
-                  onToggleTaskLine={(line) =>
-                    updateActiveContent(toggleTaskCheckboxAtLine(activeTab.content, line))
-                  }
-                  onJumpToLine={
-                    mode === 'advanced'
-                      ? (line) => editorRef.current?.scrollToLine(line)
-                      : undefined
-                  }
-                  onScrollRatio={handlePreviewScroll}
-                  onCopyNotify={(kind) =>
-                    notify(kind === 'svg' ? t.toasts.copiedSvg : t.toasts.copiedCode)
-                  }
-                />
+                {showRightPaneHeader && (
+                  <div className="right-pane-header">
+                    {settings.builtinBrowserEnabled ? (
+                      <div className="segmented-control">
+                        <button
+                          type="button"
+                          className={`seg-btn ${rightPaneMode === 'markdown' ? 'is-active' : ''}`}
+                          onClick={() => setRightPaneMode('markdown')}
+                        >
+                          <Eye size={13} />
+                          <span>{t.browser.modePreview}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`seg-btn ${rightPaneMode === 'browser' ? 'is-active' : ''}`}
+                          onClick={() => setRightPaneMode('browser')}
+                        >
+                          <Globe size={13} />
+                          <span>{t.browser.modeBrowser}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="right-pane-label">{t.browser.modePreview}</span>
+                    )}
+
+                    {settings.externalBrowserPreviewEnabled && (
+                      <button
+                        type="button"
+                        className={`mini-pill-btn ${externalPreviewUrl ? 'is-active' : ''}`}
+                        onClick={handleToggleExternalPreview}
+                        title={
+                          externalPreviewUrl
+                            ? externalPreviewUrl
+                            : t.browser.externalLiveTitle
+                        }
+                      >
+                        {externalPreviewUrl ? <Square size={11} /> : <ExternalLink size={12} />}
+                        <span>
+                          {externalPreviewUrl
+                            ? t.browser.externalStopBtn
+                            : t.browser.externalLiveBtn}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                <div
+                  className="right-pane-body"
+                  style={{ display: showRightBrowser ? 'none' : 'flex' }}
+                >
+                  {previewKind === 'webpage' ? (
+                    <WebPagePreviewPane
+                      t={t}
+                      locale={locale}
+                      fileName={activeTab.title}
+                      docPath={activeTab.filePath}
+                      workspaceRoot={workspaceRoot || projectInfo?.rootPath}
+                      content={activeTab.content}
+                      projectInfo={projectInfo}
+                      projectServer={projectServer}
+                      setupBusy={projectSetupBusy}
+                      setupActionId={projectSetupActionId}
+                      setupLogs={projectSetupLogs}
+                      setupFeedback={projectSetupFeedback}
+                      recheckingEnv={projectRechecking}
+                      onStartProjectAndBrowse={handleStartProjectAndBrowse}
+                      onStopProjectServer={handleStopProjectServer}
+                      onOpenProjectUrl={handleOpenProjectUrl}
+                      onServeDistPreview={handleServeDistPreview}
+                      onAssistProjectSetup={handleAssistProjectSetup}
+                      onRecheckProjectEnv={handleRefreshProjectInfo}
+                    />
+                  ) : previewKind === 'code' ? (
+                    <CodePreviewPane
+                      t={t}
+                      locale={locale}
+                      fileName={activeTab.title}
+                      content={activeTab.content}
+                      activeLine={activeTab.cursorLine}
+                      settings={settings}
+                      onCopyNotify={() => notify(t.toasts.copiedCode)}
+                      onOpenBuiltinBrowser={() => {
+                        setSettings((s) => ({ ...s, builtinBrowserEnabled: true }));
+                        setRightPaneMode('browser');
+                      }}
+                      projectInfo={projectInfo}
+                      projectServer={projectServer}
+                      setupBusy={projectSetupBusy}
+                      setupActionId={projectSetupActionId}
+                      setupLogs={projectSetupLogs}
+                      setupFeedback={projectSetupFeedback}
+                      recheckingEnv={projectRechecking}
+                      onStartProjectAndBrowse={handleStartProjectAndBrowse}
+                      onStopProjectServer={handleStopProjectServer}
+                      onOpenProjectUrl={handleOpenProjectUrl}
+                      onAssistProjectSetup={handleAssistProjectSetup}
+                      onRecheckProjectEnv={handleRefreshProjectInfo}
+                    />
+                  ) : (
+                    <PreviewPane
+                      ref={previewRef}
+                      docId={activeTab.id}
+                      markdown={activeTab.content}
+                      docPath={activeTab.filePath}
+                      theme={theme}
+                      settings={settings}
+                      onMarkdownChange={updateActiveContent}
+                      onFocusPane={() => {
+                        activePaneRef.current = 'visual';
+                        setActivePane('visual');
+                      }}
+                      onScrollRatio={handlePreviewScroll}
+                      onCopyNotify={(kind) =>
+                        notify(kind === 'svg' ? t.toasts.copiedSvg : t.toasts.copiedCode)
+                      }
+                      onImagePasteOrDrop={handleImageFileInput}
+                      activePane={activePane}
+                      editorSyncLine={activeTab.cursorLine}
+                      onActiveBlockLinesChange={setPreviewSyncLineRange}
+                    />
+                  )}
+                </div>
+
+                {showRightBrowser && (
+                  <RightBrowserPane
+                    t={t}
+                    locale={locale}
+                    url={browserUrl}
+                    onUrlChange={setBrowserUrl}
+                    visible={nativeBrowserVisible}
+                    projectInfo={projectInfo}
+                    projectServer={projectServer}
+                    setupBusy={projectSetupBusy}
+                    setupActionId={projectSetupActionId}
+                    setupLogs={projectSetupLogs}
+                    setupFeedback={projectSetupFeedback}
+                    recheckingEnv={projectRechecking}
+                    onStartProjectServer={() => handleStartProjectAndBrowse('builtin')}
+                    onStopProjectServer={handleStopProjectServer}
+                    onAssistProjectSetup={handleAssistProjectSetup}
+                    onRecheckProjectEnv={handleRefreshProjectInfo}
+                  />
+                )}
               </div>
             )}
           </div>
         </div>
 
-        {mode === 'advanced' && showInspector && !zenMode && (
+        {showInspector && !zenMode && mode !== 'simple' && (
           <InspectorDrawer
             t={t}
             activeTab={inspectorTab}
             onTabChange={setInspectorTab}
             markdown={activeTab.content}
+            activeDocTitle={activeTab.title}
             savedContent={activeTab.savedContent}
             stats={stats}
             snapshots={activeTab.snapshots}
@@ -1049,6 +2787,48 @@ export function App() {
             onUpdateMarkdown={updateActiveContent}
             settings={settings}
             onSettingsChange={setSettings}
+            aiConfig={aiConfig}
+            onAiConfigChange={setAiConfig}
+            onInsertToEditor={(text) => {
+              editorRef.current?.insertText(text);
+              notify(t.toasts.aiCleaned);
+            }}
+            onReplaceDocument={(text, createSnapshot) => {
+              setTabs((prev) =>
+                prev.map((tab) => {
+                  if (tab.id !== activeTab.id) return tab;
+                  const snap: Snapshot | null = createSnapshot
+                    ? {
+                        id: `snap-${Date.now()}`,
+                        label: `AI Pre-Apply (${new Date().toLocaleTimeString()})`,
+                        content: tab.content,
+                        timestamp: Date.now(),
+                      }
+                    : null;
+                  return {
+                    ...tab,
+                    content: text,
+                    dirty: text !== tab.savedContent,
+                    snapshots: snap ? [snap, ...tab.snapshots] : tab.snapshots,
+                    updatedAt: Date.now(),
+                  };
+                })
+              );
+              notify(t.toasts.aiCleaned);
+            }}
+            onCopyAiReply={async (text) => {
+              await navigator.clipboard.writeText(text);
+              notify(t.toasts.copiedMarkdown);
+            }}
+            workspaceRoot={workspaceRoot}
+            onWorkspaceRefresh={() => workspaceRoot && refreshWorkspace(workspaceRoot)}
+            onFileWritten={(relPath) => {
+              notify(`${t.toasts.folderFileWritten}: ${relPath}`);
+              void syncOpenTabsWithDisk();
+            }}
+            onCliTurnComplete={() => void syncOpenTabsWithDisk()}
+            onRequestDiffPreview={setDiffPreview}
+            onOpenFullSettings={() => setShowSettings(true)}
           />
         )}
       </div>
@@ -1059,6 +2839,7 @@ export function App() {
           mode={mode}
           isDirty={activeTab.dirty}
           filePath={activeTab.filePath}
+          autoSaveEnabled={settings.autoSaveEnabled}
           stats={stats}
           cursorLine={activeTab.cursorLine}
           cursorCol={activeTab.cursorCol}
@@ -1078,6 +2859,34 @@ export function App() {
       />
 
       <AboutModal t={t} open={showAbout} onClose={() => setShowAbout(false)} />
+
+      <SettingsModal
+        t={t}
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        locale={locale}
+        onLocaleChange={setLocale}
+        theme={theme}
+        onThemeChange={setTheme}
+        settings={settings}
+        onSettingsChange={setSettings}
+        externalPreviewUrl={externalPreviewUrl}
+        onToggleExternalPreview={handleToggleExternalPreview}
+      />
+
+      <ImageModal
+        t={t}
+        open={showImageModal}
+        docPath={activeTab.filePath}
+        onClose={() => setShowImageModal(false)}
+        onInsert={(src, alt) => insertImageIntoActivePane(src, alt)}
+      />
+
+      <AiDiffPreviewModal
+        t={t}
+        request={diffPreview}
+        onClose={() => setDiffPreview(null)}
+      />
 
       {isDraggingFile && (
         <div className="drop-overlay">

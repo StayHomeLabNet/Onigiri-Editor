@@ -1,13 +1,15 @@
 import type { Translations } from './types';
 
 export const en: Translations = {
-  appName: 'Onigiri-Markdown',
-  versionLabel: 'v0.1.0',
+  appName: 'Onigiri Editor',
+  versionLabel: 'v1.0.0',
   modes: {
+    simple: 'Simple',
     basic: 'Basic',
     advanced: 'Advanced',
-    basicHint: 'Clean, distraction-free writing & live preview',
-    advancedHint: 'Multi-tab workspace, outline, AI toolkit, diffs & customization',
+    simpleHint: 'Ultra-minimal single-pane editor for fast, distraction-free writing',
+    basicHint: 'Clean writing, bidirectional live preview & AI chat',
+    advancedHint: 'Multi-tab workspace, folder tree, AI folder integration & tools',
   },
   layouts: {
     editor: 'Editor',
@@ -43,15 +45,19 @@ export const en: Translations = {
     findReplace: 'Find & Replace',
     zenMode: 'Zen Mode',
     exitZen: 'Exit Zen Mode',
-    inspector: 'Inspector',
+    inspector: 'Options',
+    optionsPanel: 'Options / AI Chat',
     sidebar: 'Sidebar',
-    about: 'About Onigiri-Markdown',
+    settings: 'Settings',
+    about: 'About Onigiri Editor',
     close: 'Close',
     cancel: 'Cancel',
     apply: 'Apply',
     reset: 'Reset',
     undo: 'Undo',
     redo: 'Redo',
+    openExternalPreview: 'Live Preview in External Browser',
+    stopExternalPreview: 'Stop Live Server',
   },
   toolbar: {
     heading1: 'Heading 1',
@@ -63,6 +69,7 @@ export const en: Translations = {
     inlineCode: 'Inline Code',
     codeBlock: 'Code Block',
     link: 'Link',
+    image: 'Insert Image',
     bulletList: 'Bullet List',
     numberedList: 'Numbered List',
     taskList: 'Task List',
@@ -79,7 +86,7 @@ export const en: Translations = {
     outline: 'Outline',
     snippets: 'Snippets',
     noFolder: 'No folder opened',
-    openFolderPrompt: 'Open a folder containing Markdown files to browse the file tree and search across notes.',
+    openFolderPrompt: 'Open a folder containing Markdown files to browse files, search notes, and use AI folder tools.',
     chooseFolder: 'Choose Folder',
     filterFiles: 'Filter files...',
     searchContent: 'Full-Text Search',
@@ -92,7 +99,8 @@ export const en: Translations = {
     insertSnippet: 'Click to insert at cursor',
   },
   inspector: {
-    ai: 'AI Tools',
+    chat: 'AI Chat',
+    ai: 'Formatter',
     stats: 'Stats',
     diff: 'History',
     frontmatter: 'Metadata',
@@ -167,6 +175,214 @@ export const en: Translations = {
       wordGoal: 'Writing Goal (words/chars, 0 = off)',
       customCss: 'Custom Preview CSS',
       customCssPlaceholder: '.markdown-body h1 { color: #6366f1; }',
+      activeLineSyncHighlight: 'Highlight matching line/block in opposite pane while editing',
+      oeditLineCopyEnabled: 'Smart Line Copy (copy full line on ⌘+C / Ctrl+C without selection)',
+      oeditLineCopyTrigger: 'Line Copy Trigger',
+      triggerEolOnly: 'End of line only',
+      triggerAnyEmptySel: 'Anywhere on line (when no selection)',
+      oeditLineCopyIncludeNewline: 'Include trailing newline (\\n) when copying line',
+      syntaxPreset: 'Syntax Highlighting Preset',
+      syntaxResetBtn: 'Reset to Preset Colors',
+      syntaxColorsTitle: 'Custom Token Colors',
+      syntaxTokens: {
+        keyword: 'Keywords (if / function)',
+        string: 'Strings ("text")',
+        number: 'Numbers & Booleans',
+        comment: 'Comments',
+        function: 'Functions & Methods',
+        type: 'Types & Classes',
+        variable: 'Variables & Identifiers',
+        operator: 'Operators & Punctuation',
+        tag: 'HTML / JSX Tags',
+        property: 'Properties & Attributes',
+      },
+      aiFolderMode: 'AI Folder Access (Advanced Mode)',
+      aiFolderModes: {
+        disabled: 'Disabled (Active document only)',
+        readOnly: 'Read-Only (Reference folder files)',
+        readWriteApprove: 'Read + Write (Apply after approval)',
+        cliDirect: 'CLI Direct Workspace Write (Codex / Claude / Gemini)',
+      },
+      builtinBrowserEnabled: 'Enable built-in Web Browser switcher in right pane',
+      builtinBrowserDefaultUrl: 'Built-in Browser Default URL',
+      externalBrowserPreviewEnabled: 'Enable External Browser Live Preview (Chrome / Safari / Edge)',
+      externalBrowserPort: 'Live Preview Local Port (0 = auto)',
+      restoreSessionEnabled: 'Restore previous tabs, folder & unsaved drafts on startup',
+      autoSaveEnabled: 'Auto-save modified files to disk (1.5s delay, pauses on conflict)',
+    },
+  },
+  settingsModal: {
+    title: 'Settings (Onigiri Editor)',
+    tabGeneral: 'General & View',
+    tabEditor: 'Editor & Line Copy',
+    tabSyntax: 'Syntax Colors',
+    tabIntegrations: 'AI & Browser',
+    localeLabel: 'UI Language (syncs Menu Bar)',
+    themeLabel: 'Color Theme',
+    openInSidebarHint: 'Settings stay in sync with the right Options drawer (press ⌘ + , anytime to open).',
+    externalPreviewCrossPlatformNote:
+      'External Browser Live Preview (local HTTP + auto-reload) behaves identically on macOS, Windows, and Linux.',
+  },
+  browser: {
+    modePreview: 'Preview',
+    modeBrowser: 'Web Browser',
+    back: 'Back',
+    forward: 'Forward',
+    reload: 'Reload',
+    urlPlaceholder: 'Enter URL or search query and press Enter...',
+    go: 'Go',
+    openExternal: 'Open in External Browser',
+    externalLiveTitle: 'Open auto-refreshing live preview in external browser',
+    externalLiveBtn: 'External Browser',
+    externalStopBtn: 'Stop Live',
+    webOnlyHint: 'Tauri native multi-WebView runs in the desktop app (fallback frame shown in web mode).',
+    htmlLiveLabel: 'HTML Live Page Preview',
+    svgLiveLabel: 'SVG Live Preview',
+    viewportFull: 'Full Width',
+    viewportMobile: 'Mobile (390px)',
+    codePreviewLabel: 'Code Preview (Synced Line)',
+    phpServerHint: 'PHP requires a local server (e.g. http://localhost:8000) to execute and render.',
+    openBuiltinBrowserBtn: 'Open Built-in Browser',
+    platformNoteWebKit:
+      'Built-in Browser uses macOS WebKit (WKWebView). Use "Open in External Browser" if a site blocks embedding.',
+    platformNoteWebView2:
+      'On Windows, Built-in Browser uses Microsoft Edge WebView2. If rendering/HiDPI looks off (or WebView2 Runtime is missing on Windows 10), use External Browser or External Live Preview.',
+    platformNoteWebKitGtk:
+      'On Linux, Built-in Browser uses WebKitGTK. If Wayland or GPU drivers cause visual quirks, we recommend using External Browser or External Live Preview.',
+    browserErrorRecoveryWindows:
+      'On Windows, this can happen if Microsoft Edge WebView2 Runtime is missing/outdated or the local server is not running yet. If Retry fails, open it in External Browser.',
+    browserErrorRecoveryLinux:
+      'On Linux, this can be caused by WebKitGTK / Wayland compatibility or an unreachable server. If Retry fails, open it in External Browser.',
+  },
+  project: {
+    detectedLabel: 'Project Integration',
+    startAndBrowse: 'Start Dev Server & Open Browser',
+    startServer: 'Start Server',
+    stopServer: 'Stop Server',
+    disconnectServer: 'Disconnect',
+    startingServer: 'Starting server...',
+    externalServerLabel: 'External Server',
+    openInBuiltin: 'Open Built-in Browser',
+    openInExternal: 'External Browser',
+    previewDistBtn: 'Serve & Preview dist/',
+    openDistSource: 'Open dist/index.html',
+    spaNeedsDevTitle: 'App Project Entry HTML Detected',
+    spaNeedsDevDesc: 'This page loads Vite / TypeScript / Tailwind modules. Start the dev server to preview live with HMR in the built-in browser.',
+    serverRunningLabel: 'Running',
+    serverStoppedLabel: 'Stopped',
+    distNote: 'You can also serve and preview the built dist/ output over local HTTP.',
+    retryLoad: 'Retry',
+    browserErrorHint: 'Failed to initialize or load the page in the built-in browser.',
+    setupRequiredTitle: 'Environment Check & Setup',
+    setupWarningTitle: 'Environment Notes',
+    recheckEnvBtn: 'Re-check Environment',
+    recheckingEnv: 'Checking...',
+    runningSetup: 'Running setup...',
+    openTerminalBtn: 'Run in Terminal',
+    openDownloadPageBtn: 'Download Page',
+    copyCmdBtn: 'Copy Command',
+    showLogsBtn: 'Show Logs',
+    hideLogsBtn: 'Hide Logs',
+    terminalOpenedMsg: 'Opened setup in Terminal. Click Re-check Environment once complete.',
+    platformNoteWindows:
+      'Windows tip: Click "Re-check Environment" after setup. If a newly added tool on PATH is not recognized yet, restart Onigiri Editor once (if winget is missing, the official download page opens instead).',
+    platformNoteLinux:
+      'Linux tip: Installing packages or starting Docker in Terminal prompts for your sudo password. For native Docker Engine, add your user to the docker group (sudo usermod -aG docker $USER) and re-login.',
+  },
+  imageModal: {
+    title: 'Insert Image',
+    tabFile: 'Local File',
+    tabUrl: 'Image URL',
+    chooseFile: 'Choose Image File...',
+    selectedFile: 'Selected file',
+    urlLabel: 'Image URL or Path',
+    urlPlaceholder: 'https://example.com/image.png or ./assets/photo.png',
+    altLabel: 'Alt Text',
+    altPlaceholder: 'Image description (optional)',
+    insertBtn: 'Insert Image',
+    dropTip: 'Tip: You can also drag & drop image files directly onto the editor or preview pane, or paste images from the clipboard.',
+  },
+  aiChat: {
+    title: 'AI Chat Assistant',
+    providerLabel: 'Provider',
+    catSubscription: 'Subscription CLIs',
+    catCloudApi: 'Cloud APIs',
+    catLocal: 'Local AI',
+    configToggle: 'Connection Settings',
+    detectRefresh: 'Re-detect',
+    detected: 'Detected',
+    notFound: 'Not found',
+    running: 'Running',
+    offline: 'Offline',
+    modelLabel: 'Model',
+    modelShortLabel: 'Model',
+    defaultModelOption: 'Default (CLI config)',
+    customModelOption: 'Enter custom model...',
+    modelPlaceholder: 'e.g. gpt-4.1 / claude-sonnet-4-5 / llama3.2',
+    apiKeyLabel: 'API Key',
+    apiKeyPlaceholder: 'sk-... / AIza...',
+    baseUrlLabel: 'Base URL',
+    customCliLabel: 'Custom CLI Command',
+    customCliHint: 'e.g. my-agent --prompt {prompt} (uses stdin if {prompt} is omitted)',
+    refreshModels: 'Refresh Models',
+    loginNeeded: 'Login required',
+    setupGuideTitle: 'AI Connection Assistant',
+    setupGuideBtn: 'Connection Help',
+    availableSwitchTitle: 'Available AI connections found',
+    switchToProvider: 'Switch to',
+    notInstalledCli: 'CLI was not found on PATH.',
+    notLoggedInCli: 'CLI is installed, but sign-in is required.',
+    ollamaNotRunningDesc: 'Ollama is installed, but its local server is not running.',
+    ollamaNoModelsDesc: 'Ollama is running, but no models are pulled yet.',
+    ollamaNotInstalledDesc: 'Install Ollama to run local models privately.',
+    lmstudioNotRunningDesc: 'LM Studio local server (127.0.0.1:1234) is not running.',
+    apiKeyMissingDesc: 'Enter your API key below to start using this provider.',
+    customCliMissingDesc: 'Configure a custom CLI command in Connection Settings.',
+    startOllamaBtn: 'Start Ollama',
+    startingOllama: 'Starting Ollama...',
+    openLmStudioBtn: 'Open LM Studio',
+    openTerminalSetupBtn: 'Setup in Terminal',
+    openTerminalLoginBtn: 'Sign in via Terminal',
+    pullLlamaBtn: 'Pull llama3.2 (Terminal)',
+    pullQwenBtn: 'Pull qwen2.5:7b (Terminal)',
+    downloadOllamaBtn: 'Download Ollama',
+    getApiKeyBtn: 'Get API Key',
+    copyCommandBtn: 'Copy Command',
+    commandCopied: 'Command copied',
+    testConnectionBtn: 'Test Connection',
+    testingConnection: 'Testing...',
+    connectionOk: 'Connected successfully',
+    nodeRequiredHint: 'Node.js (npm) is required to install this CLI. "Setup in Terminal" can auto-install Node.js (Homebrew on macOS, winget on Windows, or your Linux package manager), or you can download Node.js directly below.',
+    downloadNodeBtn: 'Download Node.js',
+    platformNoteWindows:
+      'Windows tip: Click "Re-detect" after setup. If a newly installed CLI on PATH is not recognized yet, restart Onigiri Editor once.',
+    platformNoteLinux:
+      'Linux tip: If global package installation requires elevated permissions, follow the sudo prompt in the opened Terminal and click "Re-detect" afterward.',
+    includeDoc: 'Include current document context',
+    includeFolder: 'Include open folder context',
+    folderBadgeDisabled: 'Folder AI: OFF',
+    folderBadgeRead: 'Folder: Read',
+    folderBadgeApprove: 'Folder: Propose & Apply',
+    folderBadgeCliDirect: 'Folder: CLI Direct Write',
+    applyFileBtn: 'Write to Folder',
+    appliedFileBtn: 'Written',
+    clearChat: 'Clear',
+    emptyState: 'Ask questions about your document or workspace, or request proofreading, summaries, rewrites, and translations. Works with subscription CLIs, Cloud APIs, or Local LLMs.',
+    inputPlaceholder: 'Ask AI... (⌘/Ctrl + Enter to send)',
+    send: 'Send',
+    sending: 'Thinking...',
+    insertAtCursor: 'Insert',
+    replaceDoc: 'Replace Doc',
+    copyReply: 'Copy',
+    quickPrompts: {
+      proofread: 'Proofread',
+      proofreadPrompt: 'Please proofread this document for typos, grammar, and clarity, and suggest improvements.',
+      summarize: 'Summarize',
+      summarizePrompt: 'Summarize the key points of this document in 3–5 concise bullet points.',
+      improve: 'Polish Markdown',
+      improvePrompt: 'Rewrite this document into cleaner, well-structured Markdown while preserving its meaning.',
+      translate: 'Translate JA',
+      translatePrompt: 'Translate this document into natural Japanese Markdown.',
     },
   },
   find: {
@@ -184,6 +400,7 @@ export const en: Translations = {
   },
   status: {
     saved: 'Saved',
+    autoSaveOn: 'Auto-Save ON',
     unsaved: 'Unsaved',
     draft: 'Draft',
     chars: 'chars',
@@ -193,21 +410,52 @@ export const en: Translations = {
     col: 'Col',
     syncOn: 'Sync Scroll ON',
     syncOff: 'Sync Scroll OFF',
-    dropHint: 'Drop Markdown file to open',
+    dropHint: 'Drop Markdown or image files to open / insert',
+  },
+  externalChange: {
+    modifiedTitle: 'This file was modified on disk by an external tool (or AI CLI).',
+    deletedTitle: 'This file was deleted or moved on disk. Your current editor buffer is preserved.',
+    reloadBtn: 'Reload from Disk',
+    compareBtn: 'Compare Diff',
+    keepMineBtn: 'Keep Mine',
+    saveAgainBtn: 'Save to File Again',
+    keepDraftBtn: 'Keep as Unsaved Draft',
+  },
+  aiDiffModal: {
+    replaceDocTitle: 'AI Diff Preview (Replace Document)',
+    writeFileTitle: 'AI Workspace Write Diff Preview',
+    compareExternalTitle: 'External File Change Diff',
+    newFileBadge: 'NEW FILE',
+    noChanges: 'No differences detected (content is identical).',
+    saveSnapshotLabel: 'Save a snapshot of the current document before applying (Recommended)',
+    confirmReplaceBtn: 'Replace Document',
+    confirmWriteBtn: 'Write to Folder',
+    beforeLabel: 'Current',
+    afterLabel: 'Proposed',
+    loadingFile: 'Loading target file...',
   },
   toasts: {
     savedSuccess: 'Saved successfully',
+    autoSaved: 'Auto-saved',
+    sessionRestored: 'Restored previous session & unsaved drafts',
+    reloadedExternal: 'Reloaded external file changes',
     copiedRichText: 'Copied as Rich Text',
     copiedHtml: 'Copied HTML to clipboard',
     copiedMarkdown: 'Copied Markdown to clipboard',
     copiedCode: 'Code copied',
     copiedSvg: 'SVG diagram copied',
+    copiedLine: 'Copied current line',
     aiCleaned: 'Markdown cleaned & formatted',
     htmlPasted: 'Converted HTML clipboard to Markdown',
     noClipboardHtml: 'No HTML content found in clipboard',
     snapshotCreated: 'Snapshot saved',
     snapshotRestored: 'Snapshot restored',
     exportedSuccess: 'Export completed',
+    imageInserted: 'Image inserted',
+    folderFileWritten: 'File written to workspace folder',
+    externalPreviewStarted: 'External live preview opened in browser',
+    devServerStarted: 'Project dev server started',
+    devServerStopped: 'Project dev server stopped',
     errorPrefix: 'Error:',
   },
   dialogs: {
@@ -215,62 +463,66 @@ export const en: Translations = {
     untitledName: 'Untitled.md',
     commandPlaceholder: 'Search commands, open tabs, files, themes...',
     noCommands: 'No matching commands',
-    aboutDesc: 'A cross-platform Markdown editor crafted for writing, reviewing, and refining AI-era documents.',
+    aboutDesc: 'A cross-platform Markdown editor crafted for bidirectional visual editing, built-in browser workflows, and AI-assisted writing.',
     shortcutsTitle: 'Keyboard Shortcuts',
     shortcuts: [
+      { keys: '⌘ + ,', desc: 'Open Settings' },
       { keys: '⌘ + S', desc: 'Save file' },
       { keys: '⌘ + ⇧ + S', desc: 'Save As' },
       { keys: '⌘ + O', desc: 'Open file' },
       { keys: '⌘ + N', desc: 'New document' },
+      { keys: '⌘ + C (EOL)', desc: 'Copy whole line (when no selection)' },
       { keys: '⌘ + K / ⌘ + P', desc: 'Command Palette' },
       { keys: '⌘ + F', desc: 'Find & Replace' },
       { keys: '⌘ + B / ⌘ + I', desc: 'Bold / Italic' },
-      { keys: '⌘ + \\', desc: 'Toggle Basic / Advanced Mode' },
+      { keys: '⌘ + \\', desc: 'Cycle Simple / Basic / Advanced' },
       { keys: '⌘ + ⇧ + F', desc: 'Toggle Zen Mode' },
     ],
   },
   sampleDocument: `---
-title: Welcome to Onigiri-Markdown — AI-Era Markdown Editor
-author: Onigiri-Markdown Team
-tags: [AI, Markdown, Productivity]
+title: Welcome to Onigiri Editor — AI-Era Hybrid Editor
+author: Onigiri Editor Team
+tags: [Onigiri Editor, AI, Markdown, DevPreview]
 ---
 
-# Welcome to Onigiri-Markdown ✨
+# Welcome to Onigiri Editor 🍙
 
-**Onigiri-Markdown** is built for the AI era—where almost everything generated by AI arrives in Markdown. Preview, edit, clean, and export rich Markdown effortlessly.
+**Onigiri Editor** brings together **bidirectional visual Markdown editing**, **100+ language syntax highlighting**, **auto-detected dev server & built-in Web Browser preview**, and **AI Chat with connection assistance & model selection** in one cross-platform workspace.
 
 > [!TIP]
-> Use the **Basic / Advanced** toggle in the top bar anytime.
-> Stay in **Basic Mode** for effortless daily writing, or switch to **Advanced Mode** for multi-tab workspaces, outline navigation, AI cleanup, diff snapshots, and custom styling.
+> - Switch between **Simple**, **Basic**, and **Advanced** anytime (\`⌘ + \\\` / \`Ctrl + \\\`).
+> - Click the top-right **Bot / Panel icon (Options / AI Chat)** for AI Chat, formatting, stats, and snapshots, or press \`⌘ + ,\` / \`Ctrl + ,\` for Settings!
 
 ## Highlights
 
-- [x] **Real-time Preview with Sync Scroll** (click checkboxes directly in preview to toggle!)
-- [x] **One-click AI Output Cleanup** (auto-aligns GFM tables, strips invisible chars, fixes spacing)
-- [x] **Live Mermaid Diagrams & KaTeX Math**
-- [x] **Copy as Rich Text** for seamless pasting into Notion, Google Docs, or Slack
+- [x] **3 Modes**: \`Simple\` (minimal single-pane editor), \`Basic\` (bidirectional preview & AI), and \`Advanced\` (tabs, folder explorer & dev integration)
+- [x] **Bidirectional Editing & Sync Line Markers**: Edit on either pane and see matching line/block markers highlighted in real time
+- [x] **AI Chat & Connection Assistant**: Supports **Codex / Claude Code / Gemini CLI / Antigravity CLI** (with model selection), Cloud APIs, and **Ollama / LM Studio**, plus guided setup when disconnected
+- [x] **Dev Server Auto-Detection & Browser Preview**: Automatically detects **Vite / Next.js / Astro / Nuxt / Laravel / WordPress / PHP / Docker / Python (Django, FastAPI, Flask, Streamlit) / MkDocs / Hugo** projects and previews them in the built-in or external browser
+- [x] **Syntax Highlighting & Smart Line Copy**: Presets + 10 custom token colors across 100+ languages, plus \`⌘+C\` / \`Ctrl+C\` full-line copy with no selection
 
-### 1. AI Callouts & Tables
-
-> [!NOTE]
-> Supports GitHub-style \`[!NOTE]\`, \`[!TIP]\`, \`[!IMPORTANT]\`, \`[!WARNING]\`, and \`[!CAUTION]\` callouts out of the box.
+### 1. Choose Your Mode
 
 | Mode | Best For | Key Capabilities |
 | :--- | :--- | :--- |
-| **Basic** | Quick notes & reading AI output | Clean toolbar, split/toggle preview, theme & language switch |
-| **Advanced** | Deep writing, specs & prompt craft | Multi-tab, folder explorer, outline, diff snapshots, token counter |
+| **Simple** | Quick notes & fast code edits | Minimal UI, editor-only view, smart line copy, syntax highlighting |
+| **Basic** | Writing & live visual editing | Bidirectional split preview, toolbar, built-in/external browser, AI chat |
+| **Advanced** | Dev workflows & deep docs | Multi-tab, folder explorer, dev server launcher, snapshot diff, HTML/PDF export |
 
-### 2. Live Mermaid Flowchart
+### 2. Workflow Overview (Mermaid)
+
+> [!NOTE]
+> Supports GitHub-style \`[!NOTE]\`, \`[!TIP]\`, \`[!IMPORTANT]\`, \`[!WARNING]\`, and \`[!CAUTION]\` callouts plus live Mermaid diagrams.
 
 \`\`\`mermaid
 flowchart LR
-  AI["🤖 AI Markdown Output"] --> Paste["📋 Paste into Onigiri-Markdown"]
-  Paste --> Clean["✨ 1-Click AI Cleanup"]
-  Clean --> Preview["👁️ Live Preview"]
-  Preview --> Share["🚀 Rich Copy / HTML / PDF"]
+  Write["✍️ Write Markdown / Code"] --> AI["🤖 AI Chat & Cleanup"]
+  AI --> Preview["👁️ Live Preview / Built-in Browser"]
+  Preview --> Server["🚀 Dev Server & External Live Sync"]
+  Server --> Share["📦 HTML / PDF / Rich Copy"]
 \`\`\`
 
-### 3. LaTeX Math & Code Highlighting
+### 3. LaTeX Math & Multi-Language Syntax Highlighting
 
 Scaled Dot-Product Attention:
 
@@ -278,12 +530,12 @@ $$
 \\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V
 $$
 
-\`\`\`typescript
-export function estimateTokens(text: string): number {
-  const cjk = (text.match(/[\\u3040-\\u30ff\\u4e00-\\u9faf]/g) || []).length;
-  const other = text.length - cjk;
-  return Math.ceil(cjk * 1.4 + other / 4);
+\`\`\`php
+<?php
+function greetOnigiri(string $name): string {
+    return "Hello, " . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "!";
 }
+echo greetOnigiri('Onigiri Editor');
 \`\`\`
 `,
 };

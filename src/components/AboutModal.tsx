@@ -1,6 +1,7 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import type { Translations } from '../i18n/types';
+import { formatShortcut } from '../utils/platform';
 
 interface AboutModalProps {
   t: Translations;
@@ -19,7 +20,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ t, open, onClose }) => {
         </button>
 
         <div className="about-hero">
-          <img src="/icon.png" alt="Onigiri-Markdown" className="about-logo" />
+          <img src="/icon.png" alt="Onigiri Editor" className="about-logo" />
           <div>
             <h2>
               {t.appName} <span className="version-pill">{t.versionLabel}</span>
@@ -32,7 +33,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({ t, open, onClose }) => {
         <div className="shortcuts-grid">
           {t.dialogs.shortcuts.map((s) => (
             <div key={s.keys} className="shortcut-row">
-              <kbd>{s.keys}</kbd>
+              <kbd>{formatShortcut(s.keys)}</kbd>
               <span>{s.desc}</span>
             </div>
           ))}

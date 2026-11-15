@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Bot,
   Sparkles,
   BarChart3,
   GitCompare,
@@ -12,24 +13,32 @@ import {
   RotateCcw,
   Trash2,
   Plus,
+  Settings,
 } from 'lucide-react';
 import { diffLines } from 'diff';
 import type {
   AiCleanOptions,
+  AiFolderMode,
+  AiProviderConfig,
   DocumentStats,
   EditorSettings,
   InspectorTab,
   PreviewTheme,
   Snapshot,
+  SyntaxPresetId,
 } from '../types';
 import type { Translations } from '../i18n/types';
 import { extractFrontmatter, updateFrontmatter } from '../utils/markdown';
+import { formatShortcut } from '../utils/platform';
+import { AiChatPanel } from './AiChatPanel';
+import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
 interface InspectorDrawerProps {
   t: Translations;
   activeTab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
   markdown: string;
+  activeDocTitle?: string;
   savedContent: string;
   stats: DocumentStats;
   snapshots: Snapshot[];
@@ -45,6 +54,17 @@ interface InspectorDrawerProps {
   onUpdateMarkdown: (next: string) => void;
   settings: EditorSettings;
   onSettingsChange: (next: EditorSettings) => void;
+  aiConfig: AiProviderConfig;
+  onAiConfigChange: (next: AiProviderConfig) => void;
+  onInsertToEditor: (text: string) => void;
+  onReplaceDocument: (text: string, createSnapshot?: boolean) => void;
+  onCopyAiReply: (text: string) => void;
+  workspaceRoot: string | null;
+  onWorkspaceRefresh?: () => void;
+  onFileWritten?: (relativePath: string) => void;
+  onCliTurnComplete?: () => void;
+  onRequestDiffPreview?: (req: DiffPreviewRequest) => void;
+  onOpenFullSettings: () => void;
 }
 
 export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
@@ -52,6 +72,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   activeTab,
   onTabChange,
   markdown,
+  activeDocTitle,
   savedContent,
   stats,
   snapshots,
@@ -67,6 +88,17 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   onUpdateMarkdown,
   settings,
   onSettingsChange,
+  aiConfig,
+  onAiConfigChange,
+  onInsertToEditor,
+  onReplaceDocument,
+  onCopyAiReply,
+  workspaceRoot,
+  onWorkspaceRefresh,
+  onFileWritten,
+  onCliTurnComplete,
+  onRequestDiffPreview,
+  onOpenFullSettings,
 }) => {
   const [snapLabel, setSnapLabel] = useState('');
   const [compareId, setCompareId] = useState<string>('saved');
@@ -133,6 +165,15 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
       <div className="inspector-tabs">
         <button
           type="button"
+          className={`ins-tab-btn ${activeTab === 'chat' ? 'is-active' : ''}`}
+          onClick={() => onTabChange('chat')}
+          title={t.inspector.chat}
+        >
+          <Bot size={14} />
+          <span>{t.inspector.chat}</span>
+        </button>
+        <button
+          type="button"
           className={`ins-tab-btn ${activeTab === 'ai' ? 'is-active' : ''}`}
           onClick={() => onTabChange('ai')}
           title={t.inspector.ai}
@@ -178,7 +219,26 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
         </button>
       </div>
 
-      <div className="inspector-body">
+      <div className={`inspector-body ${activeTab === 'chat' ? 'is-chat' : ''}`}>
+        {activeTab === 'chat' && (
+          <AiChatPanel
+            t={t}
+            markdown={markdown}
+            activeDocTitle={activeDocTitle}
+            config={aiConfig}
+            onConfigChange={onAiConfigChange}
+            onInsertToEditor={onInsertToEditor}
+            onReplaceDocument={onReplaceDocument}
+            onCopyReply={onCopyAiReply}
+            workspaceRoot={workspaceRoot}
+            aiFolderMode={settings.aiFolderMode}
+            onWorkspaceRefresh={onWorkspaceRefresh}
+            onFileWritten={onFileWritten}
+            onCliTurnComplete={onCliTurnComplete}
+            onRequestDiffPreview={onRequestDiffPreview}
+          />
+        )}
+
         {activeTab === 'ai' && (
           <div className="ins-panel">
             <h4 className="ins-title">{t.inspector.aiCleanerTitle}</h4>
@@ -631,7 +691,118 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                 />
                 <span>{t.inspector.settingsLabels.smartPasteHtml}</span>
               </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.activeLineSyncHighlight}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      activeLineSyncHighlight: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.activeLineSyncHighlight}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.oeditLineCopyEnabled}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      oeditLineCopyEnabled: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.oeditLineCopyEnabled}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.restoreSessionEnabled}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      restoreSessionEnabled: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.restoreSessionEnabled}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.autoSaveEnabled}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      autoSaveEnabled: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.autoSaveEnabled}</span>
+              </label>
             </div>
+
+            <div className="field-row">
+              <label>{t.inspector.settingsLabels.syntaxPreset}</label>
+              <select
+                className="select-input"
+                value={settings.syntaxPreset}
+                onChange={(e) =>
+                  onSettingsChange({
+                    ...settings,
+                    syntaxPreset: e.target.value as SyntaxPresetId,
+                  })
+                }
+              >
+                <option value="auto">Auto</option>
+                <option value="github">GitHub</option>
+                <option value="one-dark">One Dark</option>
+                <option value="dracula">Dracula</option>
+                <option value="nord">Nord</option>
+                <option value="monokai">Monokai</option>
+                <option value="solarized">Solarized</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+
+            <div className="field-row">
+              <label>{t.inspector.settingsLabels.aiFolderMode}</label>
+              <select
+                className="select-input"
+                value={settings.aiFolderMode}
+                onChange={(e) =>
+                  onSettingsChange({
+                    ...settings,
+                    aiFolderMode: e.target.value as AiFolderMode,
+                  })
+                }
+              >
+                <option value="disabled">
+                  {t.inspector.settingsLabels.aiFolderModes.disabled}
+                </option>
+                <option value="read-only">
+                  {t.inspector.settingsLabels.aiFolderModes.readOnly}
+                </option>
+                <option value="read-write-approve">
+                  {t.inspector.settingsLabels.aiFolderModes.readWriteApprove}
+                </option>
+                <option value="cli-direct">
+                  {t.inspector.settingsLabels.aiFolderModes.cliDirect}
+                </option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              className="secondary-btn full-w"
+              onClick={onOpenFullSettings}
+            >
+              <Settings size={14} />
+              <span>{t.actions.settings} ({formatShortcut('⌘,')})</span>
+            </button>
 
             <div className="field-row">
               <label>{t.inspector.settingsLabels.customCss}</label>

@@ -1,4 +1,4 @@
-name: Release Onigiri-Markdown
+name: Release Onigiri Editor
 
 on:
   push:
@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.1.0)'
+        description: 'Release tag (e.g. v1.0.0)'
         required: true
-        default: 'v0.1.0'
+        default: 'v1.0.0'
 
 permissions:
   contents: write
@@ -84,7 +84,7 @@ jobs:
           BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
           if [ "${{ matrix.platform }}" = "macos-latest" ]; then
             cp "$BUNDLE_DIR"/dmg/*.dmg release-assets/
-            (cd "$BUNDLE_DIR/macos" && tar -czf "$GITHUB_WORKSPACE/release-assets/Onigiri-Markdown_${TAG}_macos-universal.app.tar.gz" "Onigiri-Markdown.app")
+            (cd "$BUNDLE_DIR/macos" && tar -czf "$GITHUB_WORKSPACE/release-assets/Onigiri_Editor_${TAG}_macos-universal.app.tar.gz" "Onigiri Editor.app")
           elif [ "${{ matrix.platform }}" = "windows-latest" ]; then
             cp "$BUNDLE_DIR"/nsis/*.exe release-assets/
             cp "$BUNDLE_DIR"/msi/*.msi release-assets/
@@ -120,57 +120,50 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           ls -lh all-binaries/
 
-          cat << 'EOF' | sed 's/^          //' > release-notes.md
+          cat << EOF > release-notes.md
           ## English
 
-          ### Onigiri-Markdown `v0.1.0` — Initial Release
+          ### Onigiri Editor \`$TAG\`
 
-          **Onigiri-Markdown** is a cross-platform Markdown editor built for the AI era, featuring real-time synchronized preview, dual **Basic / Advanced** UI modes, and multilingual support (`English` / `日本語`).
+          **Onigiri Editor** is a cross-platform Markdown, code & dev-preview desktop editor built for the AI era on **macOS, Windows, and Linux**—with **Simple / Basic / Advanced** UI modes, bidirectional active line/block indicators, 100+ language syntax highlighting with custom colors, OS-aware first-launch language detection, session restore & auto-save, external file change conflict detection, AI pre-apply diff preview, AI CLI connection support, project dev-server diagnostics, and dual browser preview options.
 
           #### Highlights
-          - **Dual UI Modes**:
-            - **Basic Mode**: Clean, distraction-free writing & live preview (`Editor` / `Split` / `Preview`) with essential formatting toolbar and interactive task checkboxes.
-            - **Advanced Mode**: Multi-tab workspace, folder explorer with full-text search, document outline (TOC), snippets library, snapshots & line diff viewer, YAML frontmatter editor, Find & Replace (Regex), Command Palette (`⌘K` / `Ctrl+K`), Zen Mode, custom preview CSS, and HTML/PDF export.
-          - **AI-Era Toolkit**:
-            - One-click **AI Output Cleanup & Formatter** (strip zero-width chars, auto-align GFM tables with CJK width support, normalize bullets/headings/blank lines).
-            - **Estimated LLM Token Counter** (CJK + English) and writing goal tracker.
-            - **Rich Text Copy** (for Notion, Google Docs, Slack) & **Smart HTML Paste**.
-          - **Rich Rendering**: GFM tables, KaTeX math (`$...$`, `$$...$$`), live Mermaid diagrams (with zoom & SVG copy), syntax highlighting, and GitHub-style callouts (`[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`).
-          - **Themes & Localization**: `Light`, `Dark`, `Sepia`, and `Midnight` themes + `English` / `日本語` UI.
+          - **OS-Aware First-Launch Language**: Automatically starts in Japanese on Japanese OS locales and English on all other OS locales (with native localized menu bar).
+          - **Session Restore, Draft Recovery & Auto-Save**: Restores open tabs, unsaved drafts, cursor positions, and workspace folders across launches, plus optional 1.5s auto-save.
+          - **External File Change Detection**: Auto-reloads clean tabs changed on disk and shows a conflict banner (\`Reload\`, \`Compare Diff\`, \`Keep Mine\`, \`Save Again\`, \`Keep as Draft\`) for edited or deleted files.
+          - **AI Pre-Apply Diff Preview**: Inspect line-by-line diffs before replacing document text (with automatic snapshot option) or writing workspace files.
+          - **AI Chat, Dev Server Diagnostics & Dual Browser Preview**: Supports Codex / Claude Code / Gemini / Antigravity CLIs, Cloud APIs, Ollama, LM Studio, built-in multi-WebView browser, and external HTTP live preview.
 
           #### Downloads
-          - **macOS (Universal: Apple Silicon & Intel)**: `.dmg` / `.app.tar.gz`
-          - **Windows (x64)**: `.exe` (NSIS installer) / `.msi`
-          - **Linux (x64)**: `.AppImage` / `.deb`
+          - **macOS (Universal: Apple Silicon & Intel)**: \`.dmg\` / \`.app.tar.gz\`
+          - **Windows (x64)**: \`.exe\` (NSIS installer) / \`.msi\`
+          - **Linux (x64)**: \`.AppImage\` / \`.deb\`
 
           ---
 
           ## 日本語
 
-          ### Onigiri-Markdown `v0.1.0` — 初回リリース
+          ### Onigiri Editor \`$TAG\`
 
-          **Onigiri-Markdown** は、AIが出力するリッチなMarkdownをプレビューしながら快適に編集・整形できるクロスプラットフォーム対応エディタです。UIの多言語化（`日本語` / `English`）と、用途に応じて切り替えられる **ベーシックモード / アドバンスドモード** を備えています。
+          **Onigiri Editor** は、**macOS・Windows・Linux** に対応した AI 時代向けの Markdown・コード・Web 開発プレビュー統合デスクトップエディタです。**シンプル / 標準 / 拡張** の 3 モード切替、双方向編集中行ハイライト、100言語以上のシンタックスハイライト＋色カスタマイズ、初回起動時の OS 言語自動判定、セッション復元・自動保存、外部ファイル変更検知、AI 適用前 Diff プレビュー、AI CLI 接続サポート、開発サーバー診断、内蔵 Web ブラウザ＆外部ライブプレビューを備えています。
 
-          #### 主な機能
-          - **2つのUIモード**:
-            - **ベーシックモード**: 書くこととプレビューに集中できるシンプルな構成（エディタ / 分割 / プレビュー切替、基本書式バー、プレビュー上のチェックボックス直接切替）。
-            - **アドバンスドモード**: マルチタブ編集、フォルダツリー＆全文検索、アウトライン（目次）、スニペット集、スナップショット＆差分（Diff）比較、YAML Frontmatter エディタ、検索・置換（正規表現対応）、コマンドパレット（`⌘K` / `Ctrl+K`）、集中モード（Zen）、カスタムCSS、HTML/PDF書き出し。
-          - **AI時代の便利機能**:
-            - **AI出力ワンクリック整形**: ゼロ幅文字除去、GFMテーブルの列幅自動揃え（日本語全角幅対応）、箇条書き・見出し・空行の自動クリーンアップ。
-            - **推定AIトークン数計測**: 日英混在テキストに対応した概算LLMトークン数・文字数・読了目安表示。
-            - **リッチテキストコピー**（Notion / Google Docs / Slack向け）＆ **HTML自動Markdown変換貼付**。
-          - **リッチプレビュー**: GFMテーブル、KaTeX数式、Mermaid図表（拡大・SVGコピー対応）、コードハイライト、GitHub互換コールアウト（`[!NOTE]` 等）。
-          - **テーマ＆多言語UI**: `ライト` / `ダーク` / `セピア` / `ミッドナイト` の4テーマ ＋ 日本語 / 英語UI。
+          #### 主なポイント
+          - **初回起動時の OS 言語自動判定**: 日本語 OS では日本語 UI・日本語メニューバーで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
+          - **セッション復元・未保存ドラフト保護・自動保存**: 開いていたタブ・下書き・カーソル位置・ワークスペースを次回起動時に復元し、1.5秒デバウンスの自動保存にも対応します。
+          - **外部ファイル変更検知**: 外部ツールや AI CLI による変更・削除を検知し、未編集タブは自動反映、未保存編集がある場合は **再読み込み / 差分比較 / 編集維持** 等の解決バナーを表示します。
+          - **AI 適用前 Diff プレビューモーダル**: 「本文を置換」（スナップショット自動保存オプション付き）や「フォルダーへ書き込み」の実行前に、行単位の差分を確認できます。
+          - **AI チャット・開発サーバー診断・2パターンのブラウザ連携**: Codex / Claude Code / Gemini / Antigravity CLI・各種 Cloud API・Ollama・LM Studio・内蔵マルチ WebView ブラウザ・外部ライブプレビューに対応しています。
 
           #### ダウンロード（バイナリ一覧）
-          - **macOS（Universal: Apple Silicon / Intel 両対応）**: `.dmg` / `.app.tar.gz`
-          - **Windows（x64）**: `.exe`（インストーラ） / `.msi`
-          - **Linux（x64）**: `.AppImage` / `.deb`
+          - **macOS（Universal: Apple Silicon / Intel 両対応）**: \`.dmg\` / \`.app.tar.gz\`
+          - **Windows（x64）**: \`.exe\`（インストーラ） / \`.msi\`
+          - **Linux（x64）**: \`.AppImage\` / \`.deb\`
           EOF
+          sed -i 's/^          //' release-notes.md
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "Onigiri-Markdown $TAG" --notes-file release-notes.md
+            gh release edit "$TAG" --title "Onigiri Editor $TAG" --notes-file release-notes.md
             gh release upload "$TAG" all-binaries/* --clobber
           else
-            gh release create "$TAG" all-binaries/* --title "Onigiri-Markdown $TAG" --notes-file release-notes.md
+            gh release create "$TAG" all-binaries/* --title "Onigiri Editor $TAG" --notes-file release-notes.md
           fi

@@ -13,6 +13,15 @@ export const localeNames: Record<Locale, string> = {
   en: 'English',
 };
 
+export function hasSavedLocalePreference(): boolean {
+  try {
+    const saved = localStorage.getItem('onigiri-markdown.locale');
+    return saved === 'ja' || saved === 'en';
+  } catch {
+    return false;
+  }
+}
+
 export function detectInitialLocale(): Locale {
   try {
     const saved = localStorage.getItem('onigiri-markdown.locale');
@@ -22,7 +31,12 @@ export function detectInitialLocale(): Locale {
   } catch {
     // ignore
   }
-  const navLang = (navigator.language || 'en').toLowerCase();
+  const navLang = (
+    navigator.languages?.[0] ||
+    navigator.language ||
+    Intl.DateTimeFormat().resolvedOptions().locale ||
+    'en'
+  ).toLowerCase();
   return navLang.startsWith('ja') ? 'ja' : 'en';
 }
 

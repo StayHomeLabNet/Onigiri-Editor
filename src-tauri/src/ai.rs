@@ -1,0 +1,2178 @@
+use serde::{Deserialize, Serialize};
+use std::env;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiCapabilities {
+    pub codex_cli: Option<String>,
+    pub codex_logged_in: bool,
+    pub codex_models: Vec<String>,
+    pub codex_default_model: Option<String>,
+    pub claude_cli: Option<String>,
+    pub claude_logged_in: bool,
+    pub claude_models: Vec<String>,
+    pub gemini_cli: Option<String>,
+    pub gemini_logged_in: bool,
+    pub gemini_models: Vec<String>,
+    pub antigravity_cli: Option<String>,
+    pub antigravity_logged_in: bool,
+    pub antigravity_models: Vec<String>,
+    pub antigravity_default_model: Option<String>,
+    pub antigravity_app: bool,
+    pub ollama_installed: bool,
+    pub ollama_running: bool,
+    pub ollama_models: Vec<String>,
+    pub lmstudio_installed: bool,
+    pub lmstudio_running: bool,
+    pub lmstudio_models: Vec<String>,
+    pub node_installed: bool,
+    pub homebrew_installed: bool,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessageInput {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatRequest {
+    pub provider: String,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
+    pub custom_cli_cmd: Option<String>,
+    pub system_prompt: Option<String>,
+    pub messages: Vec<ChatMessageInput>,
+    pub workspace_dir: Option<String>,
+    pub allow_workspace_write: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatResponse {
+    pub content: String,
+    pub model_used: String,
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var("HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var("USERPROFILE")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+        })
+}
+
+fn extended_path() -> String {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+
+    #[cfg(unix)]
+    {
+        let home = env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            for rel in [
+                ".local/bin",
+                ".cargo/bin",
+                ".npm-global/bin",
+                ".volta/bin",
+                ".asdf/shims",
+                ".local/share/mise/shims",
+                ".bun/bin",
+                ".fnm/aliases/default/bin",
+                ".nvm/versions/node/current/bin",
+            ] {
+                dirs.push(PathBuf::from(&home).join(rel));
+            }
+
+            let nvm_dir = PathBuf::from(&home).join(".nvm/versions/node");
+            if let Ok(read_dir) = std::fs::read_dir(&nvm_dir) {
+                let mut versions: Vec<PathBuf> = read_dir
+                    .flatten()
+                    .map(|e| e.path().join("bin"))
+                    .filter(|p| p.is_dir())
+                    .collect();
+                versions.sort();
+                if let Some(latest) = versions.pop() {
+                    dirs.push(latest);
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            for p in [
+                "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS",
+                "/Applications/Antigravity.app/Contents/Resources/app/bin",
+                "/opt/homebrew/bin",
+                "/opt/homebrew/sbin",
+            ] {
+                dirs.push(PathBuf::from(p));
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            if !home.is_empty() {
+                dirs.push(PathBuf::from(&home).join(".local/share/flatpak/exports/bin"));
+            }
+            for p in [
+                "/home/linuxbrew/.linuxbrew/bin",
+                "/home/linuxbrew/.linuxbrew/sbin",
+                "/var/lib/flatpak/exports/bin",
+            ] {
+                dirs.push(PathBuf::from(p));
+            }
+        }
+
+        for p in ["/usr/local/bin", "/usr/bin", "/bin", "/snap/bin"] {
+            dirs.push(PathBuf::from(p));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let user_profile = env::var("USERPROFILE").unwrap_or_default();
+        let appdata = env::var("APPDATA").unwrap_or_default();
+        let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
+        let program_files =
+            env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+
+        if !appdata.is_empty() {
+            dirs.push(PathBuf::from(&appdata).join("npm"));
+            dirs.push(PathBuf::from(&appdata).join("nvm"));
+        }
+        if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join("pnpm"));
+            dirs.push(PathBuf::from(&local_appdata).join(r"Volta\bin"));
+            dirs.push(PathBuf::from(&local_appdata).join(r"Programs\Antigravity\bin"));
+            dirs.push(PathBuf::from(&local_appdata).join(r"Programs\Ollama"));
+            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
+            for py_ver in ["Python313", "Python312", "Python311", "Python310", "Python39"] {
+                let py_base = PathBuf::from(&local_appdata)
+                    .join("Programs")
+                    .join("Python")
+                    .join(py_ver);
+                if py_base.is_dir() {
+                    dirs.push(py_base.clone());
+                    dirs.push(py_base.join("Scripts"));
+                }
+            }
+        }
+        if !user_profile.is_empty() {
+            for rel in [r".cargo\bin", r".bun\bin", r".local\bin", r"scoop\shims"] {
+                dirs.push(PathBuf::from(&user_profile).join(rel));
+            }
+        }
+        dirs.push(PathBuf::from(&program_files).join("nodejs"));
+        dirs.push(PathBuf::from(&program_files).join("PHP"));
+        dirs.push(PathBuf::from(&program_files).join(r"Docker\Docker\resources\bin"));
+        dirs.push(PathBuf::from(&program_files).join(r"Antigravity\bin"));
+    }
+
+    if let Some(current) = env::var_os("PATH") {
+        dirs.extend(env::split_paths(&current));
+    }
+
+    env::join_paths(dirs)
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
+}
+
+fn new_background_command<S: AsRef<std::ffi::OsStr>>(exe: &str, args: &[S]) -> Command {
+    let mut cmd = Command::new(exe);
+    cmd.args(args);
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// Extracts the relative Node script path referenced via `%dp0%` / `%~dp0` inside an npm/pnpm `.cmd` shim.
+#[allow(dead_code)]
+fn parse_windows_cmd_shim_rel(content: &str) -> Option<String> {
+    let lower = content.to_ascii_lowercase();
+    for marker in ["%dp0%", "%~dp0"] {
+        let mut search_from = 0usize;
+        while let Some(rel_idx) = lower[search_from..].find(marker) {
+            let abs_start = search_from + rel_idx + marker.len();
+            let rest = &content[abs_start..];
+            let end_offset = rest
+                .find(|c: char| c == '"' || c == '\'' || c == '\r' || c == '\n')
+                .unwrap_or(rest.len());
+            let candidate = rest[..end_offset].trim();
+            let candidate_lower = candidate.to_ascii_lowercase();
+            if candidate_lower.ends_with(".js")
+                || candidate_lower.ends_with(".mjs")
+                || candidate_lower.ends_with(".cjs")
+            {
+                let cleaned = candidate.trim_start_matches(['\\', '/']);
+                if !cleaned.is_empty() {
+                    return Some(cleaned.to_string());
+                }
+            }
+            search_from = abs_start;
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_windows_cmd_shim(bin: &str, args: &[String]) -> Option<(String, Vec<String>)> {
+    let lower = bin.to_ascii_lowercase();
+    if !lower.ends_with(".cmd") && !lower.ends_with(".bat") {
+        return None;
+    }
+    let content = std::fs::read_to_string(bin).ok()?;
+    let rel_script = parse_windows_cmd_shim_rel(&content)?;
+    let bin_dir = Path::new(bin).parent()?;
+    let mut script_path = bin_dir.to_path_buf();
+    for part in rel_script.split(['\\', '/']).filter(|p| !p.is_empty()) {
+        script_path.push(part);
+    }
+    if !script_path.is_file() {
+        return None;
+    }
+    let bundled_node = bin_dir.join("node.exe");
+    let node_exe = if bundled_node.is_file() {
+        bundled_node.to_string_lossy().to_string()
+    } else {
+        find_executable(&["node"])?
+    };
+    let mut full_args = Vec::with_capacity(args.len() + 1);
+    full_args.push(script_path.to_string_lossy().to_string());
+    full_args.extend(args.iter().cloned());
+    Some((node_exe, full_args))
+}
+
+fn build_cli_command(bin: &str, args: &[String]) -> Command {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some((node_exe, node_args)) = resolve_windows_cmd_shim(bin, args) {
+            return new_background_command(&node_exe, &node_args);
+        }
+    }
+    new_background_command(bin, args)
+}
+
+fn find_executable(names: &[&str]) -> Option<String> {
+    let path_var = extended_path();
+    for dir in env::split_paths(&path_var) {
+        for name in names {
+            let candidate = dir.join(name);
+            if candidate.exists() && candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+            #[cfg(target_os = "windows")]
+            {
+                for ext in ["exe", "cmd", "bat"] {
+                    let c = dir.join(format!("{}.{}", name, ext));
+                    if c.exists() && c.is_file() {
+                        return Some(c.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn curated_codex_models() -> Vec<String> {
+    vec![
+        "gpt-5.4".to_string(),
+        "gpt-5.3-codex".to_string(),
+        "gpt-5.2-codex".to_string(),
+        "o4-mini".to_string(),
+        "o3".to_string(),
+    ]
+}
+
+fn curated_claude_models() -> Vec<String> {
+    vec![
+        "sonnet".to_string(),
+        "opus".to_string(),
+        "haiku".to_string(),
+        "claude-sonnet-4-5".to_string(),
+        "claude-opus-4-1".to_string(),
+        "claude-haiku-4-5".to_string(),
+    ]
+}
+
+fn curated_gemini_models() -> Vec<String> {
+    vec![
+        "auto".to_string(),
+        "gemini-3.8-flash".to_string(),
+        "gemini-3.5-flash".to_string(),
+        "gemini-3.1-pro-preview".to_string(),
+        "gemini-3-flash-preview".to_string(),
+        "gemini-3.5-flash-lite".to_string(),
+        "gemini-3.1-flash-lite".to_string(),
+        "gemini-2.5-pro".to_string(),
+    ]
+}
+
+fn curated_antigravity_models() -> Vec<String> {
+    vec![
+        "gemini-4-hydrogen-high".to_string(),
+        "gemini-4-hydrogen-medium".to_string(),
+        "gemini-4-argon-high".to_string(),
+        "gemini-4-argon-medium".to_string(),
+        "gemini-3.8-flash-high".to_string(),
+        "gemini-3.8-flash-medium".to_string(),
+        "claude-opus-5-5-high".to_string(),
+        "claude-sonnet-5-5-medium".to_string(),
+        "gpt-oss-120b-medium".to_string(),
+    ]
+}
+
+fn parse_codex_default_model_toml(raw: &str) -> Option<String> {
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        // Stop before sections
+        if trimmed.starts_with('[') {
+            break;
+        }
+        if let Some(rest) = trimmed.strip_prefix("model") {
+            let rest = rest.trim_start();
+            if let Some(val_raw) = rest.strip_prefix('=') {
+                let val = val_raw
+                    .trim()
+                    .trim_matches(|c| c == '"' || c == '\'')
+                    .trim();
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_codex_models_cache_json(raw: &str) -> Vec<String> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Vec::new();
+    };
+    let Some(arr) = json["models"].as_array() else {
+        return Vec::new();
+    };
+    let mut listed = Vec::new();
+    let mut fallback = Vec::new();
+    for item in arr {
+        let Some(slug) = item["slug"]
+            .as_str()
+            .or_else(|| item["id"].as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let vis = item["visibility"].as_str().unwrap_or("list");
+        if vis == "list" {
+            if !listed.iter().any(|x| x == slug) {
+                listed.push(slug.to_string());
+            }
+        } else if vis != "hide" && !fallback.iter().any(|x| x == slug) {
+            fallback.push(slug.to_string());
+        }
+    }
+    if listed.is_empty() {
+        fallback
+    } else {
+        listed
+    }
+}
+
+fn read_codex_models_and_default(codex_installed: bool) -> (Vec<String>, Option<String>) {
+    let Some(home) = home_dir() else {
+        return (
+            if codex_installed {
+                curated_codex_models()
+            } else {
+                Vec::new()
+            },
+            None,
+        );
+    };
+    let codex_dir = home.join(".codex");
+    let default_model = std::fs::read_to_string(codex_dir.join("config.toml"))
+        .ok()
+        .and_then(|s| parse_codex_default_model_toml(&s));
+
+    let mut models = std::fs::read_to_string(codex_dir.join("models_cache.json"))
+        .ok()
+        .map(|s| parse_codex_models_cache_json(&s))
+        .unwrap_or_default();
+
+    if models.is_empty() && codex_installed {
+        models = curated_codex_models();
+    }
+    if let Some(ref def) = default_model {
+        if !models.iter().any(|m| m == def) {
+            models.insert(0, def.clone());
+        }
+    }
+    (models, default_model)
+}
+
+async fn check_codex_logged_in(codex_bin: Option<&str>) -> bool {
+    if env::var("OPENAI_API_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if let Some(home) = home_dir() {
+        let auth_file = home.join(".codex/auth.json");
+        if let Ok(meta) = std::fs::metadata(&auth_file) {
+            if meta.len() > 2 {
+                return true;
+            }
+        }
+    }
+    let Some(bin) = codex_bin else {
+        return false;
+    };
+    let args = ["login".to_string(), "status".to_string()];
+    let mut cmd = build_cli_command(bin, &args);
+    cmd.env("PATH", extended_path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(3), cmd.output()).await else {
+        return false;
+    };
+    if out.status.success() {
+        let combined = format!(
+            "{} {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+        .to_ascii_lowercase();
+        return combined.contains("logged in") || !combined.contains("not logged in");
+    }
+    false
+}
+
+async fn check_claude_logged_in(claude_bin: Option<&str>) -> bool {
+    if env::var("ANTHROPIC_API_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if let Some(home) = home_dir() {
+        for rel in [
+            ".claude/.credentials.json",
+            ".claude/credentials.json",
+            ".claude.json",
+        ] {
+            if let Ok(meta) = std::fs::metadata(home.join(rel)) {
+                if meta.len() > 10 {
+                    return true;
+                }
+            }
+        }
+    }
+    if claude_bin.is_none() {
+        return false;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let mut cmd = Command::new("security");
+        cmd.args(["find-generic-password", "-s", "Claude Code-credentials"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(2), cmd.output()).await {
+            return out.status.success();
+        }
+        return false;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+fn parse_gemini_models_json(raw: &str) -> Vec<String> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Vec::new();
+    };
+    let Some(arr) = json.as_array() else {
+        return Vec::new();
+    };
+    let mut models = Vec::new();
+    for item in arr {
+        if let Some(id) = item["modelId"]
+            .as_str()
+            .or_else(|| item["id"].as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if !models.iter().any(|m| m == id) {
+                models.push(id.to_string());
+            }
+        }
+    }
+    models
+}
+
+fn parse_gemini_list_models(output: &str) -> Vec<String> {
+    let mut models = Vec::new();
+    for line in output.lines() {
+        if line.is_empty() || line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("Available")
+            || trimmed.starts_with("Usage:")
+            || trimmed.starts_with("Error")
+        {
+            continue;
+        }
+        let token = trimmed.split_whitespace().next().unwrap_or("");
+        if token.is_empty() || token.ends_with(':') {
+            continue;
+        }
+        if (token == "auto" || token.starts_with("gemini-") || token.contains("gemma"))
+            && !models.iter().any(|m| m == token)
+        {
+            models.push(token.to_string());
+        }
+    }
+    models
+}
+
+fn merge_modern_gemini_models(mut cli_models: Vec<String>) -> Vec<String> {
+    if cli_models.is_empty() {
+        return curated_gemini_models();
+    }
+    // Ensure modern Gemini 3.x models supported by gemini-cli 0.67+ are also selectable
+    // alongside the models reported by `gemini models`.
+    for candidate in [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-pro",
+    ] {
+        if !cli_models.iter().any(|m| m == candidate) {
+            cli_models.push(candidate.to_string());
+        }
+    }
+    cli_models
+}
+
+async fn read_gemini_models(gemini_bin: Option<&str>) -> Vec<String> {
+    let Some(bin) = gemini_bin else {
+        return Vec::new();
+    };
+    let json_args = ["models".to_string(), "-o".to_string(), "json".to_string()];
+    let mut json_cmd = build_cli_command(bin, &json_args);
+    json_cmd
+        .env("PATH", extended_path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(8), json_cmd.output()).await {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed = parse_gemini_models_json(&stdout);
+        if !parsed.is_empty() {
+            return merge_modern_gemini_models(parsed);
+        }
+    }
+
+    let list_args = ["--list-models".to_string()];
+    let mut cmd = build_cli_command(bin, &list_args);
+    cmd.env("PATH", extended_path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(8), cmd.output()).await {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let parsed = parse_gemini_list_models(&stdout);
+        if !parsed.is_empty() {
+            return merge_modern_gemini_models(parsed);
+        }
+    }
+    curated_gemini_models()
+}
+
+fn check_gemini_logged_in() -> bool {
+    if env::var("GEMINI_API_KEY")
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+        || env::var("GOOGLE_API_KEY")
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+    {
+        return true;
+    }
+    if let Some(home) = home_dir() {
+        let gemini_dir = home.join(".gemini");
+        if let Ok(meta) = std::fs::metadata(gemini_dir.join("oauth_creds.json")) {
+            if meta.len() > 20 {
+                return true;
+            }
+        }
+        if let Ok(raw) = std::fs::read_to_string(gemini_dir.join("google_accounts.json")) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if json["active"]
+                    .as_str()
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn parse_agy_models(output: &str) -> Vec<String> {
+    let mut models = Vec::new();
+    for raw_line in output.lines() {
+        // Spinner frames use `\r` before printing the real line.
+        let segment = raw_line.rsplit('\r').next().unwrap_or(raw_line).trim();
+        if segment.is_empty()
+            || segment.starts_with("Fetching")
+            || segment.starts_with("Usage")
+            || segment.starts_with("Error")
+        {
+            continue;
+        }
+        let token = segment.split_whitespace().next().unwrap_or("");
+        if token.is_empty() || token.len() < 3 {
+            continue;
+        }
+        let is_valid_slug = token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+        if is_valid_slug
+            && token.contains('-')
+            && !models.iter().any(|m| m == token)
+        {
+            models.push(token.to_string());
+        }
+    }
+    models
+}
+
+async fn read_agy_models(agy_bin: Option<&str>) -> Vec<String> {
+    let Some(bin) = agy_bin else {
+        return Vec::new();
+    };
+    let args = ["models".to_string()];
+    let mut cmd = build_cli_command(bin, &args);
+    cmd.env("PATH", extended_path())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Ok(Ok(out)) = tokio::time::timeout(Duration::from_secs(10), cmd.output()).await {
+        let combined = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let parsed = parse_agy_models(&combined);
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+    curated_antigravity_models()
+}
+
+fn read_antigravity_default_model() -> Option<String> {
+    let home = home_dir()?;
+    let raw = std::fs::read_to_string(home.join(".gemini/antigravity-cli/settings.json")).ok()?;
+    let json = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    json["model"]
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn check_antigravity_logged_in(agy_installed: bool, agy_models: &[String]) -> bool {
+    if !agy_installed {
+        return false;
+    }
+    if !agy_models.is_empty() {
+        return true;
+    }
+    if let Some(home) = home_dir() {
+        let onboarding = home.join(".gemini/antigravity-cli/cache/onboarding.json");
+        if let Ok(raw) = std::fs::read_to_string(onboarding) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if json["onboardingComplete"].as_bool().unwrap_or(false) {
+                    return true;
+                }
+            }
+        }
+        if home.join(".gemini/jetski-standalone-oauth-token").is_file() {
+            return true;
+        }
+    }
+    false
+}
+
+async fn fetch_ollama_models(base_url: &str) -> (bool, Vec<String>) {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return (false, vec![]),
+    };
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let Ok(resp) = client.get(&url).send().await else {
+        return (false, vec![]);
+    };
+    if !resp.status().is_success() {
+        return (false, vec![]);
+    }
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return (true, vec![]);
+    };
+    let models = json["models"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    (true, models)
+}
+
+async fn fetch_openai_compat_models(base_url: &str, api_key: Option<&str>) -> (bool, Vec<String>) {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return (false, vec![]),
+    };
+    let trimmed = base_url.trim_end_matches('/');
+    let url = if trimmed.ends_with("/v1") {
+        format!("{}/models", trimmed)
+    } else {
+        format!("{}/v1/models", trimmed)
+    };
+    let mut req = client.get(&url);
+    if let Some(key) = api_key {
+        if !key.trim().is_empty() {
+            req = req.bearer_auth(key.trim());
+        }
+    }
+    let Ok(resp) = req.send().await else {
+        return (false, vec![]);
+    };
+    if !resp.status().is_success() {
+        return (false, vec![]);
+    }
+    let Ok(json) = resp.json::<serde_json::Value>().await else {
+        return (true, vec![]);
+    };
+    let models = json["data"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m["id"].as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    (true, models)
+}
+
+fn find_antigravity_app_path() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        for p in [
+            "/Applications/Antigravity.app",
+            "/Applications/Antigravity IDE.app",
+        ] {
+            let path = PathBuf::from(p);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+        return None;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
+        let program_files =
+            env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let mut candidates = Vec::new();
+        if !local_appdata.is_empty() {
+            candidates.push(PathBuf::from(&local_appdata).join(r"Programs\Antigravity\Antigravity.exe"));
+            candidates.push(PathBuf::from(&local_appdata).join(r"Programs\Antigravity\Antigravity IDE.exe"));
+            candidates.push(PathBuf::from(&local_appdata).join(r"Programs\Antigravity IDE\Antigravity IDE.exe"));
+        }
+        candidates.push(PathBuf::from(&program_files).join(r"Antigravity\Antigravity.exe"));
+        candidates.push(PathBuf::from(&program_files).join(r"Antigravity IDE\Antigravity IDE.exe"));
+        return candidates.into_iter().find(|p| p.is_file());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(bin) = find_executable(&["antigravity"]) {
+            return Some(PathBuf::from(bin));
+        }
+        for p in [
+            "/opt/Antigravity/antigravity",
+            "/usr/bin/antigravity",
+            "/usr/local/bin/antigravity",
+        ] {
+            let path = PathBuf::from(p);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        None
+    }
+}
+
+fn find_ollama_app_path() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let p = PathBuf::from("/Applications/Ollama.app");
+        if p.exists() {
+            return Some(p);
+        }
+        return None;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
+        let program_files =
+            env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let mut candidates = Vec::new();
+        if !local_appdata.is_empty() {
+            candidates.push(PathBuf::from(&local_appdata).join(r"Programs\Ollama\ollama app.exe"));
+            candidates.push(PathBuf::from(&local_appdata).join(r"Programs\Ollama\Ollama app.exe"));
+        }
+        candidates.push(PathBuf::from(&program_files).join(r"Ollama\ollama app.exe"));
+        return candidates.into_iter().find(|p| p.is_file());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        None
+    }
+}
+
+fn find_lmstudio_app_path() -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let p = PathBuf::from("/Applications/LM Studio.app");
+        if p.exists() {
+            return Some(p);
+        }
+        return None;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
+        let program_files =
+            env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let mut candidates = Vec::new();
+        if !local_appdata.is_empty() {
+            candidates.push(PathBuf::from(&local_appdata).join(r"Programs\LM Studio\LM Studio.exe"));
+            candidates.push(PathBuf::from(&local_appdata).join(r"LM-Studio\LM Studio.exe"));
+        }
+        candidates.push(PathBuf::from(&program_files).join(r"LM Studio\LM Studio.exe"));
+        return candidates.into_iter().find(|p| p.is_file());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(bin) = find_executable(&["lm-studio", "lmstudio"]) {
+            return Some(PathBuf::from(bin));
+        }
+        for p in ["/opt/LM Studio/lm-studio", "/usr/bin/lm-studio"] {
+            let path = PathBuf::from(p);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+        None
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn launch_linux_terminal(script_path: &str) -> Result<(), String> {
+    let candidates: &[(&str, &[&str])] = &[
+        ("x-terminal-emulator", &["-e"]),
+        ("gnome-terminal", &["--"]),
+        ("konsole", &["-e"]),
+        ("xfce4-terminal", &["-e"]),
+        ("mate-terminal", &["-e"]),
+        ("lxterminal", &["-e"]),
+        ("alacritty", &["-e"]),
+        ("kitty", &[]),
+        ("wezterm", &["start", "--"]),
+        ("xterm", &["-e"]),
+    ];
+    for (term, prefix) in candidates {
+        if let Some(bin) = find_executable(&[term]) {
+            let mut cmd = std::process::Command::new(bin);
+            cmd.args(*prefix).arg(script_path);
+            if cmd.spawn().is_ok() {
+                return Ok(());
+            }
+        }
+    }
+    Err("No supported Linux terminal emulator was found (tried x-terminal-emulator, gnome-terminal, konsole, xfce4-terminal, xterm).".to_string())
+}
+
+#[tauri::command]
+pub async fn detect_ai_capabilities() -> AiCapabilities {
+    let codex_cli = find_executable(&["codex"]);
+    let claude_cli = find_executable(&["claude"]);
+    let gemini_cli = find_executable(&["gemini"]);
+    let antigravity_cli = find_executable(&["agy", "antigravity"]);
+    let antigravity_app = find_antigravity_app_path().is_some();
+
+    let ollama_installed =
+        find_executable(&["ollama"]).is_some() || find_ollama_app_path().is_some();
+    let lmstudio_installed = find_lmstudio_app_path().is_some();
+
+    let (codex_models, codex_default_model) = read_codex_models_and_default(codex_cli.is_some());
+    let claude_models = if claude_cli.is_some() {
+        curated_claude_models()
+    } else {
+        Vec::new()
+    };
+    let gemini_logged_in = gemini_cli.is_some() && check_gemini_logged_in();
+    let antigravity_default_model = read_antigravity_default_model();
+
+    let codex_for_task = codex_cli.clone();
+    let claude_for_task = claude_cli.clone();
+    let gemini_for_task = gemini_cli.clone();
+    let agy_for_task = antigravity_cli.clone();
+
+    let t_codex = tokio::spawn(async move { check_codex_logged_in(codex_for_task.as_deref()).await });
+    let t_claude = tokio::spawn(async move { check_claude_logged_in(claude_for_task.as_deref()).await });
+    let t_gemini = tokio::spawn(async move { read_gemini_models(gemini_for_task.as_deref()).await });
+    let t_agy = tokio::spawn(async move { read_agy_models(agy_for_task.as_deref()).await });
+    let t_ollama = tokio::spawn(async move { fetch_ollama_models("http://127.0.0.1:11434").await });
+    let t_lm = tokio::spawn(async move { fetch_openai_compat_models("http://127.0.0.1:1234/v1", None).await });
+
+    let codex_logged_in = t_codex.await.unwrap_or(false);
+    let claude_logged_in = t_claude.await.unwrap_or(false);
+    let gemini_models = t_gemini.await.unwrap_or_default();
+    let antigravity_models = t_agy.await.unwrap_or_default();
+    let antigravity_logged_in =
+        check_antigravity_logged_in(antigravity_cli.is_some(), &antigravity_models);
+    let ollama_res = t_ollama.await.unwrap_or((false, Vec::new()));
+    let lmstudio_res = t_lm.await.unwrap_or((false, Vec::new()));
+    let node_installed =
+        find_executable(&["node"]).is_some() && find_executable(&["npm"]).is_some();
+    let homebrew_installed = find_executable(&["brew"]).is_some();
+
+    AiCapabilities {
+        codex_cli,
+        codex_logged_in,
+        codex_models,
+        codex_default_model,
+        claude_cli,
+        claude_logged_in,
+        claude_models,
+        gemini_cli,
+        gemini_logged_in,
+        gemini_models,
+        antigravity_cli,
+        antigravity_logged_in,
+        antigravity_models,
+        antigravity_default_model,
+        antigravity_app,
+        ollama_installed,
+        ollama_running: ollama_res.0,
+        ollama_models: ollama_res.1,
+        lmstudio_installed,
+        lmstudio_running: lmstudio_res.0,
+        lmstudio_models: lmstudio_res.1,
+        node_installed,
+        homebrew_installed,
+    }
+}
+
+#[tauri::command]
+pub async fn list_subscription_models(provider: String) -> Result<Vec<String>, String> {
+    match provider.as_str() {
+        "codex-cli" => {
+            let codex_cli = find_executable(&["codex"]);
+            let (models, _) = read_codex_models_and_default(codex_cli.is_some());
+            Ok(if models.is_empty() {
+                curated_codex_models()
+            } else {
+                models
+            })
+        }
+        "claude-cli" => Ok(curated_claude_models()),
+        "gemini-cli" => {
+            let gemini_cli = find_executable(&["gemini"]);
+            let models = read_gemini_models(gemini_cli.as_deref()).await;
+            Ok(if models.is_empty() {
+                curated_gemini_models()
+            } else {
+                models
+            })
+        }
+        "antigravity-cli" => {
+            let agy_cli = find_executable(&["agy", "antigravity"]);
+            let models = read_agy_models(agy_cli.as_deref()).await;
+            Ok(if models.is_empty() {
+                curated_antigravity_models()
+            } else {
+                models
+            })
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+#[tauri::command]
+pub async fn list_local_models(
+    provider: String,
+    base_url: Option<String>,
+    api_key: Option<String>,
+) -> Result<Vec<String>, String> {
+    if provider == "ollama" {
+        let base = base_url.unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+        let (ok, models) = fetch_ollama_models(&base).await;
+        if !ok {
+            return Err(format!("Ollama is not reachable at {}", base));
+        }
+        return Ok(models);
+    }
+
+    let base = base_url.unwrap_or_else(|| "http://127.0.0.1:1234/v1".to_string());
+    let (ok, models) = fetch_openai_compat_models(&base, api_key.as_deref()).await;
+    if !ok {
+        return Err(format!("Server is not reachable at {}", base));
+    }
+    Ok(models)
+}
+
+#[tauri::command]
+pub async fn assist_ai_connection(
+    action: String,
+    target: Option<String>,
+) -> Result<String, String> {
+    match action.as_str() {
+        "start-ollama" => {
+            #[cfg(target_os = "macos")]
+            let launched = if Path::new("/Applications/Ollama.app").exists() {
+                Command::new("open")
+                    .args(["-a", "Ollama"])
+                    .spawn()
+                    .map_err(|e| format!("Failed to open Ollama.app: {}", e))?;
+                true
+            } else {
+                false
+            };
+            #[cfg(target_os = "windows")]
+            let launched = if let Some(app_exe) = find_ollama_app_path() {
+                std::process::Command::new(&app_exe)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Ollama app: {}", e))?;
+                true
+            } else {
+                false
+            };
+            #[cfg(all(unix, not(target_os = "macos")))]
+            let launched = false;
+
+            if !launched {
+                if let Some(bin) = find_executable(&["ollama"]) {
+                    let mut cmd = new_background_command(&bin, &["serve"]);
+                    cmd.env("PATH", extended_path())
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .map_err(|e| format!("Failed to start ollama serve: {}", e))?;
+                } else {
+                    return Err("Ollama is not installed on this machine.".to_string());
+                }
+            }
+
+            for _ in 0..12 {
+                tokio::time::sleep(Duration::from_millis(450)).await;
+                let (ok, _) = fetch_ollama_models("http://127.0.0.1:11434").await;
+                if ok {
+                    return Ok("Ollama started and is ready.".to_string());
+                }
+            }
+            Ok("Ollama launch requested; please wait a moment and re-detect.".to_string())
+        }
+
+        "open-lmstudio" => {
+            #[cfg(target_os = "macos")]
+            {
+                if Path::new("/Applications/LM Studio.app").exists() {
+                    Command::new("open")
+                        .args(["-a", "LM Studio"])
+                        .spawn()
+                        .map_err(|e| format!("Failed to open LM Studio: {}", e))?;
+                    return Ok("LM Studio launched. Start the Local Server in Developer tab.".to_string());
+                }
+                return Err("LM Studio app was not found in /Applications.".to_string());
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let Some(app_exe) = find_lmstudio_app_path() else {
+                    return Err("LM Studio was not found on this machine.".to_string());
+                };
+                std::process::Command::new(&app_exe)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open LM Studio: {}", e))?;
+                Ok("LM Studio launched. Start the Local Server in Developer tab.".to_string())
+            }
+        }
+
+        "open-url" => {
+            let url = target
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+                .ok_or_else(|| "Invalid URL".to_string())?;
+            #[cfg(target_os = "macos")]
+            {
+                Command::new("open")
+                    .arg(url)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open URL: {}", e))?;
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let mut cmd = new_background_command("cmd", &["/C", "start", "", url]);
+                cmd.spawn()
+                    .map_err(|e| format!("Failed to open URL: {}", e))?;
+            }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                Command::new("xdg-open")
+                    .arg(url)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open URL: {}", e))?;
+            }
+            Ok("Opened in browser.".to_string())
+        }
+
+        "open-antigravity" => {
+            #[cfg(target_os = "macos")]
+            {
+                for app_name in ["Antigravity", "Antigravity IDE"] {
+                    let app_path = format!("/Applications/{}.app", app_name);
+                    if Path::new(&app_path).exists() {
+                        Command::new("open")
+                            .args(["-a", app_name])
+                            .spawn()
+                            .map_err(|e| format!("Failed to open {}: {}", app_name, e))?;
+                        return Ok(format!("{} launched.", app_name));
+                    }
+                }
+                return Err("Antigravity app was not found in /Applications.".to_string());
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let Some(app_exe) = find_antigravity_app_path() else {
+                    return Err("Antigravity app was not found on this machine.".to_string());
+                };
+                std::process::Command::new(&app_exe)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open Antigravity: {}", e))?;
+                Ok("Antigravity launched.".to_string())
+            }
+        }
+
+        "run-terminal-setup" => {
+            let key = target.as_deref().unwrap_or("");
+            let shell_cmd = match key {
+                "codex-login" => "codex login",
+                "codex-install" => "npm install -g @openai/codex && codex login",
+                "claude-login" => "claude",
+                "claude-install" => "npm install -g @anthropic-ai/claude-code && claude",
+                "gemini-login" => "gemini",
+                "gemini-install" => "npm install -g @google/gemini-cli && gemini",
+                "antigravity-login" => "agy",
+                "antigravity-install" => {
+                    #[cfg(target_os = "macos")]
+                    {
+                        "agy install || open -a Antigravity"
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        "agy install"
+                    }
+                }
+                "ollama-pull-llama3.2" => "ollama pull llama3.2",
+                "ollama-pull-qwen2.5" => "ollama pull qwen2.5:7b",
+                _ => return Err(format!("Unsupported setup action: {}", key)),
+            };
+
+            #[cfg(target_os = "macos")]
+            {
+                let needs_npm = matches!(
+                    key,
+                    "codex-install" | "claude-install" | "gemini-install"
+                );
+                let prereq_block = if needs_npm {
+                    r#"if ! command -v npm >/dev/null 2>&1; then
+  echo "[Node.js / npm が見つかりません] 先に Node.js をインストールします..."
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "Homebrew が未導入のためインストールします (パスワードや Enter の入力が求められる場合があります)..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi
+    if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi
+  fi
+  if command -v brew >/dev/null 2>&1; then
+    brew install node
+  else
+    echo "Homebrew の準備ができなかったため、ブラウザで https://nodejs.org/ を開きます。"
+    open "https://nodejs.org/"
+    exit 1
+  fi
+fi
+"#
+                } else if key == "antigravity-install" {
+                    r#"if ! command -v agy >/dev/null 2>&1; then
+  if [ -d "/Applications/Antigravity.app" ]; then
+    echo "Antigravity.app を開きます。コマンドパレットから 'Install agy command in PATH' を実行してください。"
+    open -a Antigravity
+  elif [ -d "/Applications/Antigravity IDE.app" ]; then
+    echo "Antigravity IDE.app を開きます。コマンドパレットから 'Install agy command in PATH' を実行してください。"
+    open -a "Antigravity IDE"
+  else
+    echo "Antigravity アプリが見つからないため、ダウンロードページを開きます..."
+    open "https://antigravity.google/"
+  fi
+  exit 0
+fi
+"#
+                } else {
+                    ""
+                };
+
+                let script_path = env::temp_dir().join(format!("onigiri_ai_setup_{}.command", key));
+                let script_body = format!(
+                    "#!/bin/zsh\nexport PATH=\"{}\"\necho \"=== Onigiri Editor AI Setup ===\"\necho \"> {}\"\necho \"\"\n{}\n{}\necho \"\"\necho \"完了したら Onigiri Editor に戻り「再検出」をクリックしてください。\"\n",
+                    extended_path().replace('"', "\\\""),
+                    shell_cmd,
+                    prereq_block,
+                    shell_cmd
+                );
+                std::fs::write(&script_path, script_body)
+                    .map_err(|e| format!("Failed to write setup script: {}", e))?;
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = std::fs::metadata(&script_path)
+                        .map_err(|e| e.to_string())?
+                        .permissions();
+                    perms.set_mode(0o755);
+                    std::fs::set_permissions(&script_path, perms).map_err(|e| e.to_string())?;
+                }
+                Command::new("open")
+                    .args(["-a", "Terminal", &script_path.to_string_lossy()])
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch Terminal: {}", e))?;
+                return Ok(shell_cmd.to_string());
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                let needs_npm = matches!(
+                    key,
+                    "codex-install" | "claude-install" | "gemini-install"
+                );
+                let prereq_block = if needs_npm {
+                    r#"where npm >nul 2>nul
+if errorlevel 1 (
+  echo [Node.js / npm not found] Checking winget...
+  where winget >nul 2>nul
+  if errorlevel 1 (
+    echo winget ^(App Installer^) is not available on this Windows system.
+    echo Opening https://nodejs.org/ in your browser. Please install Node.js LTS and re-run.
+    start "" "https://nodejs.org/"
+    exit /b 1
+  )
+  echo Installing Node.js LTS via winget...
+  winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
+  for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')" 2^>nul`) do set "PATH=%%P;%PATH%"
+  set "PATH=%ProgramFiles%\nodejs;%APPDATA%\npm;%LOCALAPPDATA%\pnpm;%USERPROFILE%\.local\bin;%PATH%"
+  where npm >nul 2>nul
+  if errorlevel 1 (
+    echo Could not install Node.js automatically. Opening https://nodejs.org/ ...
+    start "" "https://nodejs.org/"
+    exit /b 1
+  )
+)
+"#
+                } else if key == "antigravity-install" {
+                    r#"where agy >nul 2>nul
+if errorlevel 1 (
+  if exist "%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe" (
+    echo Opening Antigravity. Run "Install agy command in PATH" from Command Palette.
+    start "" "%LOCALAPPDATA%\Programs\Antigravity\Antigravity.exe"
+  ) else (
+    echo Antigravity not found. Opening https://antigravity.google/ ...
+    start "" "https://antigravity.google/"
+  )
+  exit /b 0
+)
+"#
+                } else {
+                    ""
+                };
+
+                let escape_cmd_echo = |s: &str| -> String {
+                    s.replace('^', "^^")
+                        .replace('&', "^&")
+                        .replace('|', "^|")
+                        .replace('<', "^<")
+                        .replace('>', "^>")
+                };
+                let win_exec_cmd = match key {
+                    "codex-login" => "call codex login",
+                    "codex-install" => "call npm install -g @openai/codex && call codex login",
+                    "claude-login" => "call claude",
+                    "claude-install" => "call npm install -g @anthropic-ai/claude-code && call claude",
+                    "gemini-login" => "call gemini",
+                    "gemini-install" => "call npm install -g @google/gemini-cli && call gemini",
+                    "antigravity-login" => "call agy",
+                    "antigravity-install" => "call agy install",
+                    _ => shell_cmd,
+                };
+                let script_path = env::temp_dir().join(format!("onigiri_ai_setup_{}.cmd", key));
+                let script_body = format!(
+                    "@echo off\r\nchcp 65001 >nul\r\nset \"PATH={}\"\r\necho === Onigiri Editor AI Setup ===\r\necho ^> {}\r\necho.\r\n{}\r\n{}\r\necho.\r\necho Done. Return to Onigiri Editor and click Re-detect.\r\n",
+                    extended_path().replace('"', ""),
+                    escape_cmd_echo(shell_cmd),
+                    prereq_block,
+                    win_exec_cmd
+                );
+                std::fs::write(&script_path, script_body)
+                    .map_err(|e| format!("Failed to write setup script: {}", e))?;
+                let script_str = script_path.to_string_lossy().to_string();
+                let mut launch = new_background_command(
+                    "cmd",
+                    &["/C", "start", "Onigiri AI Setup", "cmd", "/K", &script_str],
+                );
+                launch
+                    .spawn()
+                    .map_err(|e| format!("Failed to open Command Prompt: {}", e))?;
+                return Ok(shell_cmd.to_string());
+            }
+
+            #[cfg(all(unix, not(target_os = "macos")))]
+            {
+                let needs_npm = matches!(
+                    key,
+                    "codex-install" | "claude-install" | "gemini-install"
+                );
+                let prereq_block = if needs_npm {
+                    r#"if ! command -v npm >/dev/null 2>&1; then
+  echo "[Node.js / npm not found] Attempting to install Node.js (may prompt for sudo password)..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y nodejs npm
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y nodejs npm
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -S --noconfirm nodejs npm
+  elif command -v zypper >/dev/null 2>&1; then
+    sudo zypper --non-interactive install nodejs npm
+  else
+    echo "Please install Node.js from https://nodejs.org/ and re-run."
+    xdg-open "https://nodejs.org/" >/dev/null 2>&1 || true
+    exit 1
+  fi
+fi
+"#
+                } else if key == "antigravity-install" {
+                    r#"if ! command -v agy >/dev/null 2>&1; then
+  if command -v antigravity >/dev/null 2>&1; then
+    echo "Opening Antigravity. Run 'Install agy command in PATH' from Command Palette."
+    antigravity >/dev/null 2>&1 &
+  else
+    echo "Antigravity was not found. Opening https://antigravity.google/ ..."
+    xdg-open "https://antigravity.google/" >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
+"#
+                } else {
+                    ""
+                };
+
+                let script_path = env::temp_dir().join(format!("onigiri_ai_setup_{}.sh", key));
+                let script_body = format!(
+                    "#!/usr/bin/env bash\nexport PATH=\"{}\"\necho \"=== Onigiri Editor AI Setup ===\"\necho \"> {}\"\necho \"\"\n{}\n{}\necho \"\"\necho \"Done. Press Enter to close and click Re-detect in Onigiri Editor.\"\nread -r _\n",
+                    extended_path().replace('"', "\\\""),
+                    shell_cmd.replace('"', "\\\""),
+                    prereq_block,
+                    shell_cmd
+                );
+                std::fs::write(&script_path, script_body)
+                    .map_err(|e| format!("Failed to write setup script: {}", e))?;
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = std::fs::metadata(&script_path)
+                        .map_err(|e| e.to_string())?
+                        .permissions();
+                    perms.set_mode(0o755);
+                    std::fs::set_permissions(&script_path, perms).map_err(|e| e.to_string())?;
+                }
+                let script_str = script_path.to_string_lossy().to_string();
+                launch_linux_terminal(&script_str)?;
+                Ok(shell_cmd.to_string())
+            }
+        }
+
+        other => Err(format!("Unsupported connection assist action: {}", other)),
+    }
+}
+
+fn format_cli_prompt(system_prompt: Option<&str>, messages: &[ChatMessageInput]) -> String {
+    let mut parts = Vec::new();
+    if let Some(sys) = system_prompt {
+        if !sys.trim().is_empty() {
+            parts.push(format!("System Instructions:\n{}\n", sys.trim()));
+        }
+    }
+    if messages.len() > 1 {
+        parts.push("Conversation History:".to_string());
+        for m in &messages[..messages.len() - 1] {
+            let role = if m.role == "assistant" {
+                "Assistant"
+            } else {
+                "User"
+            };
+            parts.push(format!("{}: {}", role, m.content));
+        }
+        parts.push(String::new());
+    }
+    if let Some(last) = messages.last() {
+        parts.push(last.content.clone());
+    }
+    parts.join("\n")
+}
+
+#[allow(dead_code)]
+fn clamp_utf16_prompt(prompt: &str, max_units: usize) -> String {
+    let mut count = 0usize;
+    let mut end_byte = prompt.len();
+    for (idx, ch) in prompt.char_indices() {
+        let u = ch.len_utf16();
+        if count + u > max_units {
+            end_byte = idx;
+            break;
+        }
+        count += u;
+    }
+    if end_byte < prompt.len() {
+        format!(
+            "{}\n\n[Note: Context truncated to fit OS command-line limit]",
+            &prompt[..end_byte]
+        )
+    } else {
+        prompt.to_string()
+    }
+}
+
+async fn run_cli_with_timeout(
+    bin: &str,
+    args: &[String],
+    stdin_input: Option<&str>,
+    working_dir: Option<&str>,
+    timeout_secs: u64,
+) -> Result<(String, String), String> {
+    let mut cmd = build_cli_command(bin, args);
+    cmd.env("PATH", extended_path())
+        .env("GEMINI_CLI_TRUST_WORKSPACE", "true")
+        .stdin(if stdin_input.is_some() {
+            std::process::Stdio::piped()
+        } else {
+            std::process::Stdio::null()
+        })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(dir) = working_dir {
+        let p = Path::new(dir);
+        if p.exists() && p.is_dir() {
+            cmd.current_dir(p);
+        }
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start '{}': {}", bin, e))?;
+
+    if let Some(input) = stdin_input {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(input.as_bytes()).await;
+            let _ = stdin.shutdown().await;
+        }
+    }
+
+    let output = tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
+        .await
+        .map_err(|_| format!("CLI '{}' timed out after {}s", bin, timeout_secs))?
+        .map_err(|e| format!("CLI '{}' execution failed: {}", bin, e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if !output.status.success() && stdout.is_empty() {
+        return Err(if stderr.is_empty() {
+            format!("CLI exited with status {}", output.status)
+        } else {
+            stderr
+        });
+    }
+    Ok((stdout, stderr))
+}
+
+#[tauri::command]
+pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
+    let provider = request.provider.as_str();
+    let model_opt = request
+        .model
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let workspace_dir = request
+        .workspace_dir
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    let allow_write = request.allow_workspace_write.unwrap_or(false);
+
+    match provider {
+        "codex-cli" => {
+            let bin = find_executable(&["codex"])
+                .ok_or_else(|| "Codex CLI (`codex`) was not found on PATH.".to_string())?;
+            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let out_file = std::env::temp_dir().join(format!(
+                "onigiri_codex_{}.txt",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            ));
+            let sandbox_mode = if allow_write && workspace_dir.is_some() {
+                "workspace-write"
+            } else {
+                "read-only"
+            };
+            let mut args = vec![
+                "exec".to_string(),
+                "--skip-git-repo-check".to_string(),
+                "--sandbox".to_string(),
+                sandbox_mode.to_string(),
+                "-o".to_string(),
+                out_file.to_string_lossy().to_string(),
+            ];
+            if let Some(dir) = workspace_dir {
+                args.push("-C".to_string());
+                args.push(dir.to_string());
+            }
+            if let Some(m) = model_opt {
+                args.push("-m".to_string());
+                args.push(m.to_string());
+            }
+            args.push("-".to_string());
+
+            let (stdout, stderr) =
+                run_cli_with_timeout(&bin, &args, Some(&prompt), workspace_dir, 180).await?;
+            let file_text = std::fs::read_to_string(&out_file).unwrap_or_default();
+            let _ = std::fs::remove_file(&out_file);
+            let content = if !file_text.trim().is_empty() {
+                file_text.trim().to_string()
+            } else if !stdout.is_empty() {
+                stdout
+            } else {
+                return Err(if stderr.is_empty() {
+                    "Codex CLI returned an empty response.".to_string()
+                } else {
+                    stderr
+                });
+            };
+            Ok(AiChatResponse {
+                content,
+                model_used: model_opt.unwrap_or("codex-subscription").to_string(),
+            })
+        }
+
+        "claude-cli" => {
+            let bin = find_executable(&["claude"]).ok_or_else(|| {
+                "Claude Code CLI (`claude`) was not found on PATH.".to_string()
+            })?;
+            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let mut args = vec!["-p".to_string()];
+            if let Some(m) = model_opt {
+                args.push("--model".to_string());
+                args.push(m.to_string());
+            }
+            let use_stdin = cfg!(target_os = "windows") && prompt.encode_utf16().count() > 14_000;
+            let stdin_opt = if use_stdin {
+                Some(prompt.as_str())
+            } else {
+                args.push(prompt.clone());
+                None
+            };
+            let (stdout, stderr) =
+                run_cli_with_timeout(&bin, &args, stdin_opt, workspace_dir, 180).await?;
+            if stdout.is_empty() {
+                return Err(if stderr.is_empty() {
+                    "Claude CLI returned an empty response.".to_string()
+                } else {
+                    stderr
+                });
+            }
+            Ok(AiChatResponse {
+                content: stdout,
+                model_used: model_opt.unwrap_or("claude-subscription").to_string(),
+            })
+        }
+
+        "gemini-cli" => {
+            let bin = find_executable(&["gemini"]).ok_or_else(|| {
+                "Gemini CLI (`gemini`) was not found on PATH.".to_string()
+            })?;
+            let has_adc = env::var("GOOGLE_APPLICATION_CREDENTIALS")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+                || env::var("GOOGLE_GENAI_USE_VERTEXAI")
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false);
+            if !check_gemini_logged_in() && !has_adc {
+                return Err(
+                    "Gemini CLI is not signed in. Please run `gemini` in Terminal (or click Setup in the AI Connection Support card) to authenticate."
+                        .to_string(),
+                );
+            }
+            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let mut args = Vec::new();
+            if let Some(m) = model_opt.filter(|m| *m != "auto") {
+                args.push("-m".to_string());
+                args.push(m.to_string());
+            }
+            let use_stdin = cfg!(target_os = "windows") && prompt.encode_utf16().count() > 14_000;
+            args.push("-p".to_string());
+            let stdin_opt = if use_stdin {
+                args.push("Follow the prompt provided via stdin.".to_string());
+                Some(prompt.as_str())
+            } else {
+                args.push(prompt.clone());
+                None
+            };
+            let (stdout, stderr) =
+                run_cli_with_timeout(&bin, &args, stdin_opt, workspace_dir, 180).await?;
+            if stdout.is_empty() {
+                return Err(if stderr.is_empty() {
+                    "Gemini CLI returned an empty response.".to_string()
+                } else {
+                    stderr
+                });
+            }
+            Ok(AiChatResponse {
+                content: stdout,
+                model_used: model_opt.unwrap_or("gemini-cli").to_string(),
+            })
+        }
+
+        "antigravity-cli" => {
+            let bin = find_executable(&["agy", "antigravity"]).ok_or_else(|| {
+                "Antigravity CLI (`agy`) was not found on PATH.".to_string()
+            })?;
+            let raw_prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let prompt = if cfg!(target_os = "windows") {
+                clamp_utf16_prompt(&raw_prompt, 26_000)
+            } else {
+                raw_prompt
+            };
+            let mut args = vec!["--output-format".to_string(), "text".to_string()];
+            if allow_write && workspace_dir.is_some() {
+                args.push("--mode".to_string());
+                args.push("accept-edits".to_string());
+            }
+            if let Some(m) = model_opt.filter(|m| *m != "auto") {
+                args.push("--model".to_string());
+                args.push(m.to_string());
+            }
+            args.push("-p".to_string());
+            args.push(prompt);
+            let (stdout, stderr) =
+                run_cli_with_timeout(&bin, &args, None, workspace_dir, 180).await?;
+            if stdout.is_empty() {
+                return Err(if stderr.is_empty() {
+                    "Antigravity CLI returned an empty response.".to_string()
+                } else {
+                    stderr
+                });
+            }
+            Ok(AiChatResponse {
+                content: stdout,
+                model_used: model_opt.unwrap_or("antigravity-cli").to_string(),
+            })
+        }
+
+        "custom-cli" => {
+            let raw_cmd = request
+                .custom_cli_cmd
+                .as_deref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "Custom CLI command is empty.".to_string())?;
+            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let mut tokens: Vec<String> = raw_cmd.split_whitespace().map(|s| s.to_string()).collect();
+            let cmd_name = tokens.remove(0);
+            let bin = find_executable(&[&cmd_name]).unwrap_or(cmd_name);
+
+            let mut used_placeholder = false;
+            for arg in &mut tokens {
+                if arg.contains("{prompt}") {
+                    *arg = arg.replace("{prompt}", &prompt);
+                    used_placeholder = true;
+                }
+            }
+            let (stdout, stderr) = run_cli_with_timeout(
+                &bin,
+                &tokens,
+                if used_placeholder { None } else { Some(&prompt) },
+                workspace_dir,
+                180,
+            )
+            .await?;
+            if stdout.is_empty() {
+                return Err(if stderr.is_empty() {
+                    "Custom CLI returned an empty response.".to_string()
+                } else {
+                    stderr
+                });
+            }
+            Ok(AiChatResponse {
+                content: stdout,
+                model_used: raw_cmd.to_string(),
+            })
+        }
+
+        "openai-api" | "lmstudio" | "openai-compat" => {
+            let default_base = match provider {
+                "lmstudio" => "http://127.0.0.1:1234/v1",
+                "openai-compat" => "http://127.0.0.1:8080/v1",
+                _ => "https://api.openai.com/v1",
+            };
+            let base = request
+                .base_url
+                .as_deref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(default_base)
+                .trim_end_matches('/');
+            let endpoint = if base.ends_with("/chat/completions") {
+                base.to_string()
+            } else if base.ends_with("/v1") {
+                format!("{}/chat/completions", base)
+            } else {
+                format!("{}/v1/chat/completions", base)
+            };
+
+            let model = model_opt.unwrap_or(match provider {
+                "openai-api" => "gpt-4.1",
+                _ => "local-model",
+            });
+
+            if provider == "openai-api"
+                && request
+                    .api_key
+                    .as_deref()
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true)
+            {
+                return Err("OpenAI API key is required.".to_string());
+            }
+
+            let mut msg_list = Vec::new();
+            if let Some(sys) = request.system_prompt.as_deref() {
+                if !sys.trim().is_empty() {
+                    msg_list.push(serde_json::json!({ "role": "system", "content": sys.trim() }));
+                }
+            }
+            for m in &request.messages {
+                msg_list.push(serde_json::json!({ "role": m.role, "content": m.content }));
+            }
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .map_err(|e| e.to_string())?;
+            let mut req = client.post(&endpoint).json(&serde_json::json!({
+                "model": model,
+                "messages": msg_list,
+                "temperature": 0.7
+            }));
+            if let Some(key) = request.api_key.as_deref() {
+                if !key.trim().is_empty() {
+                    req = req.bearer_auth(key.trim());
+                }
+            }
+
+            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(format!("API error ({}): {}", status, body));
+            }
+            let content = body["choices"][0]["message"]["content"]
+                .as_str()
+                .ok_or_else(|| format!("Unexpected API response: {}", body))?
+                .to_string();
+
+            Ok(AiChatResponse {
+                content,
+                model_used: model.to_string(),
+            })
+        }
+
+        "anthropic-api" => {
+            let api_key = request
+                .api_key
+                .as_deref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "Anthropic API key is required.".to_string())?;
+            let model = model_opt.unwrap_or("claude-sonnet-4-5");
+            let base = request
+                .base_url
+                .as_deref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("https://api.anthropic.com")
+                .trim_end_matches('/');
+            let endpoint = format!("{}/v1/messages", base);
+
+            let msgs: Vec<serde_json::Value> = request
+                .messages
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "role": if m.role == "assistant" { "assistant" } else { "user" },
+                        "content": m.content
+                    })
+                })
+                .collect();
+
+            let mut payload = serde_json::json!({
+                "model": model,
+                "max_tokens": 4096,
+                "messages": msgs
+            });
+            if let Some(sys) = request.system_prompt.as_deref() {
+                if !sys.trim().is_empty() {
+                    payload["system"] = serde_json::json!(sys.trim());
+                }
+            }
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .map_err(|e| e.to_string())?;
+            let resp = client
+                .post(&endpoint)
+                .header("x-api-key", api_key)
+                .header("anthropic-version", "2023-06-01")
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(format!("Anthropic API error ({}): {}", status, body));
+            }
+            let content = body["content"]
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|c| c["text"].as_str())
+                .ok_or_else(|| format!("Unexpected Anthropic response: {}", body))?
+                .to_string();
+
+            Ok(AiChatResponse {
+                content,
+                model_used: model.to_string(),
+            })
+        }
+
+        "gemini-api" => {
+            let api_key = request
+                .api_key
+                .as_deref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "Gemini API key is required.".to_string())?;
+            let model = model_opt.unwrap_or("gemini-2.5-flash");
+            let endpoint = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+                model, api_key
+            );
+
+            let contents: Vec<serde_json::Value> = request
+                .messages
+                .iter()
+                .map(|m| {
+                    serde_json::json!({
+                        "role": if m.role == "assistant" { "model" } else { "user" },
+                        "parts": [{ "text": m.content }]
+                    })
+                })
+                .collect();
+
+            let mut payload = serde_json::json!({ "contents": contents });
+            if let Some(sys) = request.system_prompt.as_deref() {
+                if !sys.trim().is_empty() {
+                    payload["systemInstruction"] =
+                        serde_json::json!({ "parts": [{ "text": sys.trim() }] });
+                }
+            }
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .map_err(|e| e.to_string())?;
+            let resp = client
+                .post(&endpoint)
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(format!("Gemini API error ({}): {}", status, body));
+            }
+            let content = body["candidates"][0]["content"]["parts"][0]["text"]
+                .as_str()
+                .ok_or_else(|| format!("Unexpected Gemini response: {}", body))?
+                .to_string();
+
+            Ok(AiChatResponse {
+                content,
+                model_used: model.to_string(),
+            })
+        }
+
+        "ollama" => {
+            let base = request
+                .base_url
+                .as_deref()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .unwrap_or("http://127.0.0.1:11434")
+                .trim_end_matches('/');
+            let endpoint = format!("{}/api/chat", base);
+            let model = model_opt.unwrap_or("llama3.2");
+
+            let mut msg_list = Vec::new();
+            if let Some(sys) = request.system_prompt.as_deref() {
+                if !sys.trim().is_empty() {
+                    msg_list.push(serde_json::json!({ "role": "system", "content": sys.trim() }));
+                }
+            }
+            for m in &request.messages {
+                msg_list.push(serde_json::json!({ "role": m.role, "content": m.content }));
+            }
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(180))
+                .build()
+                .map_err(|e| e.to_string())?;
+            let resp = client
+                .post(&endpoint)
+                .json(&serde_json::json!({
+                    "model": model,
+                    "messages": msg_list,
+                    "stream": false
+                }))
+                .send()
+                .await
+                .map_err(|e| format!("Failed to connect to Ollama ({}): {}", endpoint, e))?;
+            let status = resp.status();
+            let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            if !status.is_success() {
+                return Err(format!("Ollama error ({}): {}", status, body));
+            }
+            let content = body["message"]["content"]
+                .as_str()
+                .ok_or_else(|| format!("Unexpected Ollama response: {}", body))?
+                .to_string();
+
+            Ok(AiChatResponse {
+                content,
+                model_used: model.to_string(),
+            })
+        }
+
+        other => Err(format!("Unsupported AI provider: {}", other)),
+    }
+}
+
+pub fn resolve_image_path(path_str: &str, base_dir: Option<&str>) -> PathBuf {
+    let raw = Path::new(path_str);
+    if raw.is_absolute() {
+        return raw.to_path_buf();
+    }
+    if let Some(base) = base_dir {
+        let base_path = Path::new(base);
+        let dir = if base_path.is_file() {
+            base_path.parent().unwrap_or(base_path)
+        } else {
+            base_path
+        };
+        return dir.join(raw);
+    }
+    raw.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_codex_models_and_config_default() {
+        let toml = r#"
+notify = ["echo"]
+model = "gpt-5.6-sol"
+model_reasoning_effort = "medium"
+
+[tui]
+screen_reader_detection_done = true
+"#;
+        assert_eq!(
+            parse_codex_default_model_toml(toml).as_deref(),
+            Some("gpt-5.6-sol")
+        );
+
+        let cache = r#"{
+          "models": [
+            {"slug": "gpt-6.1-sol", "visibility": "list"},
+            {"slug": "gpt-reserve", "visibility": "hide"},
+            {"slug": "gpt-5.6-sol", "visibility": "list"}
+          ]
+        }"#;
+        assert_eq!(
+            parse_codex_models_cache_json(cache),
+            vec!["gpt-6.1-sol".to_string(), "gpt-5.6-sol".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_gemini_list_models_output() {
+        let out = r#"Available Gemini Models:
+
+auto (Auto)
+  Description:   Let Gemini CLI decide
+  Context limit: 1,048,576 input tokens
+
+gemini-2.5-pro (gemini-2.5-pro)
+  Context limit: 1,048,576 input tokens
+
+gemini-3.5-flash (gemini-3.5-flash)
+  Context limit: 1,048,576 input tokens
+"#;
+        assert_eq!(
+            parse_gemini_list_models(out),
+            vec![
+                "auto".to_string(),
+                "gemini-2.5-pro".to_string(),
+                "gemini-3.5-flash".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_agy_models_with_spinner() {
+        let out = "\r⠋ Fetching available models...\r⠙ Fetching available models...\rgemini-4-hydrogen-high          Gemini 4 Hydrogen (High)\ngemini-4-argon-medium           Gemini 4 Argon (Medium)\nclaude-opus-5-5-high            Claude Opus 5.5 (High)\ngpt-oss-120b-medium             GPT-OSS 120B (Medium)\n";
+        assert_eq!(
+            parse_agy_models(out),
+            vec![
+                "gemini-4-hydrogen-high".to_string(),
+                "gemini-4-argon-medium".to_string(),
+                "claude-opus-5-5-high".to_string(),
+                "gpt-oss-120b-medium".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_and_merges_gemini_models_json() {
+        let json = r#"[
+          {"modelId": "auto", "displayName": "Auto"},
+          {"modelId": "gemini-2.5-pro", "displayName": "gemini-2.5-pro"},
+          {"modelId": "gemini-3.5-flash", "displayName": "gemini-3.5-flash"}
+        ]"#;
+        let parsed = parse_gemini_models_json(json);
+        assert_eq!(parsed, vec!["auto", "gemini-2.5-pro", "gemini-3.5-flash"]);
+        let merged = merge_modern_gemini_models(parsed);
+        assert!(merged.contains(&"gemini-3.8-flash".to_string()));
+        assert!(merged.contains(&"gemini-3.1-pro-preview".to_string()));
+    }
+
+    #[test]
+    fn extended_path_joins_entries_cleanly() {
+        let joined = extended_path();
+        assert!(env::split_paths(&joined).count() >= 3);
+    }
+
+    #[test]
+    fn parses_windows_npm_and_pnpm_cmd_shims() {
+        let npm_shim = r#"@ECHO off
+SET dp0=%~dp0
+endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\node_modules\@openai\codex\bin\codex.js" %*
+"#;
+        assert_eq!(
+            parse_windows_cmd_shim_rel(npm_shim).as_deref(),
+            Some(r"node_modules\@openai\codex\bin\codex.js")
+        );
+
+        let mjs_shim = r#"@"%dp0%\node.exe" "%~dp0\..\lib\cli.mjs" %*"#;
+        assert_eq!(
+            parse_windows_cmd_shim_rel(mjs_shim).as_deref(),
+            Some(r"..\lib\cli.mjs")
+        );
+
+        let non_node_cmd = "@echo off\r\necho hello\r\n";
+        assert_eq!(parse_windows_cmd_shim_rel(non_node_cmd), None);
+    }
+
+    #[test]
+    fn clamps_utf16_prompt_safely_at_char_boundaries() {
+        let ascii = "hello world";
+        assert_eq!(clamp_utf16_prompt(ascii, 20), "hello world");
+
+        let jp = "あいうえお🍙かき";
+        let clamped = clamp_utf16_prompt(jp, 6);
+        assert!(clamped.starts_with("あいうえお"));
+        assert!(clamped.contains("truncated"));
+    }
+}

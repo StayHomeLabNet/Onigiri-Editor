@@ -6,6 +6,7 @@ import {
   Code,
   FileCode,
   Link,
+  ImagePlus,
   List,
   ListOrdered,
   ListTodo,
@@ -26,6 +27,7 @@ import {
 } from 'lucide-react';
 import type { AppMode } from '../types';
 import type { Translations } from '../i18n/types';
+import { formatShortcut } from '../utils/platform';
 
 interface FormatToolbarProps {
   t: Translations;
@@ -64,10 +66,10 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction 
       <span className="tb-sep" />
 
       <div className="tb-group">
-        <button type="button" className="tb-btn" onClick={() => onAction('bold')} title={`${t.toolbar.bold} (⌘B)`}>
+        <button type="button" className="tb-btn" onClick={() => onAction('bold')} title={`${t.toolbar.bold} (${formatShortcut('⌘B')})`}>
           <Bold size={15} />
         </button>
-        <button type="button" className="tb-btn" onClick={() => onAction('italic')} title={`${t.toolbar.italic} (⌘I)`}>
+        <button type="button" className="tb-btn" onClick={() => onAction('italic')} title={`${t.toolbar.italic} (${formatShortcut('⌘I')})`}>
           <Italic size={15} />
         </button>
         {mode === 'advanced' && (
@@ -83,6 +85,9 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction 
         </button>
         <button type="button" className="tb-btn" onClick={() => onAction('link')} title={t.toolbar.link}>
           <Link size={15} />
+        </button>
+        <button type="button" className="tb-btn" onClick={() => onAction('image')} title={t.toolbar.image}>
+          <ImagePlus size={15} />
         </button>
       </div>
 
@@ -159,7 +164,7 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction 
           type="button"
           className="tb-btn"
           onClick={() => onAction('find')}
-          title={`${t.actions.findReplace} (⌘F)`}
+          title={`${t.actions.findReplace} (${formatShortcut('⌘F')})`}
         >
           <Search size={15} />
         </button>

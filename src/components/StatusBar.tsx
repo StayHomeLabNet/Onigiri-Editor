@@ -7,6 +7,7 @@ interface StatusBarProps {
   mode: AppMode;
   isDirty: boolean;
   filePath?: string;
+  autoSaveEnabled?: boolean;
   stats: DocumentStats;
   cursorLine: number;
   cursorCol: number;
@@ -20,6 +21,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   mode,
   isDirty,
   filePath,
+  autoSaveEnabled,
   stats,
   cursorLine,
   cursorCol,
@@ -36,6 +38,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <span className="status-dot" />
           {isDirty ? t.status.unsaved : filePath ? t.status.saved : t.status.draft}
         </span>
+
+        {autoSaveEnabled && filePath && (
+          <span className="status-autosave-pill">{t.status.autoSaveOn}</span>
+        )}
 
         {mode === 'advanced' && filePath && (
           <span className="status-path" title={filePath}>

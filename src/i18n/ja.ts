@@ -1,13 +1,15 @@
 import type { Translations } from './types';
 
 export const ja: Translations = {
-  appName: 'Onigiri-Markdown',
-  versionLabel: 'v0.1.0',
+  appName: 'Onigiri Editor',
+  versionLabel: 'v1.0.0',
   modes: {
-    basic: 'ベーシック',
-    advanced: 'アドバンスド',
-    basicHint: '書くこととプレビューに集中できるシンプルモード',
-    advancedHint: 'マルチタブ・アウトライン・AI整形・Diff・設定を備えた高機能モード',
+    simple: 'シンプル',
+    basic: '標準',
+    advanced: '拡張',
+    simpleHint: '軽量エディタ風の極小UI・エディタ単体モード',
+    basicHint: '書くこと・プレビュー編集・AIチャットに集中できる標準モード',
+    advancedHint: 'マルチタブ・フォルダ連携・アウトライン・Diffを備えた拡張モード',
   },
   layouts: {
     editor: 'エディタ',
@@ -43,15 +45,19 @@ export const ja: Translations = {
     findReplace: '検索と置換',
     zenMode: '集中モード (Zen)',
     exitZen: '集中モードを終了',
-    inspector: 'インスペクター',
+    inspector: 'オプション',
+    optionsPanel: 'オプション / AIチャット',
     sidebar: 'サイドバー',
-    about: 'Onigiri-Markdown について',
+    settings: '設定',
+    about: 'Onigiri Editor について',
     close: '閉じる',
     cancel: 'キャンセル',
     apply: '適用',
     reset: 'リセット',
     undo: '元に戻す',
     redo: 'やり直し',
+    openExternalPreview: '外部ブラウザでライブプレビュー',
+    stopExternalPreview: 'ライブサーバーを停止',
   },
   toolbar: {
     heading1: '見出し 1',
@@ -63,6 +69,7 @@ export const ja: Translations = {
     inlineCode: 'インラインコード',
     codeBlock: 'コードブロック',
     link: 'リンク',
+    image: '画像を挿入',
     bulletList: '箇条書き',
     numberedList: '番号付きリスト',
     taskList: 'タスクリスト',
@@ -79,7 +86,7 @@ export const ja: Translations = {
     outline: 'アウトライン',
     snippets: 'スニペット',
     noFolder: 'フォルダが開かれていません',
-    openFolderPrompt: 'Markdownファイルを含むフォルダを開くと、ツリー表示や全文検索が使えます。',
+    openFolderPrompt: 'Markdownファイルを含むフォルダを開くと、ツリー表示や全文検索・AI連携が使えます。',
     chooseFolder: 'フォルダを選択',
     filterFiles: 'ファイル名で絞り込み...',
     searchContent: '全文検索',
@@ -92,7 +99,8 @@ export const ja: Translations = {
     insertSnippet: 'クリックしてカーソル位置に挿入',
   },
   inspector: {
-    ai: 'AIツール',
+    chat: 'AIチャット',
+    ai: '整形ツール',
     stats: '統計',
     diff: '履歴・差分',
     frontmatter: 'メタデータ',
@@ -167,6 +175,214 @@ export const ja: Translations = {
       wordGoal: '目標文字数（0で非表示）',
       customCss: 'カスタムCSS（プレビュー用）',
       customCssPlaceholder: '.markdown-body h1 { color: #6366f1; }',
+      activeLineSyncHighlight: '編集中ペインの対応行・ブロックを相手側にマーク表示',
+      oeditLineCopyEnabled: 'スマート行コピー（選択なしで ⌘+C / Ctrl+C 時に行全体コピー）',
+      oeditLineCopyTrigger: '行コピーの発動条件',
+      triggerEolOnly: '行末にカーソルがある時のみ',
+      triggerAnyEmptySel: '行内のどこでも（選択範囲がない時）',
+      oeditLineCopyIncludeNewline: '行末の改行（\\n）を含めてコピーする',
+      syntaxPreset: 'シンタックスハイライト配色プリセット',
+      syntaxResetBtn: 'プリセットの色に戻す',
+      syntaxColorsTitle: 'トークン別の配色カスタマイズ',
+      syntaxTokens: {
+        keyword: 'キーワード (if / function)',
+        string: '文字列 ("text")',
+        number: '数値・真偽値',
+        comment: 'コメント',
+        function: '関数・メソッド名',
+        type: '型名・クラス名',
+        variable: '変数・識別子',
+        operator: '演算子・記号',
+        tag: 'HTML / JSX タグ',
+        property: 'プロパティ・属性',
+      },
+      aiFolderMode: 'AI フォルダー連携権限（拡張モード）',
+      aiFolderModes: {
+        disabled: '無効（開いているファイルのみ）',
+        readOnly: '読み込みのみ（フォルダー参照可）',
+        readWriteApprove: '読み書き（変更案を確認後に適用）',
+        cliDirect: 'CLI 直接書き込み許可（Codex / Claude / Gemini）',
+      },
+      builtinBrowserEnabled: '右ペインの内蔵 Web ブラウザ切替を有効にする',
+      builtinBrowserDefaultUrl: '内蔵ブラウザの初期 URL',
+      externalBrowserPreviewEnabled: '外部ブラウザ（Chrome / Safari 等）でのライブプレビューを有効にする',
+      externalBrowserPort: 'ライブプレビュー用ローカルポート（0 で自動）',
+      restoreSessionEnabled: '起動時に前回のタブ・フォルダー・編集内容を復元する',
+      autoSaveEnabled: '保存済みファイルを自動保存する（1.5秒ごと・外部競合時は停止）',
+    },
+  },
+  settingsModal: {
+    title: '設定 (Onigiri Editor)',
+    tabGeneral: '全般・表示',
+    tabEditor: 'エディタ / 行コピー',
+    tabSyntax: '言語ハイライト',
+    tabIntegrations: 'AI・ブラウザ',
+    localeLabel: '表示言語（メニューバー連動）',
+    themeLabel: 'カラーテーマ',
+    openInSidebarHint: '右のオプションパネル内の設定とも同期します（⌘ + , でいつでも開けます）。',
+    externalPreviewCrossPlatformNote:
+      '※ 外部ブラウザライブプレビュー（ローカル HTTP + 自動リロード）は macOS / Windows / Linux すべてで同一の挙動で動作します。',
+  },
+  browser: {
+    modePreview: 'プレビュー',
+    modeBrowser: 'Webブラウザ',
+    back: '戻る',
+    forward: '進む',
+    reload: '再読み込み',
+    urlPlaceholder: 'URL または検索語を入力して Enter...',
+    go: '移動',
+    openExternal: '外部ブラウザで開く',
+    externalLiveTitle: '外部ブラウザでリアルタイム自動更新プレビューを開く',
+    externalLiveBtn: '外部ブラウザ',
+    externalStopBtn: '配信停止',
+    webOnlyHint: 'Tauri ネイティブのマルチ WebView はデスクトップ版アプリで動作します（Web版では簡易表示）。',
+    htmlLiveLabel: 'HTML ライブページプレビュー',
+    svgLiveLabel: 'SVG ライブプレビュー',
+    viewportFull: '全幅',
+    viewportMobile: 'モバイル (390px)',
+    codePreviewLabel: 'コードプレビュー（編集行と同期）',
+    phpServerHint: 'PHP はローカル開発サーバー（http://localhost 等）経由で実行表示されます。',
+    openBuiltinBrowserBtn: '内蔵ブラウザで開く',
+    platformNoteWebKit:
+      '内蔵ブラウザは macOS 標準の WebKit (WKWebView) を使用します。表示制限があるページは「外部ブラウザで開く」をご利用ください。',
+    platformNoteWebView2:
+      'Windows の内蔵ブラウザは Microsoft Edge WebView2 を使用します。表示や高DPIに違和感がある場合（または Windows 10 で未導入の場合）は「外部ブラウザで開く」または外部ブラウザライブプレビューをご利用ください。',
+    platformNoteWebKitGtk:
+      'Linux の内蔵ブラウザは WebKitGTK を使用します。Wayland や GPU 環境によって描画が崩れる場合は「外部ブラウザで開く」または外部ブラウザライブプレビューをおすすめします。',
+    browserErrorRecoveryWindows:
+      'Windows では Microsoft Edge WebView2 Runtime が未導入・古い場合やローカルサーバー未起動時に発生することがあります。再読み込みで改善しない場合は「外部ブラウザで開く」をご利用ください。',
+    browserErrorRecoveryLinux:
+      'Linux では WebKitGTK / Wayland の描画互換性や対象サーバーへの接続問題で発生することがあります。再読み込みで改善しない場合は「外部ブラウザで開く」をご利用ください。',
+  },
+  project: {
+    detectedLabel: 'プロジェクト連携',
+    startAndBrowse: '開発サーバー起動してブラウザ表示',
+    startServer: 'サーバー起動',
+    stopServer: 'サーバー停止',
+    disconnectServer: '接続解除',
+    startingServer: 'サーバー起動中...',
+    externalServerLabel: '既存サーバー接続中',
+    openInBuiltin: '内蔵ブラウザで表示',
+    openInExternal: '外部ブラウザで開く',
+    previewDistBtn: 'dist/ をローカル配信して表示',
+    openDistSource: 'dist/index.html を開く',
+    spaNeedsDevTitle: 'アプリ開発プロジェクトのエントリー HTML です',
+    spaNeedsDevDesc: 'Vite / TypeScript / Tailwind などを含むため、開発サーバーを起動すると内蔵ブラウザでライブ表示（HMR）できます。',
+    serverRunningLabel: '稼働中',
+    serverStoppedLabel: '停止中',
+    distNote: 'ビルド済みの dist/ をローカル HTTP サーバー経由でそのまま表示することもできます。',
+    retryLoad: '再読み込み',
+    browserErrorHint: '内蔵ブラウザの初期化またはページ読み込みに失敗しました。',
+    setupRequiredTitle: '起動前の環境チェック・セットアップ',
+    setupWarningTitle: '環境・設定のヒント',
+    recheckEnvBtn: '環境を再チェック',
+    recheckingEnv: '確認中...',
+    runningSetup: 'セットアップ実行中...',
+    openTerminalBtn: 'Terminal で実行',
+    openDownloadPageBtn: '公式サイトを開く',
+    copyCmdBtn: 'コマンドをコピー',
+    showLogsBtn: 'ログを表示',
+    hideLogsBtn: 'ログを閉じる',
+    terminalOpenedMsg: 'Terminal でセットアップを開きました。完了後に「環境を再チェック」を押してください。',
+    platformNoteWindows:
+      'Windows のヒント: セットアップ後は「環境を再チェック」を押してください。新しく PATH に追加されたツールが検出されない場合はアプリを一度再起動してください（winget 未導入時は公式サイトを開きます）。',
+    platformNoteLinux:
+      'Linux のヒント: パッケージ導入や Docker 起動時は端末内で sudo パスワードの入力が必要です。ネイティブ Docker Engine を使う場合はユーザーを docker グループへ追加（sudo usermod -aG docker $USER）して再ログインしてください。',
+  },
+  imageModal: {
+    title: '画像を挿入',
+    tabFile: 'ローカルファイルから選択',
+    tabUrl: 'URLを指定',
+    chooseFile: '画像ファイルを選択...',
+    selectedFile: '選択中のファイル',
+    urlLabel: '画像URL または パス',
+    urlPlaceholder: 'https://example.com/image.png または ./assets/photo.png',
+    altLabel: '代替テキスト (Alt)',
+    altPlaceholder: '画像の説明（省略可）',
+    insertBtn: '画像を挿入',
+    dropTip: 'ヒント: エディタやプレビュー画面へ画像ファイルをドラッグ＆ドロップ、またはクリップボードから直接ペーストすることもできます。',
+  },
+  aiChat: {
+    title: 'AI チャットアシスタント',
+    providerLabel: 'プロバイダー',
+    catSubscription: 'サブスク CLI（ローカル連携）',
+    catCloudApi: 'クラウド API',
+    catLocal: 'ローカル AI',
+    configToggle: '接続設定',
+    detectRefresh: '再検出',
+    detected: '検出済み',
+    notFound: '未検出',
+    running: '起動中',
+    offline: 'オフライン',
+    modelLabel: 'モデル選択 / 指定',
+    modelShortLabel: 'モデル',
+    defaultModelOption: 'デフォルト (CLI設定)',
+    customModelOption: 'カスタムモデルを入力...',
+    modelPlaceholder: '例: gpt-4.1 / claude-sonnet-4-5 / llama3.2',
+    apiKeyLabel: 'API キー',
+    apiKeyPlaceholder: 'sk-... / AIza...',
+    baseUrlLabel: 'ベース URL',
+    customCliLabel: 'カスタムCLIコマンド',
+    customCliHint: '例: my-agent --prompt {prompt}（{prompt} 省略時は標準入力へ送信）',
+    refreshModels: 'モデル一覧を更新',
+    loginNeeded: '要ログイン',
+    setupGuideTitle: 'AI 接続サポート',
+    setupGuideBtn: '接続サポート',
+    availableSwitchTitle: '利用可能な AI にすぐ切り替えできます',
+    switchToProvider: 'に切替',
+    notInstalledCli: 'CLI がインストールされていないか、PATH 上に見つかりません。',
+    notLoggedInCli: 'CLI は見つかりましたが、ログイン（認証）が必要です。',
+    ollamaNotRunningDesc: 'Ollama はインストール済みですが、ローカルサーバーが停止しています。',
+    ollamaNoModelsDesc: 'Ollama は起動中ですが、ダウンロード済みモデルがありません。',
+    ollamaNotInstalledDesc: 'Ollama をインストールするとローカルLLMを無料で利用できます。',
+    lmstudioNotRunningDesc: 'LM Studio のローカルサーバー（127.0.0.1:1234）に接続できません。',
+    apiKeyMissingDesc: 'API キーを入力すると、このプロバイダーをすぐ利用できます。',
+    customCliMissingDesc: '接続設定から実行するカスタム CLI コマンドを入力してください。',
+    startOllamaBtn: 'Ollama を起動して接続',
+    startingOllama: 'Ollama を起動中...',
+    openLmStudioBtn: 'LM Studio を開く',
+    openTerminalSetupBtn: 'Terminal でセットアップ',
+    openTerminalLoginBtn: 'Terminal でログイン',
+    pullLlamaBtn: 'llama3.2 を取得 (Terminal)',
+    pullQwenBtn: 'qwen2.5:7b を取得 (Terminal)',
+    downloadOllamaBtn: 'Ollama をダウンロード',
+    getApiKeyBtn: 'API キーを取得',
+    copyCommandBtn: 'コマンドをコピー',
+    commandCopied: 'コマンドをコピーしました',
+    testConnectionBtn: '接続テスト',
+    testingConnection: '確認中...',
+    connectionOk: '接続に成功しました',
+    nodeRequiredHint: 'この CLI の導入には Node.js (npm) が必要です。「Terminal でセットアップ」を押すと未導入の Node.js（macOS の Homebrew / Windows の winget / Linux のパッケージマネージャ）も自動で補います。公式サイトから先に入れることもできます。',
+    downloadNodeBtn: 'Node.js をダウンロード',
+    platformNoteWindows:
+      'Windows のヒント: セットアップ後は「再検出」を押してください。新しく PATH に追加された CLI が認識されない場合は、アプリを一度再起動してください。',
+    platformNoteLinux:
+      'Linux のヒント: グローバルパッケージ導入時に権限エラーが出た場合は、端末で指示に従って sudo を実行し、完了後に「再検出」を押してください。',
+    includeDoc: '編集中のドキュメント内容をAIに共有する',
+    includeFolder: '開いているフォルダー内のファイルも参照する',
+    folderBadgeDisabled: 'フォルダー連携: OFF',
+    folderBadgeRead: 'フォルダー: 読込可',
+    folderBadgeApprove: 'フォルダー: 提案→適用可',
+    folderBadgeCliDirect: 'フォルダー: CLI直接編集可',
+    applyFileBtn: 'フォルダーに書き込む',
+    appliedFileBtn: '書き込み済み',
+    clearChat: '履歴をクリア',
+    emptyState: '執筆中のドキュメントについて質問したり、推敲・要約・翻訳・フォルダー横断作業を依頼できます。サブスク契約のCLI・各種API・ローカルLLMに対応しています。',
+    inputPlaceholder: 'AIに指示を入力... (⌘/Ctrl + Enter で送信)',
+    send: '送信',
+    sending: '応答中...',
+    insertAtCursor: 'エディタに挿入',
+    replaceDoc: '本文を置換',
+    copyReply: 'コピー',
+    quickPrompts: {
+      proofread: '誤字・推敲',
+      proofreadPrompt: 'このドキュメントの誤字脱字や不自然な表現をチェックし、改善案を日本語で提案してください。',
+      summarize: '要約',
+      summarizePrompt: 'このドキュメントの要点を3〜5個の箇条書きで簡潔にまとめてください。',
+      improve: '読みやすく整形',
+      improvePrompt: '意味を変えずに、より読みやすく構造化されたMarkdownに書き直してください。',
+      translate: '英訳',
+      translatePrompt: 'このドキュメントを自然な英語のMarkdownに翻訳してください。',
     },
   },
   find: {
@@ -184,6 +400,7 @@ export const ja: Translations = {
   },
   status: {
     saved: '保存済み',
+    autoSaveOn: '自動保存 ON',
     unsaved: '未保存の変更',
     draft: '下書き',
     chars: '文字',
@@ -193,21 +410,52 @@ export const ja: Translations = {
     col: '列',
     syncOn: '同期スクロール ON',
     syncOff: '同期スクロール OFF',
-    dropHint: 'ファイルをドロップして開く',
+    dropHint: 'Markdownまたは画像ファイルをドロップして開く / 挿入',
+  },
+  externalChange: {
+    modifiedTitle: 'このファイルは外部ツール（または AI CLI）によってディスク上で更新されました。',
+    deletedTitle: 'このファイルはディスク上で削除または移動されました。現在の編集内容は保護されています。',
+    reloadBtn: 'ディスクから再読み込み',
+    compareBtn: '差分を比較',
+    keepMineBtn: '自分の編集を維持',
+    saveAgainBtn: 'ファイルに保存し直す',
+    keepDraftBtn: '未保存ドラフトとして維持',
+  },
+  aiDiffModal: {
+    replaceDocTitle: 'AI 提案の差分プレビュー（本文を置換）',
+    writeFileTitle: 'AI ファイル書き込みの差分プレビュー',
+    compareExternalTitle: '外部変更との差分比較',
+    newFileBadge: '新規ファイル',
+    noChanges: '差分はありません（内容は同一です）。',
+    saveSnapshotLabel: '適用前に現在の内容をスナップショット保存する（推奨）',
+    confirmReplaceBtn: 'この内容で本文を置換',
+    confirmWriteBtn: 'フォルダーへ書き込む',
+    beforeLabel: '現在の内容',
+    afterLabel: '変更後の内容',
+    loadingFile: '変更対象ファイルを読み込み中...',
   },
   toasts: {
     savedSuccess: '保存しました',
+    autoSaved: '自動保存しました',
+    sessionRestored: '前回の作業状態・下書きを復元しました',
+    reloadedExternal: '外部での変更を自動反映しました',
     copiedRichText: 'リッチテキストとしてコピーしました',
     copiedHtml: 'HTMLをコピーしました',
     copiedMarkdown: 'Markdownをコピーしました',
     copiedCode: 'コードをコピーしました',
     copiedSvg: 'SVG図をコピーしました',
+    copiedLine: '行をコピーしました',
     aiCleaned: 'Markdownを整形しました',
     htmlPasted: 'HTMLをMarkdownに変換して貼り付けました',
     noClipboardHtml: 'クリップボードにHTMLデータが見つかりませんでした',
     snapshotCreated: 'スナップショットを作成しました',
     snapshotRestored: 'スナップショットを復元しました',
     exportedSuccess: '書き出しが完了しました',
+    imageInserted: '画像を挿入しました',
+    folderFileWritten: 'フォルダーへファイルを書き込みました',
+    externalPreviewStarted: '外部ブラウザでライブプレビューを開始しました',
+    devServerStarted: '開発サーバーを起動しました',
+    devServerStopped: '開発サーバーを停止しました',
     errorPrefix: 'エラー:',
   },
   dialogs: {
@@ -215,76 +463,79 @@ export const ja: Translations = {
     untitledName: '無題のドキュメント.md',
     commandPlaceholder: 'コマンド、ファイル、テーマを検索...',
     noCommands: '該当するコマンドがありません',
-    aboutDesc: 'AI時代のドキュメント執筆・レビュー・整形のために設計された、クロスプラットフォーム対応Markdownエディタです。',
+    aboutDesc: 'AI時代のドキュメント執筆・双方向ビジュアル編集・ブラウザ連携のために設計された、クロスプラットフォーム対応Markdownエディタです。',
     shortcutsTitle: 'キーボードショートカット',
     shortcuts: [
+      { keys: '⌘ + ,', desc: '設定画面を開く' },
       { keys: '⌘ + S', desc: 'ファイルを保存' },
       { keys: '⌘ + ⇧ + S', desc: '名前を付けて保存' },
       { keys: '⌘ + O', desc: 'ファイルを開く' },
       { keys: '⌘ + N', desc: '新規ドキュメント' },
+      { keys: '⌘ + C (行末)', desc: '行全体をコピー（選択なし時・設定可）' },
       { keys: '⌘ + K / ⌘ + P', desc: 'コマンドパレット' },
       { keys: '⌘ + F', desc: '検索・置換' },
       { keys: '⌘ + B / ⌘ + I', desc: '太字 / 斜体' },
-      { keys: '⌘ + \\', desc: 'ベーシック / アドバンスド切替' },
+      { keys: '⌘ + \\', desc: 'シンプル / 標準 / 拡張 切替' },
       { keys: '⌘ + ⇧ + F', desc: '集中モード (Zen) 切替' },
     ],
   },
   sampleDocument: `---
-title: Onigiri-Markdownへようこそ — AI時代のMarkdownエディタ
-author: Onigiri-Markdown Team
-tags: [AI, Markdown, Productivity]
+title: Onigiri Editor へようこそ — AI時代のハイブリッドエディタ
+author: Onigiri Editor Team
+tags: [Onigiri Editor, AI, Markdown, DevPreview]
 ---
 
-# Onigiri-Markdown へようこそ ✨
+# Onigiri Editor へようこそ 🍙
 
-**Onigiri-Markdown** は、AIが生成するリッチなMarkdown（表、数式、Mermaid図、コールアウト、コード）を**ストレスなくプレビュー＆編集**するために作られたエディタです。
+**Onigiri Editor** は、**双方向ビジュアル編集できるMarkdown**・**多言語コードハイライト**・**開発サーバー連携＆内蔵Webブラウザ**・**AIチャット（接続サポート＆モデル選択対応）** をひとつにまとめたクロスプラットフォーム対応エディタです。
 
 > [!TIP]
-> 上部のスイッチで **「ベーシック」** と **「アドバンスド」** をいつでも切り替えられます。
-> 普段はシンプルなベーシックモード、凝った作業をするときはアドバンスドモードをお試しください！
+> - 上部のスイッチで **「シンプル」**・**「標準」**・**「拡張」** をいつでも切り替えられます（\`⌘ + \\\` / \`Ctrl + \\\`）。
+> - 右上の **ロボットアイコン（オプション / AIチャット）** から AIチャット・整形・統計・履歴比較、歯車アイコン（\`⌘ + ,\` / \`Ctrl + ,\`）から詳細設定を開けます。
 
 ## 主な特徴
 
-- [x] **リアルタイム・同期スクロールプレビュー**（チェックボックスもクリックで切り替え可能！）
-- [x] **AI出力のワンクリック整形**（崩れた表の列揃え、不要な空白、ゼロ幅文字を自動クリーンアップ）
-- [x] **Mermaid 図表 ＆ KaTeX 数式** のライブレンダリング
-- [x] **リッチテキストコピー**：プレビューそのままの見た目で Notion / Google Docs / Slack に貼り付け
+- [x] **3つの作業モード**：極小UIの「シンプル」、双方向編集＋AIの「標準」、フォルダ連携＆プロジェクト起動対応の「拡張」
+- [x] **双方向ビジュアル編集 ＆ 編集中行マーク**：左のソースと右のリッチプレビューがリアルタイム同期し、編集中の行・ブロックに印が付きます
+- [x] **AIチャット ＆ 接続サポート**：**Codex / Claude Code / Gemini CLI / Antigravity CLI**（モデル選択対応）、各種クラウドAPI、**Ollama / LM Studio** に対応。未接続時は接続サポートがガイドします
+- [x] **開発環境オート検出 ＆ ブラウザ表示**：フォルダを開くと **Vite / Next.js / Astro / Nuxt / Laravel / WordPress / PHP / Docker / Python (Django・FastAPI・Flask・Streamlit) / MkDocs / Hugo** 等を自動認識し、内蔵ブラウザや外部ブラウザで即確認できます
+- [x] **多言語シンタックスハイライト ＆ スマート行コピー**：100以上の言語に対応し、配色プリセットや10トークン別カスタム設定が可能。選択なしの \`⌘+C\` / \`Ctrl+C\` で行全体コピーも使えます
 
-### 1. AIがよく出力するコールアウト＆テーブル
-
-> [!NOTE]
-> GitHub互換の \`[!NOTE]\` \`[!TIP]\` \`[!IMPORTANT]\` \`[!WARNING]\` \`[!CAUTION]\` 記法に対応しています。
+### 1. モード別の使い分け
 
 | モード | 向いている用途 | 主な機能 |
 | :--- | :--- | :--- |
-| **ベーシック** | メモ・AI回答の閲覧と微修正 | シンプル書式バー、分割/切替プレビュー、テーマ切替 |
-| **アドバンスド** | 仕様書・記事執筆・プロンプト設計 | マルチタブ、フォルダ検索、アウトライン、Diff、トークン数計測 |
+| **シンプル** | サッと起動してメモ・コード執筆 | 極小UI、エディタ単体、スマート行コピー、多言語ハイライト |
+| **標準** | 普段の執筆・ビジュアル編集・AI相談 | 双方向編集、書式バー、内蔵/外部ブラウザ切替、AIチャット・整形 |
+| **拡張** | 開発・記事執筆・プロジェクト管理 | マルチタブ、フォルダツリー＆全文検索、開発サーバー連携、スナップショット差分、HTML/PDF出力 |
 
-### 2. Mermaid フローチャート（そのまま編集できます）
+### 2. AI連携 ＆ コンテンツ確認ワークフロー（Mermaid図）
+
+> [!NOTE]
+> GitHub互換の \`[!NOTE]\` \`[!TIP]\` \`[!IMPORTANT]\` \`[!WARNING]\` \`[!CAUTION]\` コールアウトや Mermaid 図も右ペインで確認・編集できます。
 
 \`\`\`mermaid
 flowchart LR
-  AI["🤖 AIのMarkdown出力"] --> Paste["📋 Onigiri-Markdownに貼付"]
-  Paste --> Clean["✨ ワンクリック整形"]
-  Clean --> Preview["👁️ リアルタイム確認"]
-  Preview --> Share["🚀 Rich Copy / HTML / PDF"]
+  Write["✍️ Markdown / コード執筆"] --> AI["🤖 AIチャット & 出力整形"]
+  AI --> Preview["👁️ 双方向プレビュー / 内蔵Webブラウザ"]
+  Preview --> Server["🚀 開発サーバー & 外部ライブ確認"]
+  Server --> Export["📦 HTML / PDF / リッチテキスト出力"]
 \`\`\`
 
-### 3. 数式（KaTeX）＆ シンタックスハイライト
+### 3. 数式（KaTeX）＆ 多言語シンタックスハイライト
 
-注意機構（Scaled Dot-Product Attention）の式：
+Scaled Dot-Product Attention の式：
 
 $$
 \\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V
 $$
 
-\`\`\`typescript
-// Onigiri-Markdownはコードブロックの言語表示とワンクリックコピーも備えています
-export function estimateTokens(text: string): number {
-  const cjk = (text.match(/[\\u3040-\\u30ff\\u4e00-\\u9faf]/g) || []).length;
-  const other = text.length - cjk;
-  return Math.ceil(cjk * 1.4 + other / 4);
+\`\`\`php
+<?php
+function greetOnigiri(string $name): string {
+    return "Hello, " . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "!";
 }
+echo greetOnigiri('Onigiri Editor');
 \`\`\`
 `,
 };

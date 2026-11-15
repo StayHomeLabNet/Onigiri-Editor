@@ -31,7 +31,14 @@ export const TabBar: React.FC<TabBarProps> = ({
             >
               <FileText size={13} className="tab-icon" />
               <span className="tab-title">{tab.title}</span>
-              {tab.dirty && <span className="tab-dirty-dot" />}
+              {tab.externalStatus ? (
+                <span
+                  className="tab-conflict-dot"
+                  title={tab.externalStatus === 'deleted' ? 'Deleted on disk' : 'Modified on disk'}
+                />
+              ) : (
+                tab.dirty && <span className="tab-dirty-dot" />
+              )}
               {tabs.length > 1 && (
                 <button
                   type="button"

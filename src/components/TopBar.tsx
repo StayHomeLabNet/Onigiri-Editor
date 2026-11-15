@@ -18,10 +18,12 @@ import {
   Maximize2,
   Download,
   Languages,
-  Info,
+  Bot,
+  Settings,
 } from 'lucide-react';
 import type { AppMode, Locale, ThemeId, ViewLayout } from '../types';
 import type { Translations } from '../i18n/types';
+import { formatShortcut, isMacOs } from '../utils/platform';
 
 interface TopBarProps {
   t: Translations;
@@ -45,6 +47,7 @@ interface TopBarProps {
   onExportPdf: () => void;
   onOpenCommandPalette: () => void;
   onToggleZen: () => void;
+  onOpenSettings: () => void;
   onOpenAbout: () => void;
   isDirty: boolean;
   activeTitle: string;
@@ -72,10 +75,12 @@ export const TopBar: React.FC<TopBarProps> = ({
   onExportPdf,
   onOpenCommandPalette,
   onToggleZen,
+  onOpenSettings,
   onOpenAbout,
   isDirty,
   activeTitle,
 }) => {
+  const isMac = isMacOs();
   const nextTheme = (): ThemeId => {
     const order: ThemeId[] = ['light', 'dark', 'sepia', 'midnight'];
     const idx = order.indexOf(theme);
@@ -94,7 +99,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           onClick={onOpenAbout}
           title={t.actions.about}
         >
-          <img src="/icon.png" alt="Onigiri-Markdown" className="brand-icon" />
+          <img src="/icon.png" alt="Onigiri Editor" className="brand-icon" />
           <span className="brand-name">{t.appName}</span>
           <span className="version-pill">{t.versionLabel}</span>
         </button>
@@ -115,7 +120,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className="icon-btn"
             onClick={onNewFile}
-            title={`${t.actions.newFile} (⌘N)`}
+            title={`${t.actions.newFile} (${formatShortcut('⌘N')})`}
           >
             <FilePlus2 size={16} />
           </button>
@@ -123,7 +128,7 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className="icon-btn"
             onClick={onOpenFile}
-            title={`${t.actions.openFile} (⌘O)`}
+            title={`${t.actions.openFile} (${formatShortcut('⌘O')})`}
           >
             <FileCode2 size={16} />
           </button>
@@ -141,13 +146,13 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className={`icon-btn ${isDirty ? 'is-accent' : ''}`}
             onClick={onSave}
-            title={`${t.actions.save} (⌘S)`}
+            title={`${t.actions.save} (${formatShortcut('⌘S')})`}
           >
             <Save size={16} />
           </button>
         </div>
 
-        {mode === 'basic' && (
+        {mode !== 'advanced' && (
           <span className="basic-doc-title" title={activeTitle}>
             {activeTitle}
             {isDirty ? <span className="dirty-dot" /> : null}
@@ -157,6 +162,14 @@ export const TopBar: React.FC<TopBarProps> = ({
 
       <div className="topbar-center">
         <div className="segmented-control mode-switch" role="tablist">
+          <button
+            type="button"
+            className={`seg-btn ${mode === 'simple' ? 'is-active' : ''}`}
+            onClick={() => onModeChange('simple')}
+            title={t.modes.simpleHint}
+          >
+            {t.modes.simple}
+          </button>
           <button
             type="button"
             className={`seg-btn ${mode === 'basic' ? 'is-active' : ''}`}
@@ -176,35 +189,37 @@ export const TopBar: React.FC<TopBarProps> = ({
           </button>
         </div>
 
-        <div className="segmented-control layout-switch">
-          <button
-            type="button"
-            className={`seg-btn ${layout === 'editor' ? 'is-active' : ''}`}
-            onClick={() => onLayoutChange('editor')}
-            title={t.layouts.editor}
-          >
-            <PenLine size={14} />
-            <span className="hide-sm">{t.layouts.editor}</span>
-          </button>
-          <button
-            type="button"
-            className={`seg-btn ${layout === 'split' ? 'is-active' : ''}`}
-            onClick={() => onLayoutChange('split')}
-            title={t.layouts.split}
-          >
-            <Columns2 size={14} />
-            <span className="hide-sm">{t.layouts.split}</span>
-          </button>
-          <button
-            type="button"
-            className={`seg-btn ${layout === 'preview' ? 'is-active' : ''}`}
-            onClick={() => onLayoutChange('preview')}
-            title={t.layouts.preview}
-          >
-            <Eye size={14} />
-            <span className="hide-sm">{t.layouts.preview}</span>
-          </button>
-        </div>
+        {mode !== 'simple' && (
+          <div className="segmented-control layout-switch">
+            <button
+              type="button"
+              className={`seg-btn ${layout === 'editor' ? 'is-active' : ''}`}
+              onClick={() => onLayoutChange('editor')}
+              title={t.layouts.editor}
+            >
+              <PenLine size={14} />
+              <span className="hide-sm">{t.layouts.editor}</span>
+            </button>
+            <button
+              type="button"
+              className={`seg-btn ${layout === 'split' ? 'is-active' : ''}`}
+              onClick={() => onLayoutChange('split')}
+              title={t.layouts.split}
+            >
+              <Columns2 size={14} />
+              <span className="hide-sm">{t.layouts.split}</span>
+            </button>
+            <button
+              type="button"
+              className={`seg-btn ${layout === 'preview' ? 'is-active' : ''}`}
+              onClick={() => onLayoutChange('preview')}
+              title={t.layouts.preview}
+            >
+              <Eye size={14} />
+              <span className="hide-sm">{t.layouts.preview}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="topbar-right">
@@ -214,9 +229,9 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               className="pill-btn"
               onClick={onOpenCommandPalette}
-              title={`${t.actions.commandPalette} (⌘K)`}
+              title={`${t.actions.commandPalette} (${formatShortcut('⌘K')})`}
             >
-              <Command size={13} />
+              {isMac ? <Command size={13} /> : <span>Ctrl+</span>}
               <span>K</span>
             </button>
             <div className="dropdown-wrapper">
@@ -236,7 +251,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               className="icon-btn"
               onClick={onToggleZen}
-              title={`${t.actions.zenMode} (⌘⇧F)`}
+              title={`${t.actions.zenMode} (${formatShortcut('⌘⇧F')})`}
             >
               <Maximize2 size={15} />
             </button>
@@ -263,23 +278,24 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span>{locale === 'ja' ? '日本語' : 'EN'}</span>
         </button>
 
-        {mode === 'advanced' ? (
+        <button
+          type="button"
+          className="icon-btn"
+          onClick={onOpenSettings}
+          title={`${t.actions.settings} (${formatShortcut('⌘,')})`}
+        >
+          <Settings size={15} />
+        </button>
+
+        {mode !== 'simple' && (
           <button
             type="button"
-            className={`icon-btn ${showInspector ? 'is-active' : ''}`}
+            className={`pill-btn options-toggle-btn ${showInspector ? 'is-active' : ''}`}
             onClick={onToggleInspector}
-            title={t.actions.inspector}
+            title={t.actions.optionsPanel}
           >
-            <PanelRight size={16} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onOpenAbout}
-            title={t.actions.about}
-          >
-            <Info size={16} />
+            <Bot size={14} />
+            <PanelRight size={14} />
           </button>
         )}
       </div>

@@ -1,6 +1,8 @@
 import React, { useEffect, useImperativeHandle, useRef, forwardRef } from 'react';
-import { EditorState, Compartment } from '@codemirror/state';
+import { EditorState, Compartment, Prec, StateEffect, StateField, RangeSetBuilder } from '@codemirror/state';
 import {
+  Decoration,
+  type DecorationSet,
   EditorView,
   keymap,
   lineNumbers as lineNumbersExt,
@@ -13,7 +15,13 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching } from '@codemirror/language';
+import {
+  LanguageDescription,
+  syntaxHighlighting,
+  HighlightStyle,
+  indentOnInput,
+  bracketMatching,
+} from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import type { EditorSettings, ThemeId } from '../types';
 import { htmlToMarkdown } from '../utils/markdown';
@@ -32,16 +40,54 @@ export interface EditorHandle {
   replaceRange: (from: number, to: number, text: string) => void;
 }
 
+export interface LineRange {
+  start: number;
+  end: number;
+}
+
 interface EditorPaneProps {
   docId: string;
+  fileName?: string;
   value: string;
   onChange: (nextValue: string) => void;
   onCursorChange: (line: number, col: number) => void;
+  onFocusPane?: () => void;
   onScrollRatio?: (ratio: number) => void;
   onSmartPasteNotify?: () => void;
+  onLineCopyNotify?: () => void;
+  onImagePasteOrDrop?: (file: File) => Promise<void>;
+  syncHighlightRange?: LineRange | null;
   theme: ThemeId;
   settings: EditorSettings;
 }
+
+const setSyncRangeEffect = StateEffect.define<LineRange | null>();
+const syncLineDeco = Decoration.line({ class: 'cm-sync-marker-line' });
+
+const syncLineHighlightField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decos, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setSyncRangeEffect)) {
+        const range = eff.value;
+        if (!range) return Decoration.none;
+        const builder = new RangeSetBuilder<Decoration>();
+        const maxLine = tr.state.doc.lines;
+        const start = Math.max(1, Math.min(range.start, maxLine));
+        const end = Math.max(start, Math.min(range.end, maxLine));
+        for (let ln = start; ln <= end; ln++) {
+          const lineObj = tr.state.doc.line(ln);
+          builder.add(lineObj.from, lineObj.from, syncLineDeco);
+        }
+        return builder.finish();
+      }
+    }
+    return tr.docChanged ? Decoration.none : decos;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
   const isDark = theme === 'dark' || theme === 'midnight';
@@ -73,8 +119,8 @@ function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
   const selectionBg = isDark ? 'rgba(99, 102, 241, 0.35)' : 'rgba(99, 102, 241, 0.2)';
   const fontFamily =
     settings.editorFont === 'mono'
-      ? '"JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Hiragino Sans", monospace'
-      : '"Inter", -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif';
+      ? "'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, Menlo, 'Ubuntu Mono', 'Noto Sans Mono', 'Yu Gothic UI', 'Noto Sans CJK JP', monospace"
+      : "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', 'Noto Sans CJK JP', 'Noto Sans JP', 'Ubuntu', sans-serif";
 
   return EditorView.theme(
     {
@@ -132,33 +178,128 @@ function createHighlightStyle(theme: ThemeId) {
     { tag: tags.emphasis, fontStyle: 'italic' },
     { tag: tags.strikethrough, textDecoration: 'line-through', opacity: '0.65' },
     { tag: tags.link, color: isDark ? '#60a5fa' : '#2563eb', textDecoration: 'underline' },
-    { tag: tags.url, color: isDark ? '#64748b' : '#64748b' },
-    { tag: tags.monospace, color: isDark ? '#f472b6' : '#be185d', fontFamily: '"JetBrains Mono", "SF Mono", monospace' },
-    { tag: tags.quote, color: isDark ? '#94a3b8' : '#64748b', fontStyle: 'italic' },
-    { tag: tags.meta, color: isDark ? '#64748b' : '#94a3b8' },
-    { tag: tags.keyword, color: isDark ? '#c084fc' : '#7c3aed' },
-    { tag: tags.string, color: isDark ? '#34d399' : '#059669' },
-    { tag: tags.number, color: isDark ? '#fbbf24' : '#d97706' },
-    { tag: tags.comment, color: isDark ? '#64748b' : '#94a3b8', fontStyle: 'italic' },
-    { tag: tags.variableName, color: isDark ? '#38bdf8' : '#0284c7' },
-    { tag: tags.function(tags.variableName), color: isDark ? '#818cf8' : '#4f46e5' },
+    { tag: tags.url, color: 'var(--syn-comment)' },
+    { tag: tags.monospace, color: 'var(--syn-tag)', fontFamily: "'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, Menlo, 'Ubuntu Mono', 'Noto Sans Mono', monospace" },
+    { tag: tags.quote, color: 'var(--syn-comment)', fontStyle: 'italic' },
+    { tag: [tags.meta, tags.processingInstruction], color: 'var(--syn-comment)' },
+    {
+      tag: [
+        tags.keyword,
+        tags.controlKeyword,
+        tags.operatorKeyword,
+        tags.definitionKeyword,
+        tags.moduleKeyword,
+        tags.self,
+      ],
+      color: 'var(--syn-keyword)',
+      fontWeight: '600',
+    },
+    { tag: [tags.string, tags.special(tags.string), tags.regexp, tags.escape], color: 'var(--syn-string)' },
+    { tag: [tags.number, tags.integer, tags.float, tags.bool, tags.null, tags.atom], color: 'var(--syn-number)' },
+    { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], color: 'var(--syn-comment)', fontStyle: 'italic' },
+    {
+      tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName],
+      color: 'var(--syn-function)',
+    },
+    { tag: [tags.typeName, tags.className, tags.namespace], color: 'var(--syn-type)', fontWeight: '600' },
+    { tag: [tags.variableName, tags.definition(tags.variableName), tags.local(tags.variableName)], color: 'var(--syn-variable)' },
+    { tag: [tags.propertyName, tags.attributeName, tags.labelName], color: 'var(--syn-property)' },
+    { tag: [tags.operator, tags.arithmeticOperator, tags.logicOperator, tags.compareOperator], color: 'var(--syn-operator)' },
+    { tag: [tags.tagName, tags.angleBracket], color: 'var(--syn-tag)' },
   ]);
 }
 
+function isMarkdownFilename(name?: string): boolean {
+  if (!name) return true;
+  return /\.(md|markdown|mdown|mdx)$/i.test(name.trim());
+}
+
+function copyTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {
+      // Fallback via hidden textarea
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+      } finally {
+        document.body.removeChild(ta);
+      }
+    });
+  }
+}
+
 export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
-  ({ docId, value, onChange, onCursorChange, onScrollRatio, onSmartPasteNotify, theme, settings }, ref) => {
+  (
+    {
+      docId,
+      fileName,
+      value,
+      onChange,
+      onCursorChange,
+      onFocusPane,
+      onScrollRatio,
+      onSmartPasteNotify,
+      onLineCopyNotify,
+      onImagePasteOrDrop,
+      syncHighlightRange,
+      theme,
+      settings,
+    },
+    ref
+  ) => {
     const hostRef = useRef<HTMLDivElement | null>(null);
     const viewRef = useRef<EditorView | null>(null);
     const themeComp = useRef(new Compartment());
     const highlightComp = useRef(new Compartment());
     const lineNumComp = useRef(new Compartment());
     const wrapComp = useRef(new Compartment());
+    const langComp = useRef(new Compartment());
 
-    const callbacksRef = useRef({ onChange, onCursorChange, onScrollRatio, onSmartPasteNotify, settings });
-    callbacksRef.current = { onChange, onCursorChange, onScrollRatio, onSmartPasteNotify, settings };
+    const callbacksRef = useRef({
+      onChange,
+      onCursorChange,
+      onFocusPane,
+      onScrollRatio,
+      onSmartPasteNotify,
+      onLineCopyNotify,
+      onImagePasteOrDrop,
+      settings,
+    });
+    callbacksRef.current = {
+      onChange,
+      onCursorChange,
+      onFocusPane,
+      onScrollRatio,
+      onSmartPasteNotify,
+      onLineCopyNotify,
+      onImagePasteOrDrop,
+      settings,
+    };
 
     const suppressingExternalRef = useRef(false);
     const lastDocIdRef = useRef(docId);
+
+    const tryOeditLineCopy = (editorView: EditorView): boolean => {
+      const { settings: curSettings, onLineCopyNotify } = callbacksRef.current;
+      if (!curSettings.oeditLineCopyEnabled) return false;
+      const sel = editorView.state.selection.main;
+      if (!sel.empty) return false;
+
+      const line = editorView.state.doc.lineAt(sel.head);
+      if (curSettings.oeditLineCopyTrigger === 'eol-only' && sel.head !== line.to) {
+        return false;
+      }
+
+      const payload = curSettings.oeditLineCopyIncludeNewline ? `${line.text}\n` : line.text;
+      copyTextToClipboard(payload);
+      onLineCopyNotify?.();
+      return true;
+    };
 
     useEffect(() => {
       if (!hostRef.current) return;
@@ -175,14 +316,64 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             bracketMatching(),
             highlightActiveLine(),
             highlightActiveLineGutter(),
-            markdown({ base: markdownLanguage, codeLanguages: languages }),
+            syncLineHighlightField,
+            langComp.current.of(markdown({ base: markdownLanguage, codeLanguages: languages })),
+            Prec.high(
+              keymap.of([
+                {
+                  key: 'Mod-c',
+                  run: (editorView) => tryOeditLineCopy(editorView),
+                },
+              ])
+            ),
             keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
             themeComp.current.of(createEditorTheme(theme, settings)),
             highlightComp.current.of(syntaxHighlighting(createHighlightStyle(theme))),
             lineNumComp.current.of(settings.lineNumbers ? lineNumbersExt() : []),
             wrapComp.current.of(settings.wordWrap ? EditorView.lineWrapping : []),
             EditorView.domEventHandlers({
+              focus() {
+                callbacksRef.current.onFocusPane?.();
+                return false;
+              },
+              copy(event, editorView) {
+                const { settings: curSettings, onLineCopyNotify } = callbacksRef.current;
+                if (!curSettings.oeditLineCopyEnabled) return false;
+                const sel = editorView.state.selection.main;
+                if (!sel.empty) return false;
+                const line = editorView.state.doc.lineAt(sel.head);
+                if (curSettings.oeditLineCopyTrigger === 'eol-only' && sel.head !== line.to) {
+                  return false;
+                }
+                const payload = curSettings.oeditLineCopyIncludeNewline ? `${line.text}\n` : line.text;
+                event.preventDefault();
+                event.clipboardData?.setData('text/plain', payload);
+                copyTextToClipboard(payload);
+                onLineCopyNotify?.();
+                return true;
+              },
+              drop(event) {
+                const files = Array.from(event.dataTransfer?.files || []);
+                const imgFile = files.find((f) => f.type.startsWith('image/'));
+                if (imgFile && callbacksRef.current.onImagePasteOrDrop) {
+                  event.preventDefault();
+                  callbacksRef.current.onImagePasteOrDrop(imgFile);
+                  return true;
+                }
+                return false;
+              },
               paste(event, editorView) {
+                const items = Array.from(event.clipboardData?.items || []);
+                const imgItem = items.find((it) => it.type.startsWith('image/'));
+                if (imgItem && callbacksRef.current.onImagePasteOrDrop) {
+                  const file = imgItem.getAsFile();
+                  if (file) {
+                    event.preventDefault();
+                    callbacksRef.current.onImagePasteOrDrop(file);
+                    return true;
+                  }
+                }
+
                 const { settings: curSettings, onSmartPasteNotify: notify } = callbacksRef.current;
                 if (!curSettings.smartPasteHtml) return false;
                 const html = event.clipboardData?.getData('text/html');
@@ -272,6 +463,51 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         ],
       });
     }, [theme, settings]);
+
+    // Sync bidirectional active block marker from right preview pane
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      const effectiveRange = settings.activeLineSyncHighlight ? (syncHighlightRange ?? null) : null;
+      view.dispatch({
+        effects: setSyncRangeEffect.of(effectiveRange),
+      });
+    }, [syncHighlightRange, settings.activeLineSyncHighlight]);
+
+    // Dynamic language mode based on active filename extension (e.g., .php, .ts, .py, .rs, etc.)
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      let cancelled = false;
+
+      if (isMarkdownFilename(fileName)) {
+        view.dispatch({
+          effects: langComp.current.reconfigure(
+            markdown({ base: markdownLanguage, codeLanguages: languages })
+          ),
+        });
+        return;
+      }
+
+      const desc = fileName ? LanguageDescription.matchFilename(languages, fileName) : null;
+      if (!desc) {
+        view.dispatch({
+          effects: langComp.current.reconfigure([]),
+        });
+        return;
+      }
+
+      desc.load().then((support) => {
+        if (cancelled || !viewRef.current) return;
+        viewRef.current.dispatch({
+          effects: langComp.current.reconfigure(support),
+        });
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    }, [fileName]);
 
     // Sync external value changes (tab switches, AI cleanup, checkbox toggle, snapshot restore)
     useEffect(() => {

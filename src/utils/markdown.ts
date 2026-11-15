@@ -26,19 +26,10 @@ function extractText(node: any): string {
   return '';
 }
 
-function rehypeMarkFlowPlugins() {
+function rehypeStaticExportPlugins() {
   return (tree: any) => {
-    visit(tree, 'element', (node: any, index: number | undefined, parent: any) => {
+    visit(tree, 'element', (node: any) => {
       const tag = node.tagName;
-      if (
-        node.position?.start?.line &&
-        ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'blockquote', 'pre', 'table', 'hr'].includes(tag)
-      ) {
-        node.properties = node.properties || {};
-        node.properties['data-source-line'] = String(node.position.start.line);
-      }
-
-      // Add heading slug IDs for outline jump
       if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
         const text = extractText(node).trim();
         const slug = text
@@ -51,45 +42,6 @@ function rehypeMarkFlowPlugins() {
         node.properties.id = slug ? `${slug}-L${line}` : `heading-L${line}`;
       }
 
-      // Interactive task list checkboxes
-      if (tag === 'li' && Array.isArray(node.children)) {
-        const line = node.position?.start?.line;
-        const firstChild = node.children[0];
-        const checkCandidate =
-          firstChild?.tagName === 'input'
-            ? firstChild
-            : firstChild?.tagName === 'p' && firstChild.children?.[0]?.tagName === 'input'
-              ? firstChild.children[0]
-              : null;
-        if (checkCandidate && checkCandidate.properties?.type === 'checkbox' && line) {
-          checkCandidate.properties = checkCandidate.properties || {};
-          delete checkCandidate.properties.disabled;
-          checkCandidate.properties['data-task-line'] = String(line);
-          checkCandidate.properties.className = ['mf-task-checkbox'];
-        }
-      }
-
-      // Mermaid fenced code block -> custom placeholder container
-      if (tag === 'pre' && Array.isArray(node.children) && node.children.length === 1) {
-        const codeNode = node.children[0];
-        const classes: string[] = Array.isArray(codeNode?.properties?.className)
-          ? codeNode.properties.className
-          : [];
-        if (codeNode?.tagName === 'code' && classes.includes('language-mermaid')) {
-          const codeText = extractText(codeNode).trim();
-          const line = node.position?.start?.line;
-          node.tagName = 'div';
-          node.properties = {
-            className: ['mf-mermaid-placeholder'],
-            'data-mermaid-code': codeText,
-            ...(line ? { 'data-source-line': String(line) } : {}),
-          };
-          node.children = [];
-          return;
-        }
-      }
-
-      // GitHub / AI Callouts: > [!NOTE] ...
       if (tag === 'blockquote' && Array.isArray(node.children)) {
         const firstP = node.children.find((c: any) => c.type === 'element' && c.tagName === 'p');
         if (firstP && Array.isArray(firstP.children) && firstP.children.length > 0) {
@@ -116,54 +68,371 @@ function rehypeMarkFlowPlugins() {
           }
         }
       }
-
-      void index;
-      void parent;
     });
   };
 }
 
-const sanitizeSchema = {
+function rehypeEditableTransform() {
+  return (tree: any) => {
+    visit(tree, 'element', (node: any) => {
+      const tag = node.tagName;
+      const classes: string[] = Array.isArray(node.properties?.className)
+        ? node.properties.className
+        : [];
+
+      // Heading IDs
+      if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+        const text = extractText(node).trim();
+        const slug = text
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s-]/gu, '')
+          .trim()
+          .replace(/\s+/g, '-');
+        const line = node.position?.start?.line || 0;
+        node.properties = node.properties || {};
+        node.properties.id = slug ? `${slug}-L${line}` : `heading-L${line}`;
+      }
+
+      // Math display block: <pre><code class="language-math math-display">...</code></pre>
+      if (tag === 'pre' && Array.isArray(node.children) && node.children.length === 1) {
+        const codeNode = node.children[0];
+        const codeCls: string[] = Array.isArray(codeNode?.properties?.className)
+          ? codeNode.properties.className
+          : [];
+        if (codeNode?.tagName === 'code' && codeCls.includes('math-display')) {
+          const latex = extractText(codeNode).trim();
+          node.tagName = 'div';
+          node.properties = {
+            'data-type': 'math-block',
+            'data-latex': latex,
+          };
+          node.children = latex ? [{ type: 'text', value: latex }] : [];
+          return;
+        }
+      }
+
+      // Inline math: <code class="language-math math-inline">...</code>
+      if (tag === 'code' && classes.includes('math-inline')) {
+        const latex = extractText(node).trim();
+        node.tagName = 'span';
+        node.properties = {
+          'data-type': 'math-inline',
+          'data-latex': latex,
+        };
+        node.children = latex ? [{ type: 'text', value: latex }] : [];
+        return;
+      }
+
+      // Task lists for TipTap TaskList / TaskItem
+      if (tag === 'ul' && classes.includes('contains-task-list')) {
+        node.properties = {
+          ...(node.properties || {}),
+          'data-type': 'taskList',
+        };
+      }
+
+      if (tag === 'li' && classes.includes('task-list-item') && Array.isArray(node.children)) {
+        let checked = false;
+        const cleanChildren: any[] = [];
+        for (const child of node.children) {
+          if (child?.type === 'element' && child.tagName === 'input' && child.properties?.type === 'checkbox') {
+            checked = Boolean(child.properties.checked);
+            continue;
+          }
+          if (child?.type === 'element' && child.tagName === 'p' && Array.isArray(child.children)) {
+            const filtered = child.children.filter((gc: any) => {
+              if (gc?.type === 'element' && gc.tagName === 'input' && gc.properties?.type === 'checkbox') {
+                checked = Boolean(gc.properties.checked);
+                return false;
+              }
+              return true;
+            });
+            // Strip leading whitespace text node left right after checkbox
+            if (filtered[0]?.type === 'text' && typeof filtered[0].value === 'string') {
+              filtered[0] = { ...filtered[0], value: filtered[0].value.replace(/^\s+/, '') };
+            }
+            cleanChildren.push({ ...child, children: filtered });
+            continue;
+          }
+          cleanChildren.push(child);
+        }
+        node.children = cleanChildren;
+        node.properties = {
+          ...(node.properties || {}),
+          'data-type': 'taskItem',
+          'data-checked': checked ? 'true' : 'false',
+        };
+      }
+
+      // GitHub Callouts: > [!NOTE] ...
+      if (tag === 'blockquote' && Array.isArray(node.children)) {
+        const firstP = node.children.find((c: any) => c.type === 'element' && c.tagName === 'p');
+        if (firstP && Array.isArray(firstP.children) && firstP.children.length > 0) {
+          const firstTextNode = firstP.children[0];
+          if (firstTextNode?.type === 'text' && typeof firstTextNode.value === 'string') {
+            const match = firstTextNode.value.match(/^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\s*\n|\s+|$)/i);
+            if (match) {
+              const kind = match[1].toLowerCase();
+              if (CALLOUT_TYPES.has(kind)) {
+                firstTextNode.value = firstTextNode.value.slice(match[0].length);
+                if (!firstTextNode.value && firstP.children.length === 1) {
+                  node.children = node.children.filter((c: any) => c !== firstP);
+                } else if (firstP.children[0]?.type === 'text' && firstP.children[0].value === '' && firstP.children[1]?.tagName === 'br') {
+                  firstP.children.splice(0, 2);
+                }
+                node.tagName = 'div';
+                node.properties = {
+                  ...(node.properties || {}),
+                  className: ['mf-callout', `mf-callout-${kind}`],
+                  'data-callout': kind,
+                };
+              }
+            }
+          }
+        }
+      }
+    });
+  };
+}
+
+const editableSanitizeSchema = {
   ...defaultSchema,
-  tagNames: [...(defaultSchema.tagNames || []), 'input'],
+  tagNames: [...(defaultSchema.tagNames || []), 'input', 'div', 'span'],
   attributes: {
     ...defaultSchema.attributes,
-    '*': [
-      ...(defaultSchema.attributes?.['*'] || []),
-      'className',
-      'id',
-      'dataSourceLine',
-      'data-source-line',
-    ],
+    '*': [...(defaultSchema.attributes?.['*'] || []), 'className', 'id'],
+    ul: [...(defaultSchema.attributes?.ul || []), 'dataType', 'data-type'],
+    li: [...(defaultSchema.attributes?.li || []), 'dataType', 'data-type', 'dataChecked', 'data-checked'],
     div: [
       ...(defaultSchema.attributes?.div || []),
-      'dataMermaidCode',
-      'data-mermaid-code',
+      'dataType',
+      'data-type',
+      'dataLatex',
+      'data-latex',
       'dataCallout',
       'data-callout',
     ],
-    input: ['type', 'checked', 'dataTaskLine', 'data-task-line', 'className'],
+    span: [
+      ...(defaultSchema.attributes?.span || []),
+      'dataType',
+      'data-type',
+      'dataLatex',
+      'data-latex',
+    ],
     code: [...(defaultSchema.attributes?.code || []), 'className'],
-    span: [...(defaultSchema.attributes?.span || []), 'className'],
+    img: ['src', 'alt', 'title', 'width', 'height'],
   },
 };
 
-const processor = unified()
+const staticProcessor = unified()
   .use(remarkParse)
   .use(remarkFrontmatter, ['yaml'])
   .use(remarkGfm)
   .use(remarkMath)
   .use(remarkRehype, { allowDangerousHtml: true })
-  .use(rehypeMarkFlowPlugins)
+  .use(rehypeStaticExportPlugins)
   .use(rehypeRaw)
-  .use(rehypeSanitize, sanitizeSchema)
+  .use(rehypeSanitize, editableSanitizeSchema)
   .use(rehypeKatex)
   .use(rehypeHighlight, { detect: false, ignoreMissing: true })
   .use(rehypeStringify);
 
+const editableProcessor = unified()
+  .use(remarkParse)
+  .use(remarkFrontmatter, ['yaml'])
+  .use(remarkGfm)
+  .use(remarkMath)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeEditableTransform)
+  .use(rehypeRaw)
+  .use(rehypeSanitize, editableSanitizeSchema)
+  .use(rehypeStringify);
+
 export async function renderMarkdownToHtml(markdown: string): Promise<string> {
-  const file = await processor.process(markdown);
+  const file = await staticProcessor.process(markdown);
   return String(file);
+}
+
+export async function renderMarkdownToEditableHtml(markdown: string): Promise<string> {
+  const file = await editableProcessor.process(markdown);
+  return String(file);
+}
+
+export function splitFrontmatter(markdown: string): { frontmatterBlock: string; body: string; bodyStartLine: number } {
+  const match = markdown.match(/^(---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$))/);
+  if (!match) {
+    return { frontmatterBlock: '', body: markdown, bodyStartLine: 1 };
+  }
+  const consumed = markdown.slice(match[1].length);
+  const leadingBlank = consumed.match(/^(\r?\n+)/);
+  const leadingNewlines = leadingBlank ? leadingBlank[1].split(/\r?\n/).length - 1 : 0;
+  const frontmatterNewlines = match[1].split(/\r?\n/).length - 1;
+  return {
+    frontmatterBlock: match[1].trimEnd(),
+    body: consumed.replace(/^\r?\n+/, ''),
+    bodyStartLine: 1 + frontmatterNewlines + leadingNewlines,
+  };
+}
+
+const blockRangeParser = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkMath);
+
+export interface BlockLineRange {
+  index: number;
+  startLine: number;
+  endLine: number;
+  type: string;
+}
+
+export function getMarkdownBlockLineRanges(markdown: string): BlockLineRange[] {
+  const { body, bodyStartLine } = splitFrontmatter(markdown);
+  if (!body.trim()) return [];
+  const tree: any = blockRangeParser.parse(body);
+  const offset = bodyStartLine - 1;
+  const children: any[] = Array.isArray(tree?.children) ? tree.children : [];
+  const ranges: BlockLineRange[] = [];
+  let idx = 0;
+  for (const node of children) {
+    if (node.type === 'definition' || node.type === 'yaml') continue;
+    const start = (node.position?.start?.line || 1) + offset;
+    const end = (node.position?.end?.line || start) + offset;
+    ranges.push({
+      index: idx++,
+      startLine: start,
+      endLine: Math.max(start, end),
+      type: String(node.type || 'unknown'),
+    });
+  }
+  return ranges;
+}
+
+// Dedicated Turndown converter for TipTap visual editor -> clean Markdown
+const visualTurndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+  bulletListMarker: '-',
+  emDelimiter: '*',
+  hr: '---',
+  blankReplacement(_content, node) {
+    const el = node as HTMLElement;
+    const dataType = el.getAttribute?.('data-type');
+    if (el.nodeName === 'DIV' && dataType === 'math-block') {
+      const latex = (el.getAttribute('data-latex') || el.textContent || '').trim();
+      return latex ? `\n\n$$\n${latex}\n$$\n\n` : '\n\n';
+    }
+    if (el.nodeName === 'SPAN' && dataType === 'math-inline') {
+      const latex = (el.getAttribute('data-latex') || el.textContent || '').trim();
+      return latex ? `$${latex}$` : '';
+    }
+    if (el.querySelectorAll) {
+      const mathNodes = el.querySelectorAll('[data-type="math-block"], [data-type="math-inline"]');
+      if (mathNodes.length > 0) {
+        const parts: string[] = [];
+        mathNodes.forEach((m) => {
+          const kind = m.getAttribute('data-type');
+          const latex = (m.getAttribute('data-latex') || m.textContent || '').trim();
+          if (!latex) return;
+          parts.push(kind === 'math-block' ? `$$\n${latex}\n$$` : `$${latex}$`);
+        });
+        if (parts.length > 0) {
+          return (node as any).isBlock ? `\n\n${parts.join(' ')}\n\n` : parts.join(' ');
+        }
+      }
+    }
+    return (node as any).isBlock ? '\n\n' : '';
+  },
+});
+visualTurndown.use(turndownGfm);
+
+// Prevent Turndown from escaping markdown inside math or code blocks, and handle custom nodes
+visualTurndown.addRule('tiptapTaskItem', {
+  filter(node) {
+    return (
+      node.nodeName === 'LI' &&
+      node.getAttribute('data-type') === 'taskItem'
+    );
+  },
+  replacement(content, node) {
+    const el = node as HTMLElement;
+    const checked = el.getAttribute('data-checked') === 'true';
+    const cleaned = content
+      .replace(/^\n+/, '')
+      .replace(/\n+$/, '')
+      .replace(/\n/gm, '\n    ');
+    return `- [${checked ? 'x' : ' '}] ${cleaned}\n`;
+  },
+});
+
+visualTurndown.addRule('tiptapMathBlock', {
+  filter(node) {
+    return node.nodeName === 'DIV' && node.getAttribute('data-type') === 'math-block';
+  },
+  replacement(_content, node) {
+    const el = node as HTMLElement;
+    const latex = el.getAttribute('data-latex') || '';
+    return `\n\n$$\n${latex.trim()}\n$$\n\n`;
+  },
+});
+
+visualTurndown.addRule('tiptapMathInline', {
+  filter(node) {
+    return node.nodeName === 'SPAN' && node.getAttribute('data-type') === 'math-inline';
+  },
+  replacement(_content, node) {
+    const el = node as HTMLElement;
+    const latex = el.getAttribute('data-latex') || '';
+    return `$${latex.trim()}$`;
+  },
+});
+
+visualTurndown.addRule('tiptapCallout', {
+  filter(node) {
+    return node.nodeName === 'DIV' && Boolean(node.getAttribute('data-callout'));
+  },
+  replacement(content, node) {
+    const el = node as HTMLElement;
+    const kind = (el.getAttribute('data-callout') || 'note').toUpperCase();
+    const lines = content
+      .trim()
+      .split('\n')
+      .map((line) => (line ? `> ${line}` : '>'));
+    return `\n\n> [!${kind}]\n${lines.join('\n')}\n\n`;
+  },
+});
+
+visualTurndown.addRule('tiptapParagraphInList', {
+  filter(node) {
+    return (
+      node.nodeName === 'P' &&
+      Boolean(node.parentElement) &&
+      node.parentElement!.nodeName === 'LI'
+    );
+  },
+  replacement(content) {
+    return content;
+  },
+});
+
+visualTurndown.addRule('tiptapImage', {
+  filter: 'img',
+  replacement(_content, node) {
+    const el = node as HTMLElement;
+    const src = el.getAttribute('data-orig-src') || el.getAttribute('src') || '';
+    const alt = (el.getAttribute('alt') || '').replace(/\]/g, '\\]');
+    const title = el.getAttribute('title');
+    if (!src) return '';
+    return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`;
+  },
+});
+
+export function editableHtmlToMarkdown(html: string, frontmatterBlock = ''): string {
+  const bodyMd = visualTurndown.turndown(html).replace(/\n{3,}/g, '\n\n').trimEnd();
+  if (frontmatterBlock.trim()) {
+    return `${frontmatterBlock.trim()}\n\n${bodyMd}\n`;
+  }
+  return bodyMd ? `${bodyMd}\n` : '';
 }
 
 export function extractHeadings(markdown: string): HeadingItem[] {
@@ -265,7 +534,6 @@ export function computeStats(markdown: string): DocumentStats {
   const charsNoSpaces = markdown.replace(/\s/g, '').length;
   const lines = markdown ? markdown.split(/\r?\n/).length : 0;
 
-  // Smart word count: count CJK characters individually + Latin/numeric words
   const cjkMatches = markdown.match(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9faf\uac00-\ud7af]/g) || [];
   const withoutCjk = markdown.replace(/[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9faf\uac00-\ud7af]/g, ' ');
   const latinWords = withoutCjk
@@ -278,13 +546,11 @@ export function computeStats(markdown: string): DocumentStats {
     .split(/\r?\n\s*\r?\n/)
     .filter((p) => p.trim().length > 0).length;
 
-  // Reading speed: ~500 CJK chars/min or ~220 Latin words/min
   const readingMinutes = Math.max(
     1,
     Math.ceil(cjkMatches.length / 500 + latinWords.length / 220)
   );
 
-  // LLM token estimate: ~1.4 tokens per CJK char, ~1.35 tokens per Latin word + punctuation
   const otherChars = Math.max(0, chars - cjkMatches.length);
   const estimatedTokens = Math.max(
     0,
@@ -390,7 +656,7 @@ function formatGfmTables(lines: string[]): string[] {
     const colWidths = new Array(colCount).fill(3);
 
     rows.forEach((row, rIdx) => {
-      if (rIdx === 1) return; // separator
+      if (rIdx === 1) return;
       for (let c = 0; c < colCount; c++) {
         const val = row[c] ?? '';
         colWidths[c] = Math.max(colWidths[c], getVisualWidth(val));
@@ -429,7 +695,7 @@ export function cleanAiMarkdown(markdown: string, options: AiCleanOptions): stri
     text = text.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
   }
 
-  let lines = text.split('\n');
+  const lines = text.split('\n');
   let inFence = false;
   let fenceChar = '';
 
@@ -464,7 +730,6 @@ export function cleanAiMarkdown(markdown: string, options: AiCleanOptions): stri
     }
 
     if (options.fixHeadingSpacing) {
-      // Fix `#Heading` -> `# Heading`
       line = line.replace(/^(#{1,6})([^\s#])/, '$1 $2');
       const prev = processedLines[processedLines.length - 1];
       if (/^#{1,6}\s+/.test(line) && prev !== undefined && prev.trim() !== '' && prev.trim() !== '---') {
@@ -475,7 +740,7 @@ export function cleanAiMarkdown(markdown: string, options: AiCleanOptions): stri
     processedLines.push(line);
   }
 
-  let finalLines = options.formatTables ? formatGfmTables(processedLines) : processedLines;
+  const finalLines = options.formatTables ? formatGfmTables(processedLines) : processedLines;
 
   let result = finalLines.join('\n');
   if (options.collapseBlankLines) {
@@ -485,16 +750,16 @@ export function cleanAiMarkdown(markdown: string, options: AiCleanOptions): stri
   return result.trimEnd() + '\n';
 }
 
-const turndown = new TurndownService({
+const htmlPasteTurndown = new TurndownService({
   headingStyle: 'atx',
   codeBlockStyle: 'fenced',
   bulletListMarker: '-',
   emDelimiter: '*',
 });
-turndown.use(turndownGfm);
+htmlPasteTurndown.use(turndownGfm);
 
 export function htmlToMarkdown(html: string): string {
-  return turndown.turndown(html);
+  return htmlPasteTurndown.turndown(html);
 }
 
 export function toggleTaskCheckboxAtLine(markdown: string, lineNumber: number): string {
@@ -537,14 +802,14 @@ export function exportStandaloneHtml(
       padding: 40px 24px;
       background: ${bg};
       color: ${fg};
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', 'Noto Sans CJK JP', 'Noto Sans JP', 'Ubuntu', sans-serif;
       line-height: 1.75;
     }
     .markdown-body { max-width: 820px; margin: 0 auto; }
     h1, h2, h3, h4 { line-height: 1.3; margin-top: 1.6em; }
     h1, h2 { border-bottom: 1px solid ${border}; padding-bottom: 0.3em; }
     a { color: #6366f1; }
-    code { background: ${codeBg}; padding: 0.18em 0.4em; border-radius: 5px; font-size: 0.9em; }
+    code { font-family: 'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, Menlo, 'Ubuntu Mono', 'Noto Sans Mono', monospace; background: ${codeBg}; padding: 0.18em 0.4em; border-radius: 5px; font-size: 0.9em; }
     pre { background: ${codeBg}; padding: 14px 16px; border-radius: 10px; overflow-x: auto; border: 1px solid ${border}; }
     pre code { background: transparent; padding: 0; }
     blockquote { margin: 1em 0; padding: 0.4em 1em; border-left: 4px solid #6366f1; color: ${muted}; }
@@ -566,3 +831,29 @@ export function exportStandaloneHtml(
 </body>
 </html>`;
 }
+
+export type DocumentPreviewKind = 'markdown' | 'webpage' | 'code';
+
+export function getDocumentPreviewKind(fileName?: string, filePath?: string): DocumentPreviewKind {
+  const target = (filePath || fileName || '').trim().toLowerCase();
+  const base = target.split(/[/\\]/).pop() || '';
+  const dotIdx = base.lastIndexOf('.');
+  if (dotIdx <= 0 || dotIdx === base.length - 1) return 'markdown';
+  const ext = base.slice(dotIdx + 1);
+  if (ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'svg') {
+    return 'webpage';
+  }
+  if (ext === 'md' || ext === 'markdown' || ext === 'mdown' || ext === 'mdx') {
+    return 'markdown';
+  }
+  return 'code';
+}
+
+export function escapeHtmlText(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+

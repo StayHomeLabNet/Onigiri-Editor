@@ -1,21 +1,31 @@
 [package]
-name = "onigiri-markdown"
-version = "0.1.0"
-description = "Onigiri-Markdown - AI-Era Cross-Platform Markdown Editor"
-authors = ["Onigiri-Markdown"]
+name = "onigiri-editor"
+version = "1.0.0"
+description = "Onigiri Editor - AI-Era Cross-Platform Markdown & Code Editor"
+authors = ["StayHomeLabNet"]
+license = "MIT"
+repository = "https://github.com/StayHomeLabNet/Onigiri-Editor"
 edition = "2021"
 
 [lib]
-name = "onigiri_markdown_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+name = "onigiri_editor_lib"
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["process", "time", "io-util", "net"] }
+base64 = "0.22"
+url = "2"
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+tauri-plugin-single-instance = "2"
+

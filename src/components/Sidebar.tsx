@@ -9,16 +9,24 @@ import {
   FilePlus,
   Search,
   ChevronRight,
+  Play,
+  Square,
+  Globe,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import type {
   HeadingItem,
   Locale,
+  ProjectInfo,
+  ProjectServerStatus,
   SearchMatch,
   SidebarTab,
   WorkspaceEntry,
 } from '../types';
 import type { Translations } from '../i18n/types';
 import { SNIPPETS } from '../utils/snippets';
+import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 
 interface SidebarProps {
   t: Translations;
@@ -37,6 +45,18 @@ interface SidebarProps {
   currentLine: number;
   onJumpToHeading: (heading: HeadingItem) => void;
   onInsertSnippet: (content: string) => void;
+  projectInfo?: ProjectInfo | null;
+  projectServer?: ProjectServerStatus | null;
+  setupBusy?: boolean;
+  setupActionId?: string | null;
+  setupLogs?: string[];
+  setupFeedback?: { ok: boolean; text: string } | null;
+  recheckingEnv?: boolean;
+  onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
+  onStopProjectServer?: () => void;
+  onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
+  onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
+  onRecheckProjectEnv?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -56,6 +76,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentLine,
   onJumpToHeading,
   onInsertSnippet,
+  projectInfo,
+  projectServer,
+  setupBusy,
+  setupActionId,
+  setupLogs,
+  setupFeedback,
+  recheckingEnv,
+  onStartProjectAndBrowse,
+  onStopProjectServer,
+  onOpenProjectUrl,
+  onAssistProjectSetup,
+  onRecheckProjectEnv,
 }) => {
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -78,10 +110,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleNewNote = () => {
     const name = window.prompt(t.sidebar.newFilePrompt, 'note.md');
     if (name && name.trim()) {
-      const normalized = name.trim().endsWith('.md') ? name.trim() : `${name.trim()}.md`;
+      const trimmed = name.trim();
+      const normalized = trimmed.includes('.') ? trimmed : `${trimmed}.md`;
       onCreateFileInFolder(normalized);
     }
   };
+
+  const hasDiagErrors = Boolean(
+    projectInfo?.diagnostics?.some((d) => d.severity === 'error') ||
+      (projectServer?.error &&
+        (!projectInfo || !projectServer.rootPath || projectServer.rootPath === projectInfo.rootPath))
+  );
 
   return (
     <aside className="sidebar">
@@ -157,6 +196,93 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {projectInfo && projectInfo.kind !== 'none' && (
+                  <div className="sidebar-project-card">
+                    <div className="sidebar-project-head">
+                      <span className="project-kind-badge">{projectInfo.kind.toUpperCase()}</span>
+                      <span className="sidebar-project-name" title={projectInfo.name}>
+                        {projectInfo.name}
+                      </span>
+                      {projectServer?.running &&
+                      (!projectServer.rootPath ||
+                        projectServer.rootPath === projectInfo.rootPath) ? (
+                        <span className="project-status-dot is-running" />
+                      ) : hasDiagErrors ? (
+                        <AlertCircle size={13} className="diag-icon-err" />
+                      ) : null}
+                    </div>
+                    {projectInfo.devCommandLabel && (
+                      <div className="sidebar-project-actions">
+                        {projectServer?.running &&
+                        (!projectServer.rootPath ||
+                          projectServer.rootPath === projectInfo.rootPath) &&
+                        projectServer.url ? (
+                          <>
+                            {onOpenProjectUrl && (
+                              <button
+                                type="button"
+                                className="mini-pill-btn is-active"
+                                onClick={() => onOpenProjectUrl(projectServer.url!, 'builtin')}
+                              >
+                                <Globe size={11} />
+                                <span>{t.project.openInBuiltin}</span>
+                              </button>
+                            )}
+                            {onStopProjectServer && (
+                              <button
+                                type="button"
+                                className="mini-pill-btn"
+                                onClick={onStopProjectServer}
+                              >
+                                <Square size={10} />
+                                <span>
+                                  {projectServer.external
+                                    ? t.project.disconnectServer
+                                    : t.project.stopServer}
+                                </span>
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          onStartProjectAndBrowse && (
+                            <button
+                              type="button"
+                              className="mini-pill-btn is-active"
+                              onClick={() => onStartProjectAndBrowse('builtin')}
+                              disabled={projectServer?.starting}
+                            >
+                              {projectServer?.starting ? (
+                                <Loader2 size={11} className="spin" />
+                              ) : (
+                                <Play size={11} />
+                              )}
+                              <span>
+                                {projectServer?.starting
+                                  ? t.project.startingServer
+                                  : t.project.startAndBrowse}
+                              </span>
+                            </button>
+                          )
+                        )}
+                      </div>
+                    )}
+                    <ProjectSetupCard
+                      t={t}
+                      locale={locale}
+                      projectInfo={projectInfo}
+                      projectServer={projectServer}
+                      setupBusy={setupBusy}
+                      setupActionId={setupActionId}
+                      setupLogs={setupLogs}
+                      setupFeedback={setupFeedback}
+                      rechecking={recheckingEnv}
+                      compact
+                      onAssistSetup={onAssistProjectSetup}
+                      onRecheck={onRecheckProjectEnv}
+                    />
+                  </div>
+                )}
 
                 <div className="sidebar-input-wrap">
                   <Search size={13} />
