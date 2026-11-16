@@ -101,20 +101,323 @@ fn should_skip_dir(name: &str) -> bool {
     ) || name.starts_with('.')
 }
 
-#[tauri::command]
-fn read_text_file(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path, e))
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecodedTextFile {
+    content: String,
+    encoding: String,
+    eol: String,
+}
+
+fn normalize_encoding_id(raw: &str) -> Option<&'static str> {
+    let lower = raw.trim().to_ascii_lowercase().replace('_', "-");
+    match lower.as_str() {
+        "auto" => Some("auto"),
+        "utf-8" | "utf8" => Some("utf-8"),
+        "utf-8-bom" | "utf8-bom" | "utf-8-sig" => Some("utf-8-bom"),
+        "shift-jis" | "shiftjis" | "sjis" | "cp932" | "ms932" | "windows-31j" => Some("shift_jis"),
+        "euc-jp" | "eucjp" => Some("euc-jp"),
+        "iso-2022-jp" | "iso2022jp" | "jis" => Some("iso-2022-jp"),
+        "utf-16le" | "utf16le" | "utf-16-le" => Some("utf-16le"),
+        "utf-16be" | "utf16be" | "utf-16-be" => Some("utf-16be"),
+        _ => None,
+    }
+}
+
+fn has_iso2022_jp_escape(bytes: &[u8]) -> bool {
+    bytes.contains(&0x1b)
+        && bytes.windows(3).any(|w| {
+            w == b"\x1b$B" || w == b"\x1b$@" || w == b"\x1b(B" || w == b"\x1b(J" || w == b"\x1b(I"
+        })
+}
+
+fn map_encoding_rs_to_id(enc: &'static encoding_rs::Encoding) -> &'static str {
+    if enc == encoding_rs::SHIFT_JIS {
+        "shift_jis"
+    } else if enc == encoding_rs::EUC_JP {
+        "euc-jp"
+    } else if enc == encoding_rs::ISO_2022_JP {
+        "iso-2022-jp"
+    } else if enc == encoding_rs::UTF_16LE {
+        "utf-16le"
+    } else if enc == encoding_rs::UTF_16BE {
+        "utf-16be"
+    } else {
+        "utf-8"
+    }
+}
+
+fn detect_eol(text: &str) -> &'static str {
+    if text.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+fn decode_bytes_with_encoding(
+    bytes: &[u8],
+    requested_encoding: Option<&str>,
+) -> Result<DecodedTextFile, String> {
+    let normalized = match requested_encoding {
+        Some(raw) if !raw.trim().is_empty() => normalize_encoding_id(raw)
+            .ok_or_else(|| format!("Unsupported encoding: {}", raw))?,
+        _ => "auto",
+    };
+
+    let (decoded, resolved_id): (String, &'static str) = match normalized {
+        "auto" => {
+            if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+                let (cow, _) = encoding_rs::UTF_8.decode_without_bom_handling(rest);
+                (cow.into_owned(), "utf-8-bom")
+            } else if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+                let (cow, _) = encoding_rs::UTF_16LE.decode_without_bom_handling(rest);
+                (cow.into_owned(), "utf-16le")
+            } else if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+                let (cow, _) = encoding_rs::UTF_16BE.decode_without_bom_handling(rest);
+                (cow.into_owned(), "utf-16be")
+            } else if has_iso2022_jp_escape(bytes) {
+                let (cow, _) = encoding_rs::ISO_2022_JP.decode_without_bom_handling(bytes);
+                (cow.into_owned(), "iso-2022-jp")
+            } else if let Ok(utf8_str) = std::str::from_utf8(bytes) {
+                (utf8_str.to_string(), "utf-8")
+            } else {
+                let mut detector = chardetng::EncodingDetector::new();
+                detector.feed(bytes, true);
+                let guessed = detector.guess(None, true);
+                let (cow, _) = guessed.decode_without_bom_handling(bytes);
+                (cow.into_owned(), map_encoding_rs_to_id(guessed))
+            }
+        }
+        "utf-8" => {
+            let slice = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+            let (cow, _) = encoding_rs::UTF_8.decode_without_bom_handling(slice);
+            (cow.into_owned(), "utf-8")
+        }
+        "utf-8-bom" => {
+            let slice = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+            let (cow, _) = encoding_rs::UTF_8.decode_without_bom_handling(slice);
+            (cow.into_owned(), "utf-8-bom")
+        }
+        "shift_jis" => {
+            let (cow, _) = encoding_rs::SHIFT_JIS.decode_without_bom_handling(bytes);
+            (cow.into_owned(), "shift_jis")
+        }
+        "euc-jp" => {
+            let (cow, _) = encoding_rs::EUC_JP.decode_without_bom_handling(bytes);
+            (cow.into_owned(), "euc-jp")
+        }
+        "iso-2022-jp" => {
+            let (cow, _) = encoding_rs::ISO_2022_JP.decode_without_bom_handling(bytes);
+            (cow.into_owned(), "iso-2022-jp")
+        }
+        "utf-16le" => {
+            let slice = bytes.strip_prefix(&[0xFF, 0xFE]).unwrap_or(bytes);
+            let (cow, _) = encoding_rs::UTF_16LE.decode_without_bom_handling(slice);
+            (cow.into_owned(), "utf-16le")
+        }
+        "utf-16be" => {
+            let slice = bytes.strip_prefix(&[0xFE, 0xFF]).unwrap_or(bytes);
+            let (cow, _) = encoding_rs::UTF_16BE.decode_without_bom_handling(slice);
+            (cow.into_owned(), "utf-16be")
+        }
+        _ => unreachable!(),
+    };
+
+    let eol = detect_eol(&decoded).to_string();
+    Ok(DecodedTextFile {
+        content: decoded,
+        encoding: resolved_id.to_string(),
+        eol,
+    })
+}
+
+fn encode_text_with_encoding(content: &str, encoding: Option<&str>) -> Result<Vec<u8>, String> {
+    let normalized = match encoding {
+        Some(raw) if !raw.trim().is_empty() => normalize_encoding_id(raw)
+            .ok_or_else(|| format!("Unsupported encoding: {}", raw))?,
+        _ => "utf-8",
+    };
+
+    match normalized {
+        "utf-8" | "auto" => Ok(content.as_bytes().to_vec()),
+        "utf-8-bom" => {
+            let mut out = Vec::with_capacity(3 + content.len());
+            out.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+            out.extend_from_slice(content.as_bytes());
+            Ok(out)
+        }
+        "utf-16le" => {
+            let mut out = Vec::with_capacity(2 + content.len() * 2);
+            out.extend_from_slice(&[0xFF, 0xFE]);
+            for unit in content.encode_utf16() {
+                out.extend_from_slice(&unit.to_le_bytes());
+            }
+            Ok(out)
+        }
+        "utf-16be" => {
+            let mut out = Vec::with_capacity(2 + content.len() * 2);
+            out.extend_from_slice(&[0xFE, 0xFF]);
+            for unit in content.encode_utf16() {
+                out.extend_from_slice(&unit.to_be_bytes());
+            }
+            Ok(out)
+        }
+        "shift_jis" | "euc-jp" | "iso-2022-jp" => {
+            let (enc, label) = match normalized {
+                "shift_jis" => (encoding_rs::SHIFT_JIS, "Shift_JIS"),
+                "euc-jp" => (encoding_rs::EUC_JP, "EUC-JP"),
+                _ => (encoding_rs::ISO_2022_JP, "ISO-2022-JP"),
+            };
+            let (encoded, _, had_unmappable) = enc.encode(content);
+            if had_unmappable {
+                return Err(format!(
+                    "Text contains characters that cannot be represented in {}. Switch encoding to UTF-8 to save without data loss.",
+                    label
+                ));
+            }
+            Ok(encoded.into_owned())
+        }
+        _ => unreachable!(),
+    }
 }
 
 #[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
+fn read_text_file(path: String) -> Result<String, String> {
+    let bytes = fs::read(&path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+    Ok(decode_bytes_with_encoding(&bytes, None)?.content)
+}
+
+#[tauri::command]
+fn read_text_file_with_encoding(
+    path: String,
+    encoding: Option<String>,
+) -> Result<DecodedTextFile, String> {
+    let bytes = fs::read(&path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+    decode_bytes_with_encoding(&bytes, encoding.as_deref())
+}
+
+#[tauri::command]
+fn write_text_file(
+    path: String,
+    content: String,
+    encoding: Option<String>,
+) -> Result<(), String> {
     if let Some(parent) = Path::new(&path).parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create parent directory: {}", e))?;
         }
     }
-    fs::write(&path, content).map_err(|e| format!("Failed to write {}: {}", path, e))
+    let bytes = encode_text_with_encoding(&content, encoding.as_deref())?;
+    fs::write(&path, bytes).map_err(|e| format!("Failed to write {}: {}", path, e))
+}
+
+#[tauri::command]
+fn read_clipboard_text() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("pbpaste")
+            .output()
+            .map_err(|e| format!("pbpaste failed: {}", e))?;
+        return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let out = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $t = Get-Clipboard -Raw; if ($null -ne $t) { [Console]::Out.Write($t) }",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("Get-Clipboard failed: {}", e))?;
+        return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for (bin, args) in [
+            ("wl-paste", vec!["--no-newline"]),
+            ("xclip", vec!["-o", "-selection", "clipboard"]),
+            ("xsel", vec!["-ob"]),
+        ] {
+            if let Ok(out) = std::process::Command::new(bin).args(&args).output() {
+                if out.status.success() {
+                    return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+                }
+            }
+        }
+        return Err("No clipboard utility found (wl-paste, xclip, xsel)".to_string());
+    }
+    #[allow(unreachable_code)]
+    Err("Unsupported platform".to_string())
+}
+
+#[tauri::command]
+fn write_clipboard_text(text: String) -> Result<(), String> {
+    use std::io::Write;
+    #[cfg(target_os = "macos")]
+    {
+        let mut child = std::process::Command::new("pbcopy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("pbcopy failed: {}", e))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(text.as_bytes())
+                .map_err(|e| format!("pbcopy write failed: {}", e))?;
+        }
+        let _ = child.wait();
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut child = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; $t = [Console]::In.ReadToEnd(); Set-Clipboard -Value $t",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Set-Clipboard failed: {}", e))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(text.as_bytes())
+                .map_err(|e| format!("Set-Clipboard write failed: {}", e))?;
+        }
+        let _ = child.wait();
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for (bin, args) in [
+            ("wl-copy", vec![]),
+            ("xclip", vec!["-selection", "clipboard"]),
+            ("xsel", vec!["-ib"]),
+        ] {
+            if let Ok(mut child) = std::process::Command::new(bin)
+                .args(&args)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+                return Ok(());
+            }
+        }
+        return Err("No clipboard utility found".to_string());
+    }
+    #[allow(unreachable_code)]
+    Err("Unsupported platform".to_string())
 }
 
 #[tauri::command]
@@ -768,7 +1071,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             read_text_file,
+            read_text_file_with_encoding,
             write_text_file,
+            read_clipboard_text,
+            write_clipboard_text,
             scan_workspace,
             search_workspace,
             read_workspace_context,
@@ -908,5 +1214,36 @@ mod tests {
         assert!(!parse_locale_tag_is_ja("fr_FR.UTF-8"));
         assert!(!parse_locale_tag_is_ja("zh-Hans"));
         assert!(!parse_locale_tag_is_ja("C.UTF-8"));
+    }
+
+    #[test]
+    fn encode_and_decode_supported_encodings_round_trip() {
+        let sample = "こんにちは、Onigiri Editor！\r\n日本語テストABC123";
+        for enc in [
+            "utf-8",
+            "utf-8-bom",
+            "shift_jis",
+            "euc-jp",
+            "iso-2022-jp",
+            "utf-16le",
+            "utf-16be",
+        ] {
+            let bytes = encode_text_with_encoding(sample, Some(enc)).unwrap();
+            let auto_decoded = decode_bytes_with_encoding(&bytes, None).unwrap();
+            assert_eq!(auto_decoded.content, sample, "auto round-trip failed for {}", enc);
+            assert_eq!(auto_decoded.encoding, enc, "auto detected wrong encoding for {}", enc);
+            assert_eq!(auto_decoded.eol, "\r\n");
+
+            let explicit_decoded = decode_bytes_with_encoding(&bytes, Some(enc)).unwrap();
+            assert_eq!(explicit_decoded.content, sample);
+            assert_eq!(explicit_decoded.encoding, enc);
+        }
+    }
+
+    #[test]
+    fn encode_rejects_unmappable_characters_without_silent_loss() {
+        let with_emoji = "おにぎり🍙";
+        let err = encode_text_with_encoding(with_emoji, Some("shift_jis")).unwrap_err();
+        assert!(err.contains("Shift_JIS"));
     }
 }

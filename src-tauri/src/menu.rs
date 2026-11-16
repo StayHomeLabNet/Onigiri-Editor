@@ -43,7 +43,17 @@ pub fn build_app_menu<R: Runtime>(
 
     let file_title = if is_ja { "ファイル" } else { "File" };
     let new_label = if is_ja { "新規作成" } else { "New File" };
+    let new_encoding_label = if is_ja {
+        "新規作成（文字コード指定）…"
+    } else {
+        "New File with Encoding..."
+    };
     let open_label = if is_ja { "ファイルを開く…" } else { "Open File..." };
+    let reopen_encoding_label = if is_ja {
+        "文字コードを指定して再読み込み…"
+    } else {
+        "Reopen with Encoding..."
+    };
     let open_folder_label = if is_ja {
         "フォルダを開く…"
     } else {
@@ -111,9 +121,13 @@ pub fn build_app_menu<R: Runtime>(
     let file_new = MenuItemBuilder::with_id("new-file", new_label)
         .accelerator("CmdOrCtrl+N")
         .build(app)?;
+    let file_new_encoding =
+        MenuItemBuilder::with_id("new-file-with-encoding", new_encoding_label).build(app)?;
     let file_open = MenuItemBuilder::with_id("open-file", open_label)
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
+    let file_reopen_encoding =
+        MenuItemBuilder::with_id("reopen-with-encoding", reopen_encoding_label).build(app)?;
     let file_open_folder = MenuItemBuilder::with_id("open-folder", open_folder_label)
         .accelerator("CmdOrCtrl+Shift+O")
         .build(app)?;
@@ -164,7 +178,9 @@ pub fn build_app_menu<R: Runtime>(
     #[cfg_attr(target_os = "macos", allow(unused_mut))]
     let mut file_builder = SubmenuBuilder::new(app, file_title)
         .item(&file_new)
+        .item(&file_new_encoding)
         .item(&file_open)
+        .item(&file_reopen_encoding)
         .item(&file_open_folder)
         .separator()
         .item(&file_save)

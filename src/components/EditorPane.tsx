@@ -1,9 +1,27 @@
-import React, { useEffect, useImperativeHandle, useRef, forwardRef } from 'react';
-import { EditorState, Compartment, Prec, StateEffect, StateField, RangeSetBuilder } from '@codemirror/state';
+import React, { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react';
+import {
+  EditorSelection,
+  EditorState,
+  Compartment,
+  Prec,
+  StateEffect,
+  StateField,
+  RangeSetBuilder,
+  type ChangeSpec,
+  type SelectionRange,
+} from '@codemirror/state';
 import {
   Decoration,
   type DecorationSet,
   EditorView,
+  GutterMarker,
+  MatchDecorator,
+  ViewPlugin,
+  type ViewUpdate,
+  WidgetType,
+  crosshairCursor,
+  gutter,
+  highlightWhitespace,
   keymap,
   lineNumbers as lineNumbersExt,
   highlightActiveLine,
@@ -12,7 +30,17 @@ import {
   dropCursor,
   rectangularSelection,
 } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from '@codemirror/commands';
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+  redo,
+  redoDepth,
+  selectAll,
+  undo,
+  undoDepth,
+} from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import {
@@ -24,8 +52,36 @@ import {
 } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import type { EditorSettings, ThemeId } from '../types';
+import type { Translations } from '../i18n/types';
 import type { FindMatch, TextRange } from '../utils/findReplace';
 import { htmlToMarkdown } from '../utils/markdown';
+import { readClipboardText, writeClipboardText } from '../utils/platform';
+import {
+  convertHalfFullWidth,
+  dedupeLines,
+  indentLineSpaces,
+  indentLineTab,
+  insertCommentLine,
+  insertQuoteLine,
+  removeCommentLine,
+  removeLineBreaksText,
+  removeQuoteLine,
+  reverseLines,
+  sortLinesAsc,
+  sortLinesDesc,
+  spacesToTabsText,
+  tabsToSpacesText,
+  trimLeadingLine,
+  trimTrailingLine,
+  unindentLineSpaces,
+  unindentLineTab,
+} from '../utils/editorTransforms';
+import {
+  EditorContextMenu,
+  type EditorContextAction,
+  type EditorContextMenuState,
+} from './EditorContextMenu';
+import { EditorRuler } from './EditorRuler';
 
 export interface EditorHandle {
   focus: () => void;
@@ -52,6 +108,7 @@ export interface LineRange {
 }
 
 interface EditorPaneProps {
+  t: Translations;
   docId: string;
   fileName?: string;
   value: string;
@@ -61,6 +118,7 @@ interface EditorPaneProps {
   onScrollRatio?: (ratio: number) => void;
   onSmartPasteNotify?: () => void;
   onLineCopyNotify?: () => void;
+  onStatusNotify?: (msg: string) => void;
   onImagePasteOrDrop?: (file: File) => Promise<void>;
   onFindScopeChange?: (scope: TextRange | null) => void;
   onEditorSelectionChange?: (range: TextRange) => void;
@@ -69,6 +127,76 @@ interface EditorPaneProps {
   settings: EditorSettings;
 }
 
+const toggleBookmarkEffect = StateEffect.define<number>();
+const clearBookmarksEffect = StateEffect.define<void>();
+const bookmarkLineDeco = Decoration.line({ class: 'cm-bookmark-line' });
+
+class BookmarkGutterMarker extends GutterMarker {
+  toDOM() {
+    const el = document.createElement('span');
+    el.className = 'cm-bookmark-marker';
+    el.title = 'Bookmark';
+    el.textContent = '●';
+    return el;
+  }
+}
+
+const bookmarkMarkerInstance = new BookmarkGutterMarker();
+
+const bookmarkField = StateField.define<number[]>({
+  create() {
+    return [];
+  },
+  update(positions, tr) {
+    let next = positions;
+    if (tr.docChanged && next.length > 0) {
+      const mapped = new Set<number>();
+      for (const pos of next) {
+        const clamped = Math.max(0, Math.min(tr.changes.mapPos(pos, 1), tr.state.doc.length));
+        mapped.add(tr.state.doc.lineAt(clamped).from);
+      }
+      next = Array.from(mapped).sort((a, b) => a - b);
+    }
+    for (const eff of tr.effects) {
+      if (eff.is(clearBookmarksEffect)) {
+        next = [];
+      } else if (eff.is(toggleBookmarkEffect)) {
+        const lineFrom = tr.state.doc.lineAt(
+          Math.max(0, Math.min(eff.value, tr.state.doc.length))
+        ).from;
+        if (next.includes(lineFrom)) {
+          next = next.filter((p) => p !== lineFrom);
+        } else {
+          next = [...next, lineFrom].sort((a, b) => a - b);
+        }
+      }
+    }
+    return next;
+  },
+  provide: (f) =>
+    EditorView.decorations.from(f, (positions) => {
+      if (positions.length === 0) return Decoration.none;
+      const builder = new RangeSetBuilder<Decoration>();
+      for (const pos of positions) {
+        builder.add(pos, pos, bookmarkLineDeco);
+      }
+      return builder.finish();
+    }),
+});
+
+const bookmarkGutter = gutter({
+  class: 'cm-bookmark-gutter',
+  markers: (view) => {
+    const positions = view.state.field(bookmarkField);
+    if (positions.length === 0) return new RangeSetBuilder<GutterMarker>().finish();
+    const builder = new RangeSetBuilder<GutterMarker>();
+    for (const pos of positions) {
+      builder.add(pos, pos, bookmarkMarkerInstance);
+    }
+    return builder.finish();
+  },
+  initialSpacer: () => bookmarkMarkerInstance,
+});
 const setSyncRangeEffect = StateEffect.define<LineRange | null>();
 const syncLineDeco = Decoration.line({ class: 'cm-sync-marker-line' });
 
@@ -173,8 +301,89 @@ const findHighlightField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+const BRACKET_MATCH_CONFIG = {
+  brackets: '()[]{}（）「」『』【】〈〉《》〔〕［］｛｝',
+};
+
+class NewlineSymbolWidget extends WidgetType {
+  toDOM() {
+    const span = document.createElement('span');
+    span.className = 'cm-eol-symbol';
+    span.setAttribute('aria-hidden', 'true');
+    span.textContent = '↓';
+    return span;
+  }
+  eq() {
+    return true;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
+
+const newlineWidgetInstance = new NewlineSymbolWidget();
+
+function buildNewlineDecorations(view: EditorView): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  const { doc } = view.state;
+  const seenLines = new Set<number>();
+  for (const { from, to } of view.visibleRanges) {
+    let pos = from;
+    while (pos <= to) {
+      const line = doc.lineAt(pos);
+      if (!seenLines.has(line.number)) {
+        seenLines.add(line.number);
+        if (line.to < doc.length) {
+          builder.add(line.to, line.to, Decoration.widget({ widget: newlineWidgetInstance, side: 1 }));
+        }
+      }
+      pos = line.to + 1;
+    }
+  }
+  return builder.finish();
+}
+
+const newlineSymbolPlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildNewlineDecorations(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.viewportChanged) {
+        this.decorations = buildNewlineDecorations(update.view);
+      }
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
+
+const ideographicSpaceDeco = Decoration.mark({ class: 'cm-highlightIdeographicSpace' });
+const ideographicSpaceDecorator = new MatchDecorator({
+  regexp: /\u3000/g,
+  decoration: ideographicSpaceDeco,
+});
+const ideographicSpacePlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = ideographicSpaceDecorator.createDeco(view);
+    }
+    update(update: ViewUpdate) {
+      this.decorations = ideographicSpaceDecorator.updateDeco(update, this.decorations);
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
+
 function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
   const isDark = theme === 'dark' || theme === 'midnight';
+  const effectiveWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
+  const wrapCol = Math.max(20, Math.min(240, settings.wrapColumn || 80));
   const bg =
     theme === 'midnight'
       ? '#090d16'
@@ -223,7 +432,18 @@ function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
       '.cm-content': {
         padding: '0 24px',
         caretColor: '#6366f1',
-        maxWidth: '100%',
+        ...(effectiveWrapMode === 'column'
+          ? {
+              width: `calc(${wrapCol}ch + 48px)`,
+              minWidth: `calc(${wrapCol}ch + 48px)`,
+              maxWidth: `calc(${wrapCol}ch + 48px)`,
+              borderRight: isDark
+                ? '1px dashed rgba(129, 140, 248, 0.35)'
+                : '1px dashed rgba(99, 102, 241, 0.32)',
+            }
+          : {
+              maxWidth: effectiveWrapMode === 'none' ? 'none' : '100%',
+            }),
       },
       '.cm-gutters': {
         backgroundColor: bg,
@@ -245,6 +465,18 @@ function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
       '&.cm-focused .cm-cursor': {
         borderLeftColor: '#6366f1',
         borderLeftWidth: '2px',
+      },
+      '&.cm-focused .cm-matchingBracket': {
+        backgroundColor: isDark ? 'rgba(99, 102, 241, 0.36) !important' : 'rgba(99, 102, 241, 0.22) !important',
+        boxShadow: isDark ? 'inset 0 0 0 1px rgba(165, 180, 252, 0.78)' : 'inset 0 0 0 1px rgba(79, 70, 229, 0.58)',
+        color: isDark ? '#f8fafc' : '#312e81',
+        borderRadius: '2px',
+      },
+      '&.cm-focused .cm-nonmatchingBracket': {
+        backgroundColor: isDark ? 'rgba(239, 68, 68, 0.34) !important' : 'rgba(239, 68, 68, 0.2) !important',
+        boxShadow: 'inset 0 0 0 1px rgba(239, 68, 68, 0.72)',
+        color: isDark ? '#fecaca' : '#991b1b',
+        borderRadius: '2px',
       },
     },
     { dark: isDark }
@@ -317,9 +549,217 @@ function copyTextToClipboard(text: string) {
   }
 }
 
+function getTargetLineNumbers(state: EditorState): number[] {
+  const doc = state.doc;
+  const lineSet = new Set<number>();
+  for (const range of state.selection.ranges) {
+    const startLine = doc.lineAt(range.from).number;
+    let endLine = doc.lineAt(range.to).number;
+    if (range.to > range.from) {
+      const endLineObj = doc.line(endLine);
+      if (range.to === endLineObj.from && endLine > startLine) {
+        endLine -= 1;
+      }
+    }
+    for (let ln = startLine; ln <= endLine; ln += 1) {
+      lineSet.add(ln);
+    }
+  }
+  return Array.from(lineSet).sort((a, b) => a - b);
+}
+
+function applyPerLineTransform(view: EditorView, transformLine: (lineText: string) => string) {
+  const { state } = view;
+  const lineNums = getTargetLineNumbers(state);
+  const changes: ChangeSpec[] = [];
+  for (const ln of lineNums) {
+    const line = state.doc.line(ln);
+    const nextText = transformLine(line.text);
+    if (nextText !== line.text) {
+      changes.push({ from: line.from, to: line.to, insert: nextText });
+    }
+  }
+  if (changes.length > 0) {
+    view.dispatch({ changes });
+  }
+}
+
+function applyLineBlockTransform(view: EditorView, transformLines: (lines: string[]) => string[]) {
+  const { state } = view;
+  const lineNums = getTargetLineNumbers(state);
+  const multiLine = lineNums.length > 1;
+  const startLineNum = multiLine ? lineNums[0] : 1;
+  const endLineNum = multiLine ? lineNums[lineNums.length - 1] : state.doc.lines;
+
+  const firstLine = state.doc.line(startLineNum);
+  const lastLine = state.doc.line(endLineNum);
+  const blockLines: string[] = [];
+  for (let ln = startLineNum; ln <= endLineNum; ln += 1) {
+    blockLines.push(state.doc.line(ln).text);
+  }
+  const nextLines = transformLines(blockLines);
+  const nextText = nextLines.join('\n');
+  const prevText = state.sliceDoc(firstLine.from, lastLine.to);
+  if (nextText !== prevText) {
+    view.dispatch({
+      changes: { from: firstLine.from, to: lastLine.to, insert: nextText },
+      selection: multiLine
+        ? { anchor: firstLine.from, head: firstLine.from + nextText.length }
+        : { anchor: Math.min(state.selection.main.head, firstLine.from + nextText.length) },
+    });
+  }
+}
+
+function applySelectionOrLineTransform(view: EditorView, transformText: (text: string) => string) {
+  const { state } = view;
+  const hasAnySelection = state.selection.ranges.some((r) => !r.empty);
+  if (hasAnySelection) {
+    const tr = state.changeByRange((range: SelectionRange) => {
+      if (range.empty) return { range };
+      const orig = state.sliceDoc(range.from, range.to);
+      const next = transformText(orig);
+      return {
+        changes: { from: range.from, to: range.to, insert: next },
+        range: EditorSelection.range(range.from, range.from + next.length),
+      };
+    });
+    view.dispatch(tr);
+    return;
+  }
+
+  const line = state.doc.lineAt(state.selection.main.head);
+  const next = transformText(line.text);
+  if (next !== line.text) {
+    const col = Math.min(state.selection.main.head - line.from, next.length);
+    view.dispatch({
+      changes: { from: line.from, to: line.to, insert: next },
+      selection: { anchor: line.from + col },
+    });
+  }
+}
+
+function convertSelectionToRectangle(view: EditorView): boolean {
+  const { state } = view;
+  const sel = state.selection.main;
+  if (sel.empty) return false;
+  const fromLine = state.doc.lineAt(sel.from);
+  const toLine = state.doc.lineAt(sel.to);
+  if (fromLine.number === toLine.number) return false;
+
+  const colA = sel.from - fromLine.from;
+  const colB = sel.to - toLine.from;
+  const startCol = Math.min(colA, colB);
+  const endCol = Math.max(colA, colB);
+
+  const ranges: SelectionRange[] = [];
+  for (let ln = fromLine.number; ln <= toLine.number; ln += 1) {
+    const line = state.doc.line(ln);
+    const rFrom = Math.min(line.from + startCol, line.to);
+    const rTo = Math.min(line.from + endCol, line.to);
+    ranges.push(EditorSelection.range(rFrom, rTo));
+  }
+  if (ranges.length > 0) {
+    view.dispatch({ selection: EditorSelection.create(ranges, 0) });
+    return true;
+  }
+  return false;
+}
+
+function insertWrapLineBreaks(view: EditorView) {
+  const { state } = view;
+  const hasSelection = state.selection.ranges.some((r) => !r.empty);
+  const lineNums = hasSelection
+    ? getTargetLineNumbers(state)
+    : Array.from({ length: state.doc.lines }, (_, i) => i + 1);
+
+  const insertPositions: number[] = [];
+  for (const ln of lineNums) {
+    const line = state.doc.line(ln);
+    let cursor = EditorSelection.cursor(line.from);
+    let safety = 0;
+    while (cursor.head < line.to && safety < 2000) {
+      safety += 1;
+      const endOfVisual = view.moveToLineBoundary(cursor, true, true);
+      if (endOfVisual.head <= cursor.head || endOfVisual.head >= line.to) {
+        break;
+      }
+      insertPositions.push(endOfVisual.head);
+      cursor = EditorSelection.cursor(endOfVisual.head, 1);
+    }
+  }
+
+  if (insertPositions.length === 0) return;
+  const changes: ChangeSpec[] = insertPositions.map((pos) => ({
+    from: pos,
+    to: pos,
+    insert: '\n',
+  }));
+  view.dispatch({ changes });
+}
+
+function removeLineBreaks(view: EditorView) {
+  const { state } = view;
+  const hasSelection = state.selection.ranges.some((r) => !r.empty);
+  if (hasSelection) {
+    const tr = state.changeByRange((range: SelectionRange) => {
+      if (range.empty) return { range };
+      const orig = state.sliceDoc(range.from, range.to);
+      const next = removeLineBreaksText(orig);
+      return {
+        changes: { from: range.from, to: range.to, insert: next },
+        range: EditorSelection.range(range.from, range.from + next.length),
+      };
+    });
+    view.dispatch(tr);
+    return;
+  }
+
+  const line = state.doc.lineAt(state.selection.main.head);
+  if (line.number < state.doc.lines) {
+    const nextLine = state.doc.line(line.number + 1);
+    view.dispatch({
+      changes: { from: line.to, to: nextLine.from, insert: '' },
+      selection: { anchor: line.to },
+    });
+  }
+}
+
+function toggleBookmarkAtCursor(view: EditorView): boolean {
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  view.dispatch({ effects: toggleBookmarkEffect.of(line.from) });
+  return true;
+}
+
+function jumpToBookmark(view: EditorView, direction: 'next' | 'prev'): boolean {
+  const bookmarks = view.state.field(bookmarkField);
+  if (bookmarks.length === 0) return false;
+  const curLineFrom = view.state.doc.lineAt(view.state.selection.main.head).from;
+  let target: number | undefined;
+  if (direction === 'next') {
+    target = bookmarks.find((p) => p > curLineFrom) ?? bookmarks[0];
+  } else {
+    for (let i = bookmarks.length - 1; i >= 0; i -= 1) {
+      if (bookmarks[i] < curLineFrom) {
+        target = bookmarks[i];
+        break;
+      }
+    }
+    if (target === undefined) target = bookmarks[bookmarks.length - 1];
+  }
+  if (target !== undefined) {
+    view.dispatch({
+      selection: { anchor: target },
+      effects: EditorView.scrollIntoView(target, { y: 'center' }),
+    });
+    return true;
+  }
+  return false;
+}
+
 export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
   (
     {
+      t,
       docId,
       fileName,
       value,
@@ -329,6 +769,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onScrollRatio,
       onSmartPasteNotify,
       onLineCopyNotify,
+      onStatusNotify,
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
@@ -345,26 +786,42 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     const lineNumComp = useRef(new Compartment());
     const wrapComp = useRef(new Compartment());
     const langComp = useRef(new Compartment());
+    const bracketMatchComp = useRef(new Compartment());
+    const whitespaceComp = useRef(new Compartment());
+    const eolSymbolComp = useRef(new Compartment());
+
+    const [rulerVersion, setRulerVersion] = useState(0);
+    const [rectMode, setRectMode] = useState(false);
+    const rectModeRef = useRef(false);
+    rectModeRef.current = rectMode;
+
+    const [contextMenu, setContextMenu] = useState<EditorContextMenuState | null>(null);
 
     const callbacksRef = useRef({
+      t,
+      fileName,
       onChange,
       onCursorChange,
       onFocusPane,
       onScrollRatio,
       onSmartPasteNotify,
       onLineCopyNotify,
+      onStatusNotify,
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
       settings,
     });
     callbacksRef.current = {
+      t,
+      fileName,
       onChange,
       onCursorChange,
       onFocusPane,
       onScrollRatio,
       onSmartPasteNotify,
       onLineCopyNotify,
+      onStatusNotify,
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
@@ -395,18 +852,32 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     useEffect(() => {
       if (!hostRef.current) return;
 
+      const initialWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
+
       const view = new EditorView({
         state: EditorState.create({
           doc: value,
           extensions: [
+            EditorState.allowMultipleSelections.of(true),
             history(),
             drawSelection(),
             dropCursor(),
-            rectangularSelection(),
+            rectangularSelection({
+              eventFilter: (event) => event.button === 0 && (event.altKey || rectModeRef.current),
+            }),
+            crosshairCursor(),
             indentOnInput(),
-            bracketMatching(),
+            bracketMatchComp.current.of(
+              (settings.bracketMatchingEnabled ?? true) ? bracketMatching(BRACKET_MATCH_CONFIG) : []
+            ),
+            whitespaceComp.current.of(
+              settings.showWhitespaceSymbols ? [highlightWhitespace(), ideographicSpacePlugin] : []
+            ),
+            eolSymbolComp.current.of(settings.showNewlineSymbols ? newlineSymbolPlugin : []),
             highlightActiveLine(),
             highlightActiveLineGutter(),
+            bookmarkField,
+            bookmarkGutter,
             syncLineHighlightField,
             findScopeField,
             findHighlightField,
@@ -417,17 +888,96 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                   key: 'Mod-c',
                   run: (editorView) => tryOeditLineCopy(editorView),
                 },
+                {
+                  key: 'Mod-u',
+                  run: (editorView) => {
+                    applySelectionOrLineTransform(editorView, (s) => s.toLowerCase());
+                    return true;
+                  },
+                },
+                {
+                  key: 'Mod-Shift-u',
+                  run: (editorView) => {
+                    applySelectionOrLineTransform(editorView, (s) => s.toUpperCase());
+                    return true;
+                  },
+                },
+                {
+                  key: 'Mod-Shift-Space',
+                  run: (editorView) => {
+                    applyPerLineTransform(editorView, trimLeadingLine);
+                    return true;
+                  },
+                },
+                {
+                  key: 'Mod-Shift-r',
+                  run: (editorView) => {
+                    applyPerLineTransform(editorView, insertQuoteLine);
+                    return true;
+                  },
+                },
+                {
+                  key: 'Mod-F2',
+                  run: (editorView) => toggleBookmarkAtCursor(editorView),
+                },
+                {
+                  key: 'F2',
+                  run: (editorView) => jumpToBookmark(editorView, 'next'),
+                },
+                {
+                  key: 'Shift-F2',
+                  run: (editorView) => jumpToBookmark(editorView, 'prev'),
+                },
+                {
+                  key: 'Escape',
+                  run: () => {
+                    if (rectModeRef.current) {
+                      setRectMode(false);
+                      callbacksRef.current.onStatusNotify?.(
+                        callbacksRef.current.t.contextMenu.rectModeOffToast
+                      );
+                      return true;
+                    }
+                    return false;
+                  },
+                },
               ])
             ),
             keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
             themeComp.current.of(createEditorTheme(theme, settings)),
             highlightComp.current.of(syntaxHighlighting(createHighlightStyle(theme))),
             lineNumComp.current.of(settings.lineNumbers ? lineNumbersExt() : []),
-            wrapComp.current.of(settings.wordWrap ? EditorView.lineWrapping : []),
+            wrapComp.current.of(initialWrapMode === 'none' ? [] : EditorView.lineWrapping),
             EditorView.domEventHandlers({
               focus() {
                 callbacksRef.current.onFocusPane?.();
                 return false;
+              },
+              contextmenu(event, editorView) {
+                event.preventDefault();
+                const pos = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
+                if (pos !== null) {
+                  const insideSelection = editorView.state.selection.ranges.some(
+                    (r) => !r.empty && pos >= r.from && pos <= r.to
+                  );
+                  if (!insideSelection) {
+                    editorView.dispatch({ selection: { anchor: pos } });
+                  }
+                }
+                const hasSelection = editorView.state.selection.ranges.some((r) => !r.empty);
+                const canCopy =
+                  hasSelection || callbacksRef.current.settings.oeditLineCopyEnabled;
+                setContextMenu({
+                  x: event.clientX,
+                  y: event.clientY,
+                  canUndo: undoDepth(editorView.state) > 0,
+                  canRedo: redoDepth(editorView.state) > 0,
+                  hasSelection,
+                  canCopy,
+                  isRectMode: rectModeRef.current,
+                  hasBookmarks: editorView.state.field(bookmarkField).length > 0,
+                });
+                return true;
               },
               copy(event, editorView) {
                 const { settings: curSettings, onLineCopyNotify } = callbacksRef.current;
@@ -514,6 +1064,9 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 const head = update.state.selection.main.head;
                 const lineObj = update.state.doc.lineAt(head);
                 callbacksRef.current.onCursorChange(lineObj.number, head - lineObj.from + 1);
+                if (callbacksRef.current.settings.showRuler) {
+                  setRulerVersion((v) => v + 1);
+                }
 
                 // Typewriter mode: keep active line vertically centered on typing/selection
                 if (callbacksRef.current.settings.typewriterMode && (update.docChanged || update.selectionSet)) {
@@ -548,6 +1101,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       };
       scroller.addEventListener('scroll', handleScroll, { passive: true });
       viewRef.current = view;
+      setRulerVersion((v) => v + 1);
 
       return () => {
         scroller.removeEventListener('scroll', handleScroll);
@@ -561,14 +1115,25 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     useEffect(() => {
       const view = viewRef.current;
       if (!view) return;
+      const effectiveWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
       view.dispatch({
         effects: [
           themeComp.current.reconfigure(createEditorTheme(theme, settings)),
           highlightComp.current.reconfigure(syntaxHighlighting(createHighlightStyle(theme))),
           lineNumComp.current.reconfigure(settings.lineNumbers ? lineNumbersExt() : []),
-          wrapComp.current.reconfigure(settings.wordWrap ? EditorView.lineWrapping : []),
+          wrapComp.current.reconfigure(effectiveWrapMode === 'none' ? [] : EditorView.lineWrapping),
+          bracketMatchComp.current.reconfigure(
+            (settings.bracketMatchingEnabled ?? true) ? bracketMatching(BRACKET_MATCH_CONFIG) : []
+          ),
+          whitespaceComp.current.reconfigure(
+            settings.showWhitespaceSymbols ? [highlightWhitespace(), ideographicSpacePlugin] : []
+          ),
+          eolSymbolComp.current.reconfigure(settings.showNewlineSymbols ? newlineSymbolPlugin : []),
         ],
       });
+      if (settings.showRuler) {
+        setRulerVersion((v) => v + 1);
+      }
     }, [theme, settings]);
 
     // Sync bidirectional active block marker from right preview pane
@@ -800,7 +1365,196 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       },
     }));
 
-    return <div ref={hostRef} className="editor-codemirror-host" />;
+    const handleContextAction = useCallback((action: EditorContextAction) => {
+      const view = viewRef.current;
+      if (!view) return;
+
+      switch (action) {
+        case 'undo':
+          undo(view);
+          break;
+        case 'redo':
+          redo(view);
+          break;
+        case 'cut': {
+          const { selection } = view.state;
+          if (selection.ranges.some((r) => !r.empty)) {
+            const text = selection.ranges
+              .map((r) => view.state.sliceDoc(r.from, r.to))
+              .join('\n');
+            void writeClipboardText(text);
+            view.dispatch(view.state.replaceSelection(''));
+          }
+          break;
+        }
+        case 'copy': {
+          const { selection } = view.state;
+          if (selection.ranges.some((r) => !r.empty)) {
+            const text = selection.ranges
+              .map((r) => view.state.sliceDoc(r.from, r.to))
+              .join('\n');
+            void writeClipboardText(text);
+          } else {
+            tryOeditLineCopy(view);
+          }
+          break;
+        }
+        case 'paste':
+          void readClipboardText().then((clip) => {
+            const currentView = viewRef.current;
+            if (!currentView || clip === null) return;
+            const normalized = clip.replace(/\r\n?/g, '\n');
+            const ranges = currentView.state.selection.ranges;
+            if (ranges.length > 1) {
+              const clipLines = normalized.split('\n');
+              if (clipLines.length === ranges.length) {
+                let idx = 0;
+                const tr = currentView.state.changeByRange((range) => {
+                  const insert = clipLines[idx++] ?? '';
+                  return {
+                    changes: { from: range.from, to: range.to, insert },
+                    range: EditorSelection.cursor(range.from + insert.length),
+                  };
+                });
+                currentView.dispatch(tr);
+                currentView.focus();
+                return;
+              }
+            }
+            currentView.dispatch(currentView.state.replaceSelection(normalized));
+            currentView.focus();
+          });
+          return;
+        case 'delete':
+          if (view.state.selection.ranges.some((r) => !r.empty)) {
+            view.dispatch(view.state.replaceSelection(''));
+          }
+          break;
+        case 'selectAll':
+          selectAll(view);
+          break;
+        case 'rectangularSelection': {
+          const next = !rectModeRef.current;
+          if (next && view.state.selection.ranges.length === 1 && !view.state.selection.main.empty) {
+            convertSelectionToRectangle(view);
+          }
+          setRectMode(next);
+          callbacksRef.current.onStatusNotify?.(
+            next
+              ? callbacksRef.current.t.contextMenu.rectModeOnToast
+              : callbacksRef.current.t.contextMenu.rectModeOffToast
+          );
+          break;
+        }
+        case 'indentTab':
+          applyPerLineTransform(view, indentLineTab);
+          break;
+        case 'unindentTab':
+          applyPerLineTransform(view, unindentLineTab);
+          break;
+        case 'indentSpace':
+          applyPerLineTransform(view, indentLineSpaces);
+          break;
+        case 'unindentSpace':
+          applyPerLineTransform(view, unindentLineSpaces);
+          break;
+        case 'insertComment':
+          applyPerLineTransform(view, (line) => insertCommentLine(line, callbacksRef.current.fileName));
+          break;
+        case 'removeComment':
+          applyPerLineTransform(view, (line) => removeCommentLine(line, callbacksRef.current.fileName));
+          break;
+        case 'spacesToTabs':
+          applySelectionOrLineTransform(view, (s) => spacesToTabsText(s, 4));
+          break;
+        case 'tabsToSpaces':
+          applySelectionOrLineTransform(view, (s) => tabsToSpacesText(s, 4));
+          break;
+        case 'toLowerCase':
+          applySelectionOrLineTransform(view, (s) => s.toLowerCase());
+          break;
+        case 'toUpperCase':
+          applySelectionOrLineTransform(view, (s) => s.toUpperCase());
+          break;
+        case 'reverseLines':
+          applyLineBlockTransform(view, reverseLines);
+          break;
+        case 'sortLinesAsc':
+          applyLineBlockTransform(view, sortLinesAsc);
+          break;
+        case 'sortLinesDesc':
+          applyLineBlockTransform(view, sortLinesDesc);
+          break;
+        case 'dedupeLines':
+          applyLineBlockTransform(view, dedupeLines);
+          break;
+        case 'trimLeading':
+          applyPerLineTransform(view, trimLeadingLine);
+          break;
+        case 'trimTrailing':
+          applyPerLineTransform(view, trimTrailingLine);
+          break;
+        case 'insertQuote':
+          applyPerLineTransform(view, insertQuoteLine);
+          break;
+        case 'removeQuote':
+          applyPerLineTransform(view, removeQuoteLine);
+          break;
+        case 'insertWrapLineBreaks':
+          insertWrapLineBreaks(view);
+          break;
+        case 'removeLineBreaks':
+          removeLineBreaks(view);
+          break;
+        case 'to-full':
+        case 'to-full-kana':
+        case 'to-full-alnum':
+        case 'to-half':
+        case 'to-half-kana':
+        case 'to-half-alnum':
+          applySelectionOrLineTransform(view, (s) => convertHalfFullWidth(s, action));
+          break;
+        case 'toggleBookmark':
+          toggleBookmarkAtCursor(view);
+          break;
+        case 'nextBookmark':
+          jumpToBookmark(view, 'next');
+          break;
+        case 'prevBookmark':
+          jumpToBookmark(view, 'prev');
+          break;
+        case 'clearBookmarks':
+          view.dispatch({ effects: clearBookmarksEffect.of(undefined) });
+          break;
+      }
+      view.focus();
+    }, []);
+
+    const effectiveWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
+
+    return (
+      <div className={`editor-host-wrap ${rectMode ? 'is-rect-mode' : ''}`}>
+        {settings.showRuler && (
+          <EditorRuler
+            viewRef={viewRef}
+            theme={theme}
+            fontSize={settings.fontSize}
+            editorFont={settings.editorFont}
+            lineNumbers={settings.lineNumbers}
+            wrapMode={effectiveWrapMode}
+            wrapColumn={settings.wrapColumn}
+            rulerVersion={rulerVersion}
+          />
+        )}
+        <div ref={hostRef} className="editor-codemirror-host" />
+        <EditorContextMenu
+          t={t}
+          menu={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onAction={handleContextAction}
+        />
+      </div>
+    );
   }
 );
 

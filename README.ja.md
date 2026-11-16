@@ -10,13 +10,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v101-の更新内容">v1.0.1 の更新内容</a> ・
+    <a href="#v102-の更新内容">v1.0.2 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.1-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.0.2-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -38,7 +38,7 @@
 
 初回起動時は OS の言語設定を自動判定し、日本語環境では日本語 UI・日本語ネイティブメニューで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
 
-現在のバージョン: `v1.0.1`
+現在のバージョン: `v1.0.2`
 
 ## 主な機能
 
@@ -95,12 +95,21 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.0.1 の更新内容
+## v1.0.2 の更新内容
+
+- **文字コード・改行コードの全面対応**: `UTF-8` / `UTF-8 (BOM)` / `Shift_JIS (CP932)` / `EUC-JP` / `ISO-2022-JP (JIS)` / `UTF-16 LE` / `UTF-16 BE` と `LF` / `CRLF` の自動判別・指定再読み込み・指定新規作成・保存時変換に対応し、設定での既定値指定と保存時の表現不可文字チェックを追加しました。
+- **エディタ右クリックコンテキストメニュー**: 元に戻す／やり直し・切り取り／コピー／貼り付け・**矩形選択**・**高度な操作**（インデント、コメント、スペース⇔タブ、大文字／小文字、行の逆順／ソート／重複削除、空白削除、`>` 引用、折り返し改行／改行削除）・**半角－全角変換**・**ブックマーク**を追加しました。
+- **ルーラー・折り返し・記号表示＆対応括弧ハイライト**: 列ルーラー、折り返し方式（ウィンドウ右端／指定文字数／折り返さない）、改行・空白記号表示、ステータスバー表示切替、対応括弧ハイライトを追加しました。
+
+<details>
+<summary>以前のリリース: v1.0.1</summary>
 
 - **Windows CLI 起動エラー（`os error 193`）の修正**: `%APPDATA%\npm` 内の拡張子なし POSIX シェルスクリプト（`codex` / `claude` / `gemini` / `npm` 等）を Windows 実行候補から除外し、`.exe` / `.com` / `.cmd` / `.bat` を正しく解決して起動するようにしました。
 - **AI CLI・ローカル LLM 接続サポート強化**: Antigravity CLI（`agy`）がデスクトップアプリ本体とは別配布である点の明記と OS 別インストーラー（`curl` / `irm`）、macOS/Linux の `~/.npm-global` 自動設定による権限エラー回避、CLI 別の認証案内・Ollama/LM Studio 詳細手順を追加しました。
 - **Web 実行環境・依存パッケージ診断の拡充**: Windows Microsoft Store のダミー `python.exe` 除外、`wp-config-sample.php` / Laravel SQLite / Ruby・Jekyll / `.env.example` の診断、Linux `python3-venv`・PHP 拡張案内、ボタンの役割説明を追加しました。
 - **検索・置換機能の強化**: 全角／半角の区別切り替え、選択範囲内での検索・置換（範囲再取得対応）、正規表現 OFF 時の `$1` 等リテラル維持、一致箇所ナビゲーションを改善しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.0.0</summary>

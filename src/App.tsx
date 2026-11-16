@@ -26,10 +26,12 @@ import type {
   SearchMatch,
   SidebarTab,
   Snapshot,
+  TextEncodingId,
   ThemeId,
   ViewLayout,
   WorkspaceEntry,
 } from './types';
+import { decodeBytesBrowser, getEncodingShortLabel } from './utils/encodings';
 import { detectInitialLocale, getTranslations, hasSavedLocalePreference } from './i18n';
 import {
   cleanAiMarkdown,
@@ -91,6 +93,7 @@ import { StatusBar } from './components/StatusBar';
 import { AboutModal } from './components/AboutModal';
 import { ImageModal } from './components/ImageModal';
 import { SettingsModal } from './components/SettingsModal';
+import { EncodingModal, type EncodingModalMode } from './components/EncodingModal';
 import {
   AiDiffPreviewModal,
   type DiffPreviewRequest,
@@ -103,6 +106,9 @@ interface PersistedTabRecord {
   title: string;
   filePath?: string;
   eol?: '\n' | '\r\n';
+  savedEol?: '\n' | '\r\n';
+  encoding?: TextEncodingId;
+  savedEncoding?: TextEncodingId;
   dirty: boolean;
   content?: string;
   savedContent?: string;
@@ -128,6 +134,15 @@ const DEFAULT_SETTINGS: EditorSettings = {
   previewTheme: 'editorial',
   lineNumbers: true,
   wordWrap: true,
+  wrapMode: 'window',
+  wrapColumn: 80,
+  showRuler: true,
+  showNewlineSymbols: false,
+  showWhitespaceSymbols: false,
+  bracketMatchingEnabled: true,
+  showStatusBar: true,
+  defaultNewFileEncoding: 'utf-8',
+  defaultNewFileEol: '\n',
   syncScroll: true,
   typewriterMode: false,
   smartPasteHtml: true,
@@ -147,6 +162,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   externalBrowserPort: 49123,
   restoreSessionEnabled: true,
   autoSaveEnabled: false,
+  hideTopBarInSimpleMode: false,
 };
 
 const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
@@ -179,14 +195,30 @@ function loadJson<T>(key: string, fallback: T): T {
   }
 }
 
+function computeTabDirty(
+  tab: Pick<DocumentTab, 'filePath' | 'savedContent' | 'savedEncoding' | 'savedEol'>,
+  content: string,
+  encoding: TextEncodingId,
+  eol: '\n' | '\r\n'
+): boolean {
+  if (content !== tab.savedContent) return true;
+  if (!tab.filePath) return false;
+  return (
+    encoding !== (tab.savedEncoding ?? 'utf-8') ||
+    eol !== (tab.savedEol ?? '\n')
+  );
+}
+
 function makeTab(
   title: string,
   rawContent: string,
   filePath?: string,
-  diskModifiedMs?: number
+  diskModifiedMs?: number,
+  options?: { encoding?: TextEncodingId; eol?: '\n' | '\r\n' }
 ): DocumentTab {
-  const eol: '\n' | '\r\n' = rawContent.includes('\r\n') ? '\r\n' : '\n';
-  const content = eol === '\r\n' ? rawContent.replace(/\r\n/g, '\n') : rawContent;
+  const eol: '\n' | '\r\n' = options?.eol ?? (rawContent.includes('\r\n') ? '\r\n' : '\n');
+  const encoding: TextEncodingId = options?.encoding ?? 'utf-8';
+  const content = rawContent.includes('\r\n') ? rawContent.replace(/\r\n/g, '\n') : rawContent;
   return {
     id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     title,
@@ -194,6 +226,9 @@ function makeTab(
     content,
     savedContent: content,
     eol,
+    savedEol: eol,
+    encoding,
+    savedEncoding: encoding,
     dirty: false,
     cursorLine: 1,
     cursorCol: 1,
@@ -232,11 +267,16 @@ function buildInitialSessionState(
             if (needsDiskLoad) pendingHydrationIds.push(rec.id);
             const content = rec.content ?? '';
             const savedContent = rec.savedContent ?? content;
+            const eol = rec.eol || '\n';
+            const encoding = rec.encoding || 'utf-8';
             return {
               id: rec.id || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
               title: rec.title || welcomeTitle,
               filePath: rec.filePath,
-              eol: rec.eol || '\n',
+              eol,
+              savedEol: rec.savedEol || eol,
+              encoding,
+              savedEncoding: rec.savedEncoding || encoding,
               content,
               savedContent,
               dirty: Boolean(rec.dirty),
@@ -293,9 +333,21 @@ export function App() {
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
-  const [settings, setSettings] = useState<EditorSettings>(() =>
-    loadJson('onigiri-markdown.settings', DEFAULT_SETTINGS)
-  );
+  const [settings, setSettings] = useState<EditorSettings>(() => {
+    const loaded = loadJson('onigiri-markdown.settings', DEFAULT_SETTINGS);
+    try {
+      const raw = localStorage.getItem('onigiri-markdown.settings');
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<EditorSettings>;
+        if (!parsed.wrapMode && parsed.wordWrap === false) {
+          loaded.wrapMode = 'none';
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return loaded;
+  });
   const [cleanOptions, setCleanOptions] = useState<AiCleanOptions>(() =>
     loadJson('onigiri-markdown.cleanOpts', DEFAULT_CLEAN_OPTS)
   );
@@ -325,6 +377,7 @@ export function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [encodingModalMode, setEncodingModalMode] = useState<EncodingModalMode | null>(null);
   const [diffPreview, setDiffPreview] = useState<DiffPreviewRequest | null>(null);
   const [zenMode, setZenMode] = useState(false);
   const [splitRatio, setSplitRatio] = useState(0.5);
@@ -499,6 +552,9 @@ export function App() {
         title: tb.title,
         filePath: tb.filePath,
         eol: tb.eol,
+        savedEol: tb.savedEol,
+        encoding: tb.encoding,
+        savedEncoding: tb.savedEncoding,
         dirty: tb.dirty,
         content: trimmedContent,
         savedContent: trimmedSaved,
@@ -567,7 +623,10 @@ export function App() {
         const syncList = await checkFilesSync(paths).catch(() => []);
         const syncMap = new Map(syncList.map((s) => [s.path, s]));
 
-        const loadedById = new Map<string, { content: string; eol: '\n' | '\r\n'; modifiedMs?: number }>();
+        const loadedById = new Map<
+          string,
+          { content: string; eol: '\n' | '\r\n'; encoding: TextEncodingId; modifiedMs?: number }
+        >();
         const missingIds = new Set<string>();
 
         for (const tb of targetTabs) {
@@ -578,12 +637,15 @@ export function App() {
             continue;
           }
           try {
-            const res = await readFileByPath(path);
-            const eol: '\n' | '\r\n' = res.content.includes('\r\n') ? '\r\n' : '\n';
-            const norm = eol === '\r\n' ? res.content.replace(/\r\n/g, '\n') : res.content;
+            const res = await readFileByPath(path, tb.encoding);
+            const eol: '\n' | '\r\n' = res.eol;
+            const norm = res.content.includes('\r\n')
+              ? res.content.replace(/\r\n/g, '\n')
+              : res.content;
             loadedById.set(tb.id, {
               content: norm,
               eol,
+              encoding: res.encoding,
               modifiedMs: syncInfo?.modifiedMs,
             });
           } catch {
@@ -603,6 +665,9 @@ export function App() {
                   content: loaded.content,
                   savedContent: loaded.content,
                   eol: loaded.eol,
+                  savedEol: loaded.eol,
+                  encoding: loaded.encoding,
+                  savedEncoding: loaded.encoding,
                   dirty: false,
                   diskModifiedMs: loaded.modifiedMs ?? tb.diskModifiedMs,
                 };
@@ -690,7 +755,12 @@ export function App() {
             ? {
                 ...tab,
                 content: nextContent,
-                dirty: nextContent !== tab.savedContent,
+                dirty: computeTabDirty(
+                  tab,
+                  nextContent,
+                  tab.encoding ?? 'utf-8',
+                  tab.eol ?? '\n'
+                ),
                 updatedAt: Date.now(),
               }
             : tab
@@ -747,7 +817,10 @@ export function App() {
         const res = await readFileByPath(filePath);
         const syncInfo = await checkFilesSync([res.path]).catch(() => []);
         const modifiedMs = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : undefined;
-        const created = makeTab(res.name, res.content, res.path, modifiedMs);
+        const created = makeTab(res.name, res.content, res.path, modifiedMs, {
+          encoding: res.encoding,
+          eol: res.eol,
+        });
         setTabs((prev) => {
           if (prev.some((tb) => tb.filePath === res.path)) return prev;
           return [...prev, created];
@@ -775,7 +848,10 @@ export function App() {
     try {
       const infos = await checkFilesSync(candidatePaths);
       const infoMap = new Map(infos.map((item) => [item.path, item]));
-      const changedContents = new Map<string, { content: string; modifiedMs: number }>();
+      const changedContents = new Map<
+        string,
+        { content: string; encoding: TextEncodingId; eol: '\n' | '\r\n'; modifiedMs: number }
+      >();
 
       for (const tab of tabsRef.current) {
         if (!tab.filePath || savingPathsRef.current.has(tab.filePath)) continue;
@@ -794,6 +870,8 @@ export function App() {
               : loaded.content;
             changedContents.set(tab.filePath, {
               content: norm,
+              encoding: loaded.encoding,
+              eol: loaded.eol,
               modifiedMs: info.modifiedMs,
             });
           } catch {
@@ -835,6 +913,10 @@ export function App() {
             return {
               ...tab,
               savedContent: changed.content,
+              encoding: changed.encoding,
+              savedEncoding: changed.encoding,
+              eol: changed.eol,
+              savedEol: changed.eol,
               dirty: false,
               diskModifiedMs: changed.modifiedMs,
               externalStatus: null,
@@ -850,6 +932,10 @@ export function App() {
               ...tab,
               content: changed.content,
               savedContent: changed.content,
+              encoding: changed.encoding,
+              savedEncoding: changed.encoding,
+              eol: changed.eol,
+              savedEol: changed.eol,
               dirty: false,
               diskModifiedMs: changed.modifiedMs,
               externalStatus: null,
@@ -911,7 +997,8 @@ export function App() {
     const targetTabId = activeTab.id;
     const targetPath = activeTab.filePath;
     const contentSnapshot = activeTab.content;
-    const eolSnapshot = activeTab.eol;
+    const eolSnapshot: '\n' | '\r\n' = activeTab.eol ?? '\n';
+    const encodingSnapshot: TextEncodingId = activeTab.encoding ?? 'utf-8';
 
     const timer = window.setTimeout(async () => {
       savingPathsRef.current.add(targetPath);
@@ -920,22 +1007,31 @@ export function App() {
           eolSnapshot === '\r\n'
             ? contentSnapshot.replace(/\n/g, '\r\n')
             : contentSnapshot;
-        await writeFileSilently(targetPath, diskText);
+        await writeFileSilently(targetPath, diskText, encodingSnapshot);
         const syncRes = await checkFilesSync([targetPath]).catch(() => []);
         const newMtime = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
         setTabs((prev) =>
-          prev.map((tb) =>
-            tb.id === targetTabId
-              ? {
-                  ...tb,
-                  savedContent: contentSnapshot,
-                  dirty: tb.content !== contentSnapshot,
-                  diskModifiedMs: newMtime ?? tb.diskModifiedMs,
-                  externalStatus: null,
-                  externalContent: undefined,
-                }
-              : tb
-          )
+          prev.map((tb) => {
+            if (tb.id !== targetTabId) return tb;
+            const nextSaved = {
+              ...tb,
+              savedContent: contentSnapshot,
+              savedEncoding: encodingSnapshot,
+              savedEol: eolSnapshot,
+            };
+            return {
+              ...nextSaved,
+              dirty: computeTabDirty(
+                nextSaved,
+                tb.content,
+                tb.encoding ?? 'utf-8',
+                tb.eol ?? '\n'
+              ),
+              diskModifiedMs: newMtime ?? tb.diskModifiedMs,
+              externalStatus: null,
+              externalContent: undefined,
+            };
+          })
         );
       } catch {
         // leave dirty if auto-save fails
@@ -952,6 +1048,7 @@ export function App() {
     activeTab.content,
     activeTab.dirty,
     activeTab.eol,
+    activeTab.encoding,
     activeTab.externalStatus,
   ]);
 
@@ -962,11 +1059,15 @@ export function App() {
       try {
         let nextText = target.externalContent;
         let nextMtime = target.diskModifiedMs;
+        let nextEncoding: TextEncodingId = target.encoding ?? 'utf-8';
+        let nextEol: '\n' | '\r\n' = target.eol ?? '\n';
         if (nextText === undefined) {
           const res = await readFileByPath(target.filePath);
           nextText = res.content.includes('\r\n')
             ? res.content.replace(/\r\n/g, '\n')
             : res.content;
+          nextEncoding = res.encoding;
+          nextEol = res.eol;
         }
         const syncRes = await checkFilesSync([target.filePath]).catch(() => []);
         if (syncRes[0]?.exists) nextMtime = syncRes[0].modifiedMs;
@@ -986,6 +1087,10 @@ export function App() {
               ...tb,
               content: nextText!,
               savedContent: nextText!,
+              encoding: nextEncoding,
+              savedEncoding: nextEncoding,
+              eol: nextEol,
+              savedEol: nextEol,
               dirty: false,
               diskModifiedMs: nextMtime,
               externalStatus: null,
@@ -1133,18 +1238,33 @@ export function App() {
   }, []);
 
   // File actions
-  const handleNewFile = useCallback(() => {
-    const created = makeTab(t.dialogs.untitledName, '# \n');
-    if (mode !== 'advanced') {
-      if (activeTab.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
-      setTabs([created]);
-      setActiveTabId(created.id);
-    } else {
-      setTabs((prev) => [...prev, created]);
-      setActiveTabId(created.id);
-    }
-    setTimeout(() => editorRef.current?.focus(), 30);
-  }, [mode, activeTab.dirty, t.dialogs.unsavedCloseConfirm, t.dialogs.untitledName]);
+  const handleNewFile = useCallback(
+    (opts?: { encoding?: TextEncodingId; eol?: '\n' | '\r\n' }) => {
+      const encoding = opts?.encoding ?? settings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = opts?.eol ?? settings.defaultNewFileEol ?? '\n';
+      const created = makeTab(t.dialogs.untitledName, '', undefined, undefined, {
+        encoding,
+        eol,
+      });
+      if (mode !== 'advanced') {
+        if (activeTab.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
+        setTabs([created]);
+        setActiveTabId(created.id);
+      } else {
+        setTabs((prev) => [...prev, created]);
+        setActiveTabId(created.id);
+      }
+      setTimeout(() => editorRef.current?.focus(), 30);
+    },
+    [
+      mode,
+      activeTab.dirty,
+      settings.defaultNewFileEncoding,
+      settings.defaultNewFileEol,
+      t.dialogs.unsavedCloseConfirm,
+      t.dialogs.untitledName,
+    ]
+  );
 
   const handleOpenFile = useCallback(async () => {
     try {
@@ -1157,7 +1277,10 @@ export function App() {
       }
       const syncInfo = await checkFilesSync([opened.path]).catch(() => []);
       const modifiedMs = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : undefined;
-      const created = makeTab(opened.name, opened.content, opened.path, modifiedMs);
+      const created = makeTab(opened.name, opened.content, opened.path, modifiedMs, {
+        encoding: opened.encoding,
+        eol: opened.eol,
+      });
       if (mode !== 'advanced') {
         if (activeTab.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
         setTabs([created]);
@@ -1175,38 +1298,50 @@ export function App() {
     async (forceSaveAs = false) => {
       const savedSnapshot = activeTab.content;
       const prevPath = activeTab.filePath;
+      const targetEncoding: TextEncodingId = activeTab.encoding ?? 'utf-8';
+      const targetEol: '\n' | '\r\n' = activeTab.eol ?? '\n';
       if (!forceSaveAs && prevPath) {
         savingPathsRef.current.add(prevPath);
       }
       try {
         const contentToWrite =
-          activeTab.eol === '\r\n'
+          targetEol === '\r\n'
             ? savedSnapshot.replace(/\n/g, '\r\n')
             : savedSnapshot;
         const res = await saveMarkdownFile(
           contentToWrite,
           forceSaveAs ? undefined : activeTab.filePath,
-          activeTab.title
+          activeTab.title,
+          targetEncoding
         );
         if (!res) return;
         savingPathsRef.current.add(res.path);
         const syncRes = await checkFilesSync([res.path]).catch(() => []);
         const newMtime = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
         setTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === activeTab.id
-              ? {
-                  ...tab,
-                  title: res.name,
-                  filePath: res.path,
-                  savedContent: savedSnapshot,
-                  dirty: tab.content !== savedSnapshot,
-                  diskModifiedMs: newMtime ?? tab.diskModifiedMs,
-                  externalStatus: null,
-                  externalContent: undefined,
-                }
-              : tab
-          )
+          prev.map((tab) => {
+            if (tab.id !== activeTab.id) return tab;
+            const nextSaved = {
+              ...tab,
+              title: res.name,
+              filePath: res.path,
+              savedContent: savedSnapshot,
+              savedEncoding: targetEncoding,
+              savedEol: targetEol,
+            };
+            return {
+              ...nextSaved,
+              dirty: computeTabDirty(
+                nextSaved,
+                tab.content,
+                tab.encoding ?? 'utf-8',
+                tab.eol ?? '\n'
+              ),
+              diskModifiedMs: newMtime ?? tab.diskModifiedMs,
+              externalStatus: null,
+              externalContent: undefined,
+            };
+          })
         );
         notify(t.toasts.savedSuccess);
         if (
@@ -1250,6 +1385,100 @@ export function App() {
     ]
   );
 
+  const handleReopenWithEncoding = useCallback(
+    async (encoding: TextEncodingId) => {
+      const target = activeTab;
+      if (!target.filePath) {
+        notify(t.encoding.noFileToReopen);
+        return;
+      }
+      if (target.dirty && !window.confirm(t.encoding.reopenConfirmUnsaved)) {
+        return;
+      }
+      try {
+        const res = await readFileByPath(target.filePath, encoding);
+        const norm = res.content.includes('\r\n')
+          ? res.content.replace(/\r\n/g, '\n')
+          : res.content;
+        const syncRes = await checkFilesSync([target.filePath]).catch(() => []);
+        const nextMtime = syncRes[0]?.exists ? syncRes[0].modifiedMs : target.diskModifiedMs;
+        setTabs((prev) =>
+          prev.map((tb) => {
+            if (tb.id !== target.id) return tb;
+            const backupSnap: Snapshot | null = tb.dirty
+              ? {
+                  id: `snap-${Date.now()}`,
+                  label: `Pre-Encoding-Reload (${new Date().toLocaleTimeString()})`,
+                  content: tb.content,
+                  timestamp: Date.now(),
+                }
+              : null;
+            return {
+              ...tb,
+              content: norm,
+              savedContent: norm,
+              encoding: res.encoding,
+              savedEncoding: res.encoding,
+              eol: res.eol,
+              savedEol: res.eol,
+              dirty: false,
+              diskModifiedMs: nextMtime,
+              externalStatus: null,
+              externalContent: undefined,
+              snapshots: backupSnap ? [backupSnap, ...tb.snapshots] : tb.snapshots,
+              updatedAt: Date.now(),
+            };
+          })
+        );
+        notify(`${t.encoding.reopenedToast} (${getEncodingShortLabel(res.encoding)})`);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [
+      activeTab,
+      notify,
+      t.encoding.noFileToReopen,
+      t.encoding.reopenConfirmUnsaved,
+      t.encoding.reopenedToast,
+      t.toasts.errorPrefix,
+    ]
+  );
+
+  const handleChangeSaveEncoding = useCallback(
+    (encoding: TextEncodingId) => {
+      setTabs((prev) =>
+        prev.map((tb) => {
+          if (tb.id !== activeTab.id) return tb;
+          return {
+            ...tb,
+            encoding,
+            dirty: computeTabDirty(tb, tb.content, encoding, tb.eol ?? '\n'),
+            updatedAt: Date.now(),
+          };
+        })
+      );
+      notify(`${t.encoding.encodingChangedToast} (${getEncodingShortLabel(encoding)})`);
+    },
+    [activeTab.id, notify, t.encoding.encodingChangedToast]
+  );
+
+  const handleToggleActiveEol = useCallback(() => {
+    const nextEol: '\n' | '\r\n' = (activeTab.eol ?? '\n') === '\r\n' ? '\n' : '\r\n';
+    setTabs((prev) =>
+      prev.map((tb) => {
+        if (tb.id !== activeTab.id) return tb;
+        return {
+          ...tb,
+          eol: nextEol,
+          dirty: computeTabDirty(tb, tb.content, tb.encoding ?? 'utf-8', nextEol),
+          updatedAt: Date.now(),
+        };
+      })
+    );
+    notify(`${t.encoding.eolChangedToast} (${nextEol === '\r\n' ? 'CRLF' : 'LF'})`);
+  }, [activeTab.id, activeTab.eol, notify, t.encoding.eolChangedToast]);
+
   const handleCloseTab = useCallback(
     (id: string) => {
       const target = tabs.find((tb) => tb.id === id);
@@ -1257,7 +1486,10 @@ export function App() {
       if (target.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
       const remaining = tabs.filter((tb) => tb.id !== id);
       if (remaining.length === 0) {
-        const fresh = makeTab(t.dialogs.untitledName, '');
+        const fresh = makeTab(t.dialogs.untitledName, '', undefined, undefined, {
+          encoding: settings.defaultNewFileEncoding ?? 'utf-8',
+          eol: settings.defaultNewFileEol ?? '\n',
+        });
         setTabs([fresh]);
         setActiveTabId(fresh.id);
       } else {
@@ -1267,7 +1499,14 @@ export function App() {
         }
       }
     },
-    [tabs, activeTabId, t.dialogs.unsavedCloseConfirm, t.dialogs.untitledName]
+    [
+      tabs,
+      activeTabId,
+      settings.defaultNewFileEncoding,
+      settings.defaultNewFileEol,
+      t.dialogs.unsavedCloseConfirm,
+      t.dialogs.untitledName,
+    ]
   );
 
   // Workspace folder actions
@@ -1294,19 +1533,31 @@ export function App() {
     async (fileName: string) => {
       if (!workspaceRoot) return;
       try {
-        const starter = `# ${fileName.replace(/\.md$/i, '')}\n\n`;
-        const fullPath = await createFileInDir(workspaceRoot, fileName, starter);
+        const starter = '';
+        const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
+        const eol = settings.defaultNewFileEol ?? '\n';
+        const fullPath = await createFileInDir(workspaceRoot, fileName, starter, encoding);
         await refreshWorkspace(workspaceRoot);
         const syncRes = await checkFilesSync([fullPath]).catch(() => []);
         const modifiedMs = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
-        const created = makeTab(fileName, starter, fullPath, modifiedMs);
+        const created = makeTab(fileName, starter, fullPath, modifiedMs, {
+          encoding,
+          eol,
+        });
         setTabs((prev) => [...prev, created]);
         setActiveTabId(created.id);
       } catch (err) {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
       }
     },
-    [workspaceRoot, refreshWorkspace, notify, t.toasts.errorPrefix]
+    [
+      workspaceRoot,
+      settings.defaultNewFileEncoding,
+      settings.defaultNewFileEol,
+      refreshWorkspace,
+      notify,
+      t.toasts.errorPrefix,
+    ]
   );
 
   const handleSearchWorkspace = useCallback(
@@ -2147,7 +2398,15 @@ export function App() {
   menuActionsRef.current = {
     'open-about': () => setShowAbout(true),
     'open-settings': () => setShowSettings(true),
-    'new-file': handleNewFile,
+    'new-file': () => handleNewFile(),
+    'new-file-with-encoding': () => setEncodingModalMode('new'),
+    'reopen-with-encoding': () => {
+      if (activeTab.filePath) {
+        setEncodingModalMode('reopen');
+      } else {
+        notify(t.encoding.noFileToReopen);
+      }
+    },
     'open-file': handleOpenFile,
     'open-folder': handleOpenFolder,
     save: () => handleSave(false),
@@ -2216,6 +2475,81 @@ export function App() {
         action: () => handleModeChange('advanced'),
       },
       {
+        id: 'toggle-simple-topbar',
+        category: 'View',
+        label: t.actions.toggleSimpleTopBar,
+        action: () =>
+          setSettings((s) => ({
+            ...s,
+            hideTopBarInSimpleMode: !s.hideTopBarInSimpleMode,
+          })),
+      },
+      {
+        id: 'toggle-ruler',
+        category: 'View',
+        label: t.actions.toggleRuler,
+        action: () =>
+          setSettings((s) => ({
+            ...s,
+            showRuler: !s.showRuler,
+          })),
+      },
+      {
+        id: 'toggle-line-numbers',
+        category: 'View',
+        label: t.actions.toggleLineNumbers,
+        action: () =>
+          setSettings((s) => ({
+            ...s,
+            lineNumbers: !s.lineNumbers,
+          })),
+      },
+      {
+        id: 'toggle-newline-symbols',
+        category: 'View',
+        label: t.actions.toggleNewlineSymbols,
+        action: () =>
+          setSettings((s) => ({
+            ...s,
+            showNewlineSymbols: !s.showNewlineSymbols,
+          })),
+      },
+      {
+        id: 'toggle-whitespace-symbols',
+        category: 'View',
+        label: t.actions.toggleWhitespaceSymbols,
+        action: () =>
+          setSettings((s) => ({
+            ...s,
+            showWhitespaceSymbols: !s.showWhitespaceSymbols,
+          })),
+      },
+      {
+        id: 'cycle-wrap-mode',
+        category: 'View',
+        label: t.actions.cycleWrapMode,
+        action: () =>
+          setSettings((s) => {
+            const cur = s.wrapMode ?? (s.wordWrap ? 'window' : 'none');
+            const next = cur === 'window' ? 'column' : cur === 'column' ? 'none' : 'window';
+            return {
+              ...s,
+              wrapMode: next,
+              wordWrap: next !== 'none',
+            };
+          }),
+      },
+      {
+        id: 'toggle-status-bar',
+        category: 'View',
+        label: t.actions.toggleStatusBar,
+        action: () =>
+          setSettings((s) => ({
+            ...s,
+            showStatusBar: !(s.showStatusBar ?? true),
+          })),
+      },
+      {
         id: 'toggle-right-browser',
         category: 'Browser',
         label:
@@ -2256,7 +2590,31 @@ export function App() {
         category: 'File',
         label: t.actions.newFile,
         shortcut: formatShortcut('⌘N'),
-        action: handleNewFile,
+        action: () => handleNewFile(),
+      },
+      {
+        id: 'new-file-with-encoding',
+        category: 'File',
+        label: t.actions.newFileWithEncoding,
+        action: () => setEncodingModalMode('new'),
+      },
+      {
+        id: 'reopen-with-encoding',
+        category: 'File',
+        label: t.actions.reopenWithEncoding,
+        action: () => {
+          if (activeTab.filePath) {
+            setEncodingModalMode('reopen');
+          } else {
+            notify(t.encoding.noFileToReopen);
+          }
+        },
+      },
+      {
+        id: 'change-encoding',
+        category: 'File',
+        label: t.actions.changeEncoding,
+        action: () => setEncodingModalMode('convert'),
       },
       {
         id: 'open-file',
@@ -2365,6 +2723,8 @@ export function App() {
     locale,
     zenMode,
     workspaceEntries,
+    activeTab.filePath,
+    notify,
     handleModeChange,
     handleToggleExternalPreview,
     handleNewFile,
@@ -2396,8 +2756,12 @@ export function App() {
       if (file.type.startsWith('image/')) {
         await handleImageFileInput(file);
       } else {
-        const text = await file.text();
-        const created = makeTab(file.name, text, file.name);
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const decoded = decodeBytesBrowser(bytes);
+        const created = makeTab(file.name, decoded.content, file.name, undefined, {
+          encoding: decoded.encoding,
+          eol: decoded.eol,
+        });
         setTabs((prev) => [...prev, created]);
         setActiveTabId(created.id);
       }
@@ -2409,6 +2773,7 @@ export function App() {
     showAbout ||
     showImageModal ||
     showPalette ||
+    Boolean(encodingModalMode) ||
     Boolean(diffPreview) ||
     isDraggingFile;
   const showRightBrowser = settings.builtinBrowserEnabled && rightPaneMode === 'browser';
@@ -2420,6 +2785,7 @@ export function App() {
     !anyModalOpen;
   const showRightPaneHeader =
     settings.builtinBrowserEnabled || settings.externalBrowserPreviewEnabled;
+  const hideTopBarInSimple = mode === 'simple' && settings.hideTopBarInSimpleMode;
 
   return (
     <div
@@ -2438,33 +2804,35 @@ export function App() {
     >
       {!zenMode && (
         <>
-          <TopBar
-            t={t}
-            mode={mode}
-            onModeChange={handleModeChange}
-            layout={layout}
-            onLayoutChange={setLayout}
-            theme={theme}
-            onThemeChange={setTheme}
-            locale={locale}
-            onLocaleChange={setLocale}
-            showSidebar={showSidebar}
-            onToggleSidebar={() => setShowSidebar((v) => !v)}
-            showInspector={showInspector}
-            onToggleInspector={() => setShowInspector((v) => !v)}
-            onNewFile={handleNewFile}
-            onOpenFile={handleOpenFile}
-            onOpenFolder={handleOpenFolder}
-            onSave={() => handleSave(false)}
-            onExportHtml={handleExportHtml}
-            onExportPdf={handleExportPdf}
-            onOpenCommandPalette={() => setShowPalette(true)}
-            onToggleZen={toggleZenMode}
-            onOpenSettings={() => setShowSettings(true)}
-            onOpenAbout={() => setShowAbout(true)}
-            isDirty={activeTab.dirty}
-            activeTitle={activeTab.title}
-          />
+          {!hideTopBarInSimple && (
+            <TopBar
+              t={t}
+              mode={mode}
+              onModeChange={handleModeChange}
+              layout={layout}
+              onLayoutChange={setLayout}
+              theme={theme}
+              onThemeChange={setTheme}
+              locale={locale}
+              onLocaleChange={setLocale}
+              showSidebar={showSidebar}
+              onToggleSidebar={() => setShowSidebar((v) => !v)}
+              showInspector={showInspector}
+              onToggleInspector={() => setShowInspector((v) => !v)}
+              onNewFile={() => handleNewFile()}
+              onOpenFile={handleOpenFile}
+              onOpenFolder={handleOpenFolder}
+              onSave={() => handleSave(false)}
+              onExportHtml={handleExportHtml}
+              onExportPdf={handleExportPdf}
+              onOpenCommandPalette={() => setShowPalette(true)}
+              onToggleZen={toggleZenMode}
+              onOpenSettings={() => setShowSettings(true)}
+              onOpenAbout={() => setShowAbout(true)}
+              isDirty={activeTab.dirty}
+              activeTitle={activeTab.title}
+            />
+          )}
           {mode !== 'simple' && (
             <FormatToolbar t={t} mode={mode} onAction={handleToolbarAction} />
           )}
@@ -2483,7 +2851,7 @@ export function App() {
           activeTabId={activeTab.id}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
-          onNewTab={handleNewFile}
+          onNewTab={() => handleNewFile()}
         />
       )}
 
@@ -2638,6 +3006,7 @@ export function App() {
               >
                 <EditorPane
                   ref={editorRef}
+                  t={t}
                   docId={activeTab.id}
                   fileName={activeTab.title}
                   value={activeTab.content}
@@ -2658,6 +3027,7 @@ export function App() {
                   onScrollRatio={handleEditorScroll}
                   onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
                   onLineCopyNotify={() => notify(t.toasts.copiedLine)}
+                  onStatusNotify={notify}
                   onImagePasteOrDrop={handleImageFileInput}
                   onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
                   onEditorSelectionChange={(range) => findBarRef.current?.onEditorSelection(range)}
@@ -2876,7 +3246,12 @@ export function App() {
                   return {
                     ...tab,
                     content: text,
-                    dirty: text !== tab.savedContent,
+                    dirty: computeTabDirty(
+                      tab,
+                      text,
+                      tab.encoding ?? 'utf-8',
+                      tab.eol ?? '\n'
+                    ),
                     snapshots: snap ? [snap, ...tab.snapshots] : tab.snapshots,
                     updatedAt: Date.now(),
                   };
@@ -2901,21 +3276,32 @@ export function App() {
         )}
       </div>
 
-      {!zenMode && (
+      {!zenMode && (settings.showStatusBar ?? true) && (
         <StatusBar
           t={t}
+          locale={locale}
           mode={mode}
           isDirty={activeTab.dirty}
           filePath={activeTab.filePath}
+          activeTitle={activeTab.title}
           autoSaveEnabled={settings.autoSaveEnabled}
           stats={stats}
           cursorLine={activeTab.cursorLine}
           cursorCol={activeTab.cursorCol}
+          encoding={activeTab.encoding ?? 'utf-8'}
+          eol={activeTab.eol ?? '\n'}
+          onToggleEol={handleToggleActiveEol}
+          onChangeSaveEncoding={handleChangeSaveEncoding}
+          onReopenWithEncoding={handleReopenWithEncoding}
+          onOpenNewWithEncodingModal={() => setEncodingModalMode('new')}
           syncScroll={settings.syncScroll}
           onToggleSyncScroll={() =>
             setSettings((s) => ({ ...s, syncScroll: !s.syncScroll }))
           }
           wordGoal={settings.wordGoal}
+          topBarHidden={hideTopBarInSimple}
+          onSwitchToBasic={() => handleModeChange('basic')}
+          onOpenSettings={() => setShowSettings(true)}
         />
       )}
 
@@ -2954,6 +3340,18 @@ export function App() {
         t={t}
         request={diffPreview}
         onClose={() => setDiffPreview(null)}
+      />
+
+      <EncodingModal
+        t={t}
+        locale={locale}
+        mode={encodingModalMode}
+        currentEncoding={activeTab.encoding ?? 'utf-8'}
+        currentEol={activeTab.eol ?? '\n'}
+        onClose={() => setEncodingModalMode(null)}
+        onCreateNewWithEncoding={(encoding, eol) => handleNewFile({ encoding, eol })}
+        onReopenWithEncoding={handleReopenWithEncoding}
+        onChangeSaveEncoding={handleChangeSaveEncoding}
       />
 
       {isDraggingFile && (

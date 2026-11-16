@@ -26,9 +26,12 @@ import type {
   PreviewTheme,
   Snapshot,
   SyntaxPresetId,
+  TextEncodingId,
+  WrapMode,
 } from '../types';
 import type { Translations } from '../i18n/types';
 import { extractFrontmatter, updateFrontmatter } from '../utils/markdown';
+import { TEXT_ENCODINGS } from '../utils/encodings';
 import { formatShortcut } from '../utils/platform';
 import { AiChatPanel } from './AiChatPanel';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
@@ -640,7 +643,94 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
               />
             </div>
 
+            <div className="field-row">
+              <label>{t.inspector.settingsLabels.wrapMode}</label>
+              <select
+                className="select-input"
+                value={settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none')}
+                onChange={(e) => {
+                  const mode = e.target.value as WrapMode;
+                  onSettingsChange({
+                    ...settings,
+                    wrapMode: mode,
+                    wordWrap: mode !== 'none',
+                  });
+                }}
+              >
+                <option value="window">{t.inspector.settingsLabels.wrapModeWindow}</option>
+                <option value="column">{t.inspector.settingsLabels.wrapModeColumn}</option>
+                <option value="none">{t.inspector.settingsLabels.wrapModeNone}</option>
+              </select>
+            </div>
+
+            {(settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none')) === 'column' && (
+              <div className="field-row">
+                <label>{t.inspector.settingsLabels.wrapColumn}</label>
+                <input
+                  type="number"
+                  min={20}
+                  max={240}
+                  step={5}
+                  className="text-input"
+                  value={settings.wrapColumn ?? 80}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      wrapColumn: Math.max(20, Math.min(240, Number(e.target.value) || 80)),
+                    })
+                  }
+                />
+              </div>
+            )}
+
+            <div className="field-row">
+              <label>{t.inspector.settingsLabels.defaultNewFileEncoding}</label>
+              <select
+                className="select-input"
+                value={settings.defaultNewFileEncoding ?? 'utf-8'}
+                onChange={(e) =>
+                  onSettingsChange({
+                    ...settings,
+                    defaultNewFileEncoding: e.target.value as TextEncodingId,
+                  })
+                }
+              >
+                {TEXT_ENCODINGS.map((enc) => (
+                  <option key={enc.id} value={enc.id}>
+                    {enc.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="field-row">
+              <label>{t.inspector.settingsLabels.defaultNewFileEol}</label>
+              <select
+                className="select-input"
+                value={settings.defaultNewFileEol ?? '\n'}
+                onChange={(e) =>
+                  onSettingsChange({
+                    ...settings,
+                    defaultNewFileEol: e.target.value as '\n' | '\r\n',
+                  })
+                }
+              >
+                <option value={'\n'}>LF (\n)</option>
+                <option value={'\r\n'}>CRLF (\r\n)</option>
+              </select>
+            </div>
+
             <div className="check-list">
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.showRuler}
+                  onChange={(e) =>
+                    onSettingsChange({ ...settings, showRuler: e.target.checked })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.showRuler}</span>
+              </label>
               <label className="check-row">
                 <input
                   type="checkbox"
@@ -654,12 +744,42 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
               <label className="check-row">
                 <input
                   type="checkbox"
-                  checked={settings.wordWrap}
+                  checked={settings.showNewlineSymbols}
                   onChange={(e) =>
-                    onSettingsChange({ ...settings, wordWrap: e.target.checked })
+                    onSettingsChange({ ...settings, showNewlineSymbols: e.target.checked })
                   }
                 />
-                <span>{t.inspector.settingsLabels.wordWrap}</span>
+                <span>{t.inspector.settingsLabels.showNewlineSymbols}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.showWhitespaceSymbols}
+                  onChange={(e) =>
+                    onSettingsChange({ ...settings, showWhitespaceSymbols: e.target.checked })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.showWhitespaceSymbols}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.bracketMatchingEnabled ?? true}
+                  onChange={(e) =>
+                    onSettingsChange({ ...settings, bracketMatchingEnabled: e.target.checked })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.bracketMatchingEnabled}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.showStatusBar ?? true}
+                  onChange={(e) =>
+                    onSettingsChange({ ...settings, showStatusBar: e.target.checked })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.showStatusBar}</span>
               </label>
               <label className="check-row">
                 <input
@@ -742,6 +862,19 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                   }
                 />
                 <span>{t.inspector.settingsLabels.autoSaveEnabled}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.hideTopBarInSimpleMode}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      hideTopBarInSimpleMode: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.hideTopBarInSimpleMode}</span>
               </label>
             </div>
 

@@ -939,7 +939,8 @@ textarea {
 
 .editor-codemirror-host {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .split-resizer {
@@ -4495,5 +4496,443 @@ textarea {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Editor Host Wrapper, Ruler, Symbols, Rectangular Selection, Bookmarks & Context Menu */
+.editor-host-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.editor-ruler {
+  position: relative;
+  height: 22px;
+  width: 100%;
+  flex-shrink: 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+.editor-ruler-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cm-eol-symbol {
+  display: inline-block;
+  margin-left: 1px;
+  font-size: 0.85em;
+  line-height: 1;
+  color: var(--fg-muted);
+  opacity: 0.65;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cm-highlightIdeographicSpace {
+  display: inline-block;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.55);
+}
+
+[data-theme='dark'] .cm-highlightIdeographicSpace,
+[data-theme='midnight'] .cm-highlightIdeographicSpace {
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.45);
+}
+
+.editor-host-wrap.is-rect-mode .cm-content,
+.editor-host-wrap.is-rect-mode .cm-scroller {
+  cursor: crosshair;
+}
+
+.cm-bookmark-gutter {
+  width: 14px;
+}
+
+.cm-bookmark-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.cm-bookmark-line {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.editor-ctx-menu {
+  position: fixed;
+  z-index: 120;
+  min-width: 224px;
+  padding: 5px;
+  border-radius: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  user-select: none;
+}
+
+.editor-ctx-submenu {
+  z-index: 121;
+  min-width: 240px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+}
+
+.editor-ctx-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+.editor-ctx-item:hover:not(.is-disabled),
+.editor-ctx-item.is-open {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.editor-ctx-item.is-disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.editor-ctx-check {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.editor-ctx-label {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.editor-ctx-shortcut {
+  margin-left: 16px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+
+.editor-ctx-item:hover:not(.is-disabled) .editor-ctx-shortcut,
+.editor-ctx-item.is-open .editor-ctx-shortcut {
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.editor-ctx-arrow {
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.editor-ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* StatusBar Encoding / EOL Pills & Popover */
+.status-eol-btn,
+.status-encoding-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 4px;
+  color: var(--fg-primary);
+}
+
+.status-encoding-btn.is-open {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.status-encoding-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-encoding-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 90;
+  width: 296px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.status-encoding-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 6px;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border);
+}
+
+.status-encoding-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-encoding-tab:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.status-encoding-tab.is-active {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.status-encoding-subtitle {
+  padding: 7px 11px 4px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.status-encoding-list {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 5px 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.status-encoding-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.status-encoding-item:hover {
+  background: var(--bg-hover);
+}
+
+.status-encoding-item.is-current {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.status-encoding-check {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.status-encoding-item-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-encoding-item-note {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-encoding-footer {
+  padding: 6px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-app);
+}
+
+.status-encoding-new-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-encoding-new-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--bg-active);
+}
+
+/* Encoding Picker Modal */
+.encoding-modal {
+  position: relative;
+  width: min(460px, 92vw);
+  max-height: 82vh;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.encoding-modal-header {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-app);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.encoding-modal-header .modal-close-btn {
+  position: static;
+}
+
+.encoding-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-primary);
+}
+
+.encoding-modal-title svg {
+  color: var(--accent);
+}
+
+.encoding-modal-title h3 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.encoding-eol-bar {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.encoding-eol-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-secondary);
+}
+
+.encoding-modal-list {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.encoding-option-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--fg-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.encoding-option-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.encoding-option-row.is-current {
+  background: var(--bg-active);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.encoding-option-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.encoding-option-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.encoding-option-note {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+.encoding-option-check {
+  color: var(--accent);
+  flex-shrink: 0;
 }
 

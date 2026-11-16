@@ -6,8 +6,14 @@ import type {
   ProjectServerStatus,
   ProjectSetupResult,
   SearchMatch,
+  TextEncodingId,
   WorkspaceEntry,
 } from '../types';
+import {
+  decodeBytesBrowser,
+  encodeTextBrowser,
+  normalizeTextEncoding,
+} from './encodings';
 
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -53,7 +59,23 @@ const SUPPORTED_DOC_EXTENSIONS = [
   'sh', 'bash', 'zsh', 'vue', 'svelte', 'ini', 'conf',
 ];
 
-export async function openMarkdownFileDialog(): Promise<{ path: string; name: string; content: string } | null> {
+export interface OpenedTextFile {
+  path: string;
+  name: string;
+  content: string;
+  encoding: TextEncodingId;
+  eol: '\n' | '\r\n';
+}
+
+interface RawDecodedTextFile {
+  content: string;
+  encoding: string;
+  eol: string;
+}
+
+export async function openMarkdownFileDialog(
+  encoding?: TextEncodingId
+): Promise<OpenedTextFile | null> {
   if (isTauri()) {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const { invoke } = await import('@tauri-apps/api/core');
@@ -66,9 +88,18 @@ export async function openMarkdownFileDialog(): Promise<{ path: string; name: st
       ],
     });
     if (!selected || typeof selected !== 'string') return null;
-    const content = await invoke<string>('read_text_file', { path: selected });
+    const decoded = await invoke<RawDecodedTextFile>('read_text_file_with_encoding', {
+      path: selected,
+      encoding: encoding || null,
+    });
     const name = selected.split(/[/\\]/).pop() || 'Untitled.md';
-    return { path: selected, name, content };
+    return {
+      path: selected,
+      name,
+      content: decoded.content,
+      encoding: normalizeTextEncoding(decoded.encoding),
+      eol: decoded.eol === '\r\n' ? '\r\n' : '\n',
+    };
   }
 
   return new Promise((resolve) => {
@@ -81,8 +112,15 @@ export async function openMarkdownFileDialog(): Promise<{ path: string; name: st
         resolve(null);
         return;
       }
-      const content = await file.text();
-      resolve({ path: file.name, name: file.name, content });
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const decoded = decodeBytesBrowser(buf, encoding);
+      resolve({
+        path: file.name,
+        name: file.name,
+        content: decoded.content,
+        encoding: decoded.encoding,
+        eol: decoded.eol,
+      });
     };
     input.click();
   });
@@ -187,12 +225,24 @@ export async function savePastedImage(
   return base64Data;
 }
 
-export async function readFileByPath(filePath: string): Promise<{ path: string; name: string; content: string }> {
+export async function readFileByPath(
+  filePath: string,
+  encoding?: TextEncodingId
+): Promise<OpenedTextFile> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    const content = await invoke<string>('read_text_file', { path: filePath });
+    const decoded = await invoke<RawDecodedTextFile>('read_text_file_with_encoding', {
+      path: filePath,
+      encoding: encoding || null,
+    });
     const name = filePath.split(/[/\\]/).pop() || 'Untitled.md';
-    return { path: filePath, name, content };
+    return {
+      path: filePath,
+      name,
+      content: decoded.content,
+      encoding: normalizeTextEncoding(decoded.encoding),
+      eol: decoded.eol === '\r\n' ? '\r\n' : '\n',
+    };
   }
   throw new Error('Path reading is only supported in desktop mode');
 }
@@ -200,7 +250,8 @@ export async function readFileByPath(filePath: string): Promise<{ path: string; 
 export async function saveMarkdownFile(
   content: string,
   currentPath?: string,
-  suggestedName = 'Untitled.md'
+  suggestedName = 'Untitled.md',
+  encoding?: TextEncodingId
 ): Promise<{ path: string; name: string } | null> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -217,12 +268,18 @@ export async function saveMarkdownFile(
       if (!chosen) return null;
       targetPath = chosen;
     }
-    await invoke('write_text_file', { path: targetPath, content });
+    await invoke('write_text_file', {
+      path: targetPath,
+      content,
+      encoding: encoding || null,
+    });
     const name = targetPath.split(/[/\\]/).pop() || suggestedName;
     return { path: targetPath, name };
   }
 
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const bytes = encodeTextBrowser(content, encoding || 'utf-8');
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const blob = new Blob([buf], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -280,12 +337,21 @@ export async function searchWorkspaceDir(rootPath: string, query: string): Promi
   return invoke<SearchMatch[]>('search_workspace', { rootPath, query });
 }
 
-export async function createFileInDir(dirPath: string, fileName: string, initialContent = ''): Promise<string> {
+export async function createFileInDir(
+  dirPath: string,
+  fileName: string,
+  initialContent = '',
+  encoding?: TextEncodingId
+): Promise<string> {
   const sep = dirPath.includes('\\') ? '\\' : '/';
   const fullPath = `${dirPath.replace(/[/\\]+$/, '')}${sep}${fileName}`;
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('write_text_file', { path: fullPath, content: initialContent });
+    await invoke('write_text_file', {
+      path: fullPath,
+      content: initialContent,
+      encoding: encoding || null,
+    });
   }
   return fullPath;
 }
@@ -416,10 +482,18 @@ export async function checkFilesSync(paths: string[]): Promise<FileSyncInfo[]> {
   return invoke<FileSyncInfo[]>('check_files_sync', { paths });
 }
 
-export async function writeFileSilently(filePath: string, content: string): Promise<void> {
+export async function writeFileSilently(
+  filePath: string,
+  content: string,
+  encoding?: TextEncodingId
+): Promise<void> {
   if (!isTauri()) return;
   const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('write_text_file', { path: filePath, content });
+  await invoke('write_text_file', {
+    path: filePath,
+    content,
+    encoding: encoding || null,
+  });
 }
 
 export async function readWorkspaceContext(rootPath: string, maxBytes = 36000): Promise<string> {
@@ -678,4 +752,56 @@ export async function assistProjectSetup(params: {
     command: params.command || null,
     url: params.url || null,
   });
+}
+
+export async function writeClipboardText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fallback below
+  }
+  if (isTauri()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('write_clipboard_text', { text });
+      return true;
+    } catch {
+      // fallback to execCommand
+    }
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+export async function readClipboardText(): Promise<string | null> {
+  if (isTauri()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      return await invoke<string>('read_clipboard_text');
+    } catch {
+      // try browser clipboard API below
+    }
+  }
+  try {
+    if (navigator.clipboard?.readText) {
+      return await navigator.clipboard.readText();
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }

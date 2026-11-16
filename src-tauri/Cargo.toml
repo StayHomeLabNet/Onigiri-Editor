@@ -1,6 +1,6 @@
 [package]
 name = "onigiri-editor"
-version = "1.0.1"
+version = "1.0.2"
 description = "Onigiri Editor - AI-Era Cross-Platform Markdown & Code Editor"
 authors = ["StayHomeLabNet"]
 license = "MIT"
@@ -25,6 +25,8 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["process", "time", "io-util", "net"] }
 base64 = "0.22"
 url = "2"
+encoding_rs = "0.8"
+chardetng = "0.1"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 tauri-plugin-single-instance = "2"

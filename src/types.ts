@@ -31,6 +31,15 @@ export interface SyntaxColorMap {
 }
 
 export type OeditLineCopyTrigger = 'eol-only' | 'any-empty-sel';
+export type WrapMode = 'window' | 'column' | 'none';
+export type TextEncodingId =
+  | 'utf-8'
+  | 'utf-8-bom'
+  | 'shift_jis'
+  | 'euc-jp'
+  | 'iso-2022-jp'
+  | 'utf-16le'
+  | 'utf-16be';
 export type AiFolderMode = 'disabled' | 'read-only' | 'read-write-approve' | 'cli-direct';
 
 export type AiProviderId =
@@ -106,6 +115,9 @@ export interface DocumentTab {
   content: string;
   savedContent: string;
   eol?: '\n' | '\r\n';
+  savedEol?: '\n' | '\r\n';
+  encoding?: TextEncodingId;
+  savedEncoding?: TextEncodingId;
   dirty: boolean;
   cursorLine: number;
   cursorCol: number;
@@ -155,6 +167,15 @@ export interface EditorSettings {
   previewTheme: PreviewTheme;
   lineNumbers: boolean;
   wordWrap: boolean;
+  wrapMode: WrapMode;
+  wrapColumn: number;
+  showRuler: boolean;
+  showNewlineSymbols: boolean;
+  showWhitespaceSymbols: boolean;
+  bracketMatchingEnabled: boolean;
+  showStatusBar: boolean;
+  defaultNewFileEncoding: TextEncodingId;
+  defaultNewFileEol: '\n' | '\r\n';
   syncScroll: boolean;
   typewriterMode: boolean;
   smartPasteHtml: boolean;
@@ -174,6 +195,7 @@ export interface EditorSettings {
   externalBrowserPort: number;
   restoreSessionEnabled: boolean;
   autoSaveEnabled: boolean;
+  hideTopBarInSimpleMode: boolean;
 }
 
 export interface DocumentStats {

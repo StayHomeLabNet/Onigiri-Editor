@@ -10,13 +10,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v101">What's New in v1.0.1</a> ・
+    <a href="#whats-new-in-v102">What's New in v1.0.2</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.1-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.0.2-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -38,7 +38,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.0.1`
+Current version: `v1.0.2`
 
 ## Key Features
 
@@ -95,12 +95,21 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.0.1
+## What's New in v1.0.2
+
+- **Full Character Encoding & EOL Support**: Auto-detects and supports `UTF-8`, `UTF-8 (BOM)`, `Shift_JIS (CP932)`, `EUC-JP`, `ISO-2022-JP (JIS)`, `UTF-16 LE`, and `UTF-16 BE` plus `LF` / `CRLF`. Click the StatusBar pills to **Reopen with Encoding**, **Change Save Encoding**, or open **New File with Encoding…**, set defaults in Settings, and guard against unmappable characters on save.
+- **Editor Right-Click Context Menu**: Adds Undo/Redo, Cut/Copy/Paste/Delete, Select All, **Rectangular Selection**, **Advanced** line operations (Tab/Space indent, comments, spaces↔tabs, case conversion, reverse/sort/dedupe lines, trim whitespace, `>` quote, wrap/unwrap line breaks), **Full-width / Half-width Conversion**, and **Bookmarks** with gutter markers.
+- **Ruler, Wrap Modes, Visible Symbols & Bracket Matching**: Adds a column ruler, Window / Fixed Column / No Wrap modes, visible newline & whitespace symbols, StatusBar toggle, and **Matching Bracket Highlighting**.
+
+<details>
+<summary>Previous release: v1.0.1</summary>
 
 - **Windows CLI Shim Fix (`os error 193`)**: Fixed Windows launching extensionless POSIX shims in `%APPDATA%\npm` (such as `codex`, `claude`, `gemini`, `npm`) by skipping extensionless scripts and resolving `.exe` / `.com` / `.cmd` / `.bat` cleanly.
 - **Improved AI CLI & Local LLM Guidance**: Added Antigravity CLI (`agy`) standalone setup distinction and terminal installers (`curl` / `irm`), automatic `~/.npm-global` fallback on macOS/Linux to prevent `EACCES`, per-CLI login hints, and step-by-step Ollama / LM Studio server guidance.
 - **Expanded Web Runtime Diagnostics**: Filtered out Windows' empty Microsoft Store `python.exe` stub, added `wp-config-sample.php` / Laravel SQLite / Ruby-Jekyll / `.env.example` checks, Linux `python3-venv` & PHP extension hints, and action button legends.
 - **Upgraded Find & Replace**: Added full-width/half-width sensitivity toggle, **In Selection** search & replace scope with range refresh, literal `$1` preservation when Regex is off, and smoother navigation.
+
+</details>
 
 <details>
 <summary>Previous release: v1.0.0</summary>
