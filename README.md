@@ -7,6 +7,7 @@
   </p>
   <p>
     <a href="#overview">Overview</a> ・
+    <a href="doc/README.md">User Manual</a> ・
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・

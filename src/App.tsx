@@ -103,7 +103,10 @@ import {
 } from './components/AiDiffPreviewModal';
 
 const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
-const ONLINE_MANUAL_URL = 'https://github.com/StayHomeLabNet/Onigiri-Editor/tree/main/doc';
+const ONLINE_MANUAL_URL_EN =
+  'https://github.com/StayHomeLabNet/Onigiri-Editor/blob/main/doc/README.md';
+const ONLINE_MANUAL_URL_JA =
+  'https://github.com/StayHomeLabNet/Onigiri-Editor/blob/main/doc/README.ja.md';
 
 interface PersistedTabRecord {
   id: string;
@@ -2445,10 +2448,11 @@ export function App() {
   );
 
   const handleOpenOnlineManual = useCallback(() => {
-    void openInExternalBrowser(ONLINE_MANUAL_URL).catch((err) => {
+    const manualUrl = locale === 'ja' ? ONLINE_MANUAL_URL_JA : ONLINE_MANUAL_URL_EN;
+    void openInExternalBrowser(manualUrl).catch((err) => {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     });
-  }, [notify, t.toasts.errorPrefix]);
+  }, [locale, notify, t.toasts.errorPrefix]);
 
   // Global keyboard shortcuts
   useEffect(() => {
