@@ -148,12 +148,15 @@ fn extended_path() -> String {
         let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
         let program_files =
             env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let program_data =
+            env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
 
         if !appdata.is_empty() {
             dirs.push(PathBuf::from(&appdata).join("npm"));
             dirs.push(PathBuf::from(&appdata).join("nvm"));
         }
         if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WinGet\Links"));
             dirs.push(PathBuf::from(&local_appdata).join(r"agy\bin"));
             dirs.push(PathBuf::from(&local_appdata).join("pnpm"));
             dirs.push(PathBuf::from(&local_appdata).join(r"Volta\bin"));
@@ -175,12 +178,16 @@ fn extended_path() -> String {
                 dirs.push(PathBuf::from(&user_profile).join(rel));
             }
         }
+        dirs.push(PathBuf::from(&program_data).join(r"chocolatey\bin"));
         dirs.push(PathBuf::from(&program_files).join("nodejs"));
         dirs.push(PathBuf::from(&program_files).join("PHP"));
         dirs.push(PathBuf::from(&program_files).join(r"Docker\Docker\resources\bin"));
         dirs.push(PathBuf::from(&program_files).join(r"Antigravity\bin"));
-        if !local_appdata.is_empty() {
-            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
+        for reg_dir in crate::project::windows_registry_path_entries() {
+            let lower = reg_dir.to_string_lossy().to_ascii_lowercase();
+            if !lower.ends_with(r"microsoft\windowsapps") {
+                dirs.push(reg_dir);
+            }
         }
     }
 
@@ -188,7 +195,30 @@ fn extended_path() -> String {
         dirs.extend(env::split_paths(&current));
     }
 
-    env::join_paths(dirs)
+    #[cfg(target_os = "windows")]
+    {
+        let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
+        if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
+        }
+    }
+
+    let mut deduped: Vec<PathBuf> = Vec::with_capacity(dirs.len());
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for dir in dirs {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        #[cfg(target_os = "windows")]
+        let key = dir.to_string_lossy().to_ascii_lowercase();
+        #[cfg(not(target_os = "windows"))]
+        let key = dir.to_string_lossy().to_string();
+        if seen.insert(key) {
+            deduped.push(dir);
+        }
+    }
+
+    env::join_paths(deduped)
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
 }

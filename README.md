@@ -10,13 +10,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v103">What's New in v1.0.3</a> ・
+    <a href="#whats-new-in-v104">What's New in v1.0.4</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.3-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.0.4-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -38,7 +38,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.0.3`
+Current version: `v1.0.4`
 
 ## Key Features
 
@@ -95,13 +95,22 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.0.3
+## What's New in v1.0.4
+
+- **Live Windows Registry `PATH` Lookup**: Reads `HKCU\Environment` and `HKLM\...\Environment` `Path` dynamically (with `%VAR%` expansion) so newly installed PHP, Composer, Node, or AI CLIs are picked up on **Re-check Environment** without restarting the app.
+- **Expanded Windows PHP Path Discovery**: Scans WinGet Links & Packages (`WinGet\Links`, `WinGet\Packages\PHP.PHP*`), Chocolatey, Laravel Herd / `php.new`, Scoop, XAMPP, Laragon, WampServer / MAMP, versioned `Program Files\PHP\*`, `C:\php*`, and `C:\tools\php*`, and uses valid WinGet ID `PHP.PHP.8.4`.
+- **Consistent Setup Card & Probe Timeout**: Hides redundant setup error cards across the left sidebar and preview panes while the project's dev server is cleanly running, and raises local server probe timeout to `750ms`.
+
+<details>
+<summary>Previous release: v1.0.3</summary>
 
 - **Windows Embedded Browser Deadlock Fix**: Converted native WebView2 child-webview operations (`add_child`, navigation, bounds, close, and `url()` queries) to async / `spawn_blocking` and removed blocking `webview.url()` calls inside `.on_page_load`, preventing Windows UI hangs when switching to the Built-in Browser tab or clicking **Show in Built-in Browser**. Also hides the redundant setup card when an existing dev server is already connected cleanly.
 - **LAN External Browser Live Preview**: Added a Settings toggle to bind the live preview server to `0.0.0.0` so smartphones or other PCs on the same Wi-Fi/LAN can open the live preview, complete with LAN IPv4 detection, quick-copy pill, and path traversal hardening.
 - **Top Header Bar & Format Toolbar Visibility Toggles**: Added checkable **View → Top Header Bar** and **View → Format Toolbar** menu items, Settings toggles (including **Show format toolbar in Simple mode**), Command Palette actions, and StatusBar recovery controls.
 - **Go to Line (`⌘L` / `Ctrl+L`)**: Added a **Go to Line** modal (`line` or `line:col`, supporting full-width digits/colon) via Edit menu, shortcut, Command Palette, or clicking the StatusBar line/column readout.
 - **Help → Online Manual**: Added **Online Manual** in the **Help** menu and Command Palette to open the official documentation on GitHub.
+
+</details>
 
 <details>
 <summary>Previous release: v1.0.2</summary>

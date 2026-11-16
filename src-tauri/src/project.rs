@@ -112,6 +112,148 @@ impl ProjectServerState {
     }
 }
 
+#[allow(dead_code)]
+pub(crate) fn parse_reg_query_path_output(output: &str) -> Option<String> {
+    for raw_line in output.lines() {
+        let trimmed = raw_line.trim();
+        let upper = trimmed.to_ascii_uppercase();
+        for kind in ["REG_EXPAND_SZ", "REG_SZ"] {
+            if let Some(idx) = upper.find(kind) {
+                let after = trimmed[idx + kind.len()..].trim();
+                if !after.is_empty() {
+                    return Some(after.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[allow(dead_code)]
+pub(crate) fn expand_windows_env_vars_with<'a, F>(input: &str, mut lookup: F) -> String
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after_start = &rest[start + 1..];
+        if let Some(end) = after_start.find('%') {
+            let var_name = &after_start[..end];
+            if !var_name.is_empty() {
+                if let Some(val) = lookup(var_name) {
+                    out.push_str(&val);
+                    rest = &after_start[end + 1..];
+                    continue;
+                }
+            }
+            out.push('%');
+            out.push_str(var_name);
+            out.push('%');
+            rest = &after_start[end + 1..];
+        } else {
+            out.push('%');
+            rest = after_start;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(target_os = "windows")]
+fn expand_windows_env_vars(input: &str) -> String {
+    let vars: Vec<(String, String)> = env::vars_os()
+        .map(|(k, v)| {
+            (
+                k.to_string_lossy().to_ascii_lowercase(),
+                v.to_string_lossy().to_string(),
+            )
+        })
+        .collect();
+    expand_windows_env_vars_with(input, |name| {
+        let target = name.to_ascii_lowercase();
+        vars.iter()
+            .find(|(k, _)| k == &target)
+            .map(|(_, v)| v.clone())
+    })
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn windows_registry_path_entries() -> Vec<PathBuf> {
+    use std::os::windows::process::CommandExt;
+    use std::sync::{Mutex as StdMutex, OnceLock};
+    use std::time::Instant;
+
+    static CACHE: OnceLock<StdMutex<Option<(Instant, Vec<PathBuf>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| StdMutex::new(None));
+    if let Ok(guard) = cache.lock() {
+        if let Some((fetched_at, ref cached)) = *guard {
+            if fetched_at.elapsed() < Duration::from_secs(2) {
+                return cached.clone();
+            }
+        }
+    }
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut entries: Vec<PathBuf> = Vec::new();
+    for key in [
+        r"HKCU\Environment",
+        r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+    ] {
+        let Ok(out) = std::process::Command::new("reg")
+            .args(["query", key, "/v", "Path"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        else {
+            continue;
+        };
+        if !out.status.success() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        if let Some(raw_path) = parse_reg_query_path_output(&text) {
+            let expanded = expand_windows_env_vars(&raw_path);
+            for p in env::split_paths(&expanded) {
+                if !p.as_os_str().is_empty() {
+                    entries.push(p);
+                }
+            }
+        }
+    }
+
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((Instant::now(), entries.clone()));
+    }
+    entries
+}
+
+#[cfg(target_os = "windows")]
+fn push_sorted_subdirs_desc(dirs: &mut Vec<PathBuf>, parent: &Path, prefix_ci: Option<&str>) {
+    let Ok(read_dir) = fs::read_dir(parent) else {
+        return;
+    };
+    let mut matches: Vec<PathBuf> = read_dir
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_dir() {
+                return None;
+            }
+            if let Some(prefix) = prefix_ci {
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                if !name.starts_with(prefix) {
+                    return None;
+                }
+            }
+            Some(path)
+        })
+        .collect();
+    matches.sort();
+    matches.reverse();
+    dirs.extend(matches);
+}
+
 fn extended_path() -> String {
     let mut dirs: Vec<PathBuf> = Vec::new();
 
@@ -206,6 +348,8 @@ fn extended_path() -> String {
         let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
         let program_files =
             env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let program_files_x86 =
+            env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".to_string());
         let program_data =
             env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
 
@@ -215,6 +359,16 @@ fn extended_path() -> String {
             dirs.push(PathBuf::from(&appdata).join(r"Composer\vendor\bin"));
         }
         if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WinGet\Links"));
+            let winget_pkgs = PathBuf::from(&local_appdata).join(r"Microsoft\WinGet\Packages");
+            if winget_pkgs.is_dir() {
+                let mut php_pkgs = Vec::new();
+                push_sorted_subdirs_desc(&mut php_pkgs, &winget_pkgs, Some("php.php"));
+                for pkg in php_pkgs {
+                    dirs.push(pkg.clone());
+                    push_sorted_subdirs_desc(&mut dirs, &pkg, None);
+                }
+            }
             dirs.push(PathBuf::from(&local_appdata).join("pnpm"));
             dirs.push(PathBuf::from(&local_appdata).join(r"Volta\bin"));
             for py_ver in ["Python313", "Python312", "Python311", "Python310", "Python39"] {
@@ -229,26 +383,49 @@ fn extended_path() -> String {
             }
         }
         if !user_profile.is_empty() {
-            for rel in [r".cargo\bin", r".bun\bin", r".local\bin", r"scoop\shims"] {
+            for rel in [
+                r".cargo\bin",
+                r".bun\bin",
+                r".local\bin",
+                r"scoop\shims",
+                r"scoop\apps\php\current",
+                r".config\herd\bin",
+                r".config\herd-lite\bin",
+            ] {
                 dirs.push(PathBuf::from(&user_profile).join(rel));
             }
         }
+        dirs.push(PathBuf::from(&program_data).join(r"chocolatey\bin"));
+        dirs.push(PathBuf::from(&program_data).join(r"ComposerSetup\bin"));
         dirs.push(PathBuf::from(&program_files).join("nodejs"));
-        dirs.push(PathBuf::from(&program_files).join("PHP"));
+        for pf in [&program_files, &program_files_x86] {
+            let pf_php = PathBuf::from(pf).join("PHP");
+            dirs.push(pf_php.clone());
+            push_sorted_subdirs_desc(&mut dirs, &pf_php, None);
+        }
         dirs.push(PathBuf::from(&program_files).join(r"Docker\Docker\resources\bin"));
         dirs.push(PathBuf::from(&program_files).join(r"Git\cmd"));
         dirs.push(PathBuf::from(&program_files).join(r"Git\bin"));
-        dirs.push(PathBuf::from(&program_data).join(r"ComposerSetup\bin"));
         dirs.push(PathBuf::from(r"C:\php"));
+        push_sorted_subdirs_desc(&mut dirs, Path::new(r"C:\"), Some("php"));
         dirs.push(PathBuf::from(r"C:\tools\php"));
+        push_sorted_subdirs_desc(&mut dirs, Path::new(r"C:\tools"), Some("php"));
+        dirs.push(PathBuf::from(r"C:\xampp\php"));
+        push_sorted_subdirs_desc(&mut dirs, Path::new(r"C:\laragon\bin\php"), Some("php"));
+        push_sorted_subdirs_desc(&mut dirs, Path::new(r"C:\wamp64\bin\php"), Some("php"));
+        push_sorted_subdirs_desc(&mut dirs, Path::new(r"C:\wamp\bin\php"), Some("php"));
+        push_sorted_subdirs_desc(&mut dirs, Path::new(r"C:\MAMP\bin\php"), Some("php"));
         for ruby_ver in ["Ruby34-x64", "Ruby33-x64", "Ruby32-x64", "Ruby31-x64"] {
             let ruby_bin = PathBuf::from(r"C:\").join(ruby_ver).join("bin");
             if ruby_bin.is_dir() {
                 dirs.push(ruby_bin);
             }
         }
-        if !local_appdata.is_empty() {
-            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
+        for reg_dir in windows_registry_path_entries() {
+            let lower = reg_dir.to_string_lossy().to_ascii_lowercase();
+            if !lower.ends_with(r"microsoft\windowsapps") {
+                dirs.push(reg_dir);
+            }
         }
     }
 
@@ -256,7 +433,30 @@ fn extended_path() -> String {
         dirs.extend(env::split_paths(&current));
     }
 
-    env::join_paths(dirs)
+    #[cfg(target_os = "windows")]
+    {
+        let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
+        if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
+        }
+    }
+
+    let mut deduped: Vec<PathBuf> = Vec::with_capacity(dirs.len());
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for dir in dirs {
+        if dir.as_os_str().is_empty() {
+            continue;
+        }
+        #[cfg(target_os = "windows")]
+        let key = dir.to_string_lossy().to_ascii_lowercase();
+        #[cfg(not(target_os = "windows"))]
+        let key = dir.to_string_lossy().to_string();
+        if seen.insert(key) {
+            deduped.push(dir);
+        }
+    }
+
+    env::join_paths(deduped)
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|_| env::var("PATH").unwrap_or_default())
 }
@@ -1555,7 +1755,7 @@ fn os_install_hint(tool: &str) -> String {
         match tool {
             "docker" => "winget install -e --id Docker.DockerDesktop".to_string(),
             "node" => "winget install -e --id OpenJS.NodeJS.LTS".to_string(),
-            "php" => "winget install -e --id PHP.PHP".to_string(),
+            "php" => "winget install -e --id PHP.PHP.8.4".to_string(),
             "composer" => "winget install -e --id Composer.Composer".to_string(),
             "python" => "winget install -e --id Python.Python.3.12".to_string(),
             "hugo" => "winget install -e --id Hugo.Hugo.Extended".to_string(),
@@ -2275,7 +2475,7 @@ async fn finalize_project_probe(info: &mut ProjectInfo) {
     if info.kind == "laravel" {
         let candidates = laravel_candidate_urls(Path::new(&info.root_path));
         for url in candidates {
-            if probe_local_http(&url, 350).await {
+            if probe_local_http(&url, 750).await {
                 info.already_running = true;
                 info.default_url = Some(url);
                 return;
@@ -2285,14 +2485,14 @@ async fn finalize_project_probe(info: &mut ProjectInfo) {
         return;
     }
     if let Some(ref url) = info.default_url {
-        if probe_local_http(url, 350).await {
+        if probe_local_http(url, 750).await {
             info.already_running = true;
             return;
         }
     }
     for port in parse_compose_ports(Path::new(&info.root_path)) {
         let url = format!("http://localhost:{}", port);
-        if probe_local_http(&url, 350).await {
+        if probe_local_http(&url, 750).await {
             info.already_running = true;
             info.default_url = Some(url);
             return;
@@ -4407,5 +4607,27 @@ mod tests {
         assert_eq!(resolve_windows_executable_candidate(&dir, "posix_only"), None);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_windows_registry_path_and_expands_env_vars() {
+        let reg_output = "\r\nHKEY_CURRENT_USER\\Environment\r\n    Path    REG_EXPAND_SZ    %USERPROFILE%\\AppData\\Local\\Microsoft\\WinGet\\Links;C:\\Program Files\\PHP\\v8.4\r\n";
+        let raw = parse_reg_query_path_output(reg_output).expect("should parse REG_EXPAND_SZ path");
+        assert_eq!(
+            raw,
+            "%USERPROFILE%\\AppData\\Local\\Microsoft\\WinGet\\Links;C:\\Program Files\\PHP\\v8.4"
+        );
+        let expanded = expand_windows_env_vars_with(&raw, |name| {
+            if name.eq_ignore_ascii_case("userprofile") {
+                Some("C:\\Users\\Alice".to_string())
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            expanded,
+            "C:\\Users\\Alice\\AppData\\Local\\Microsoft\\WinGet\\Links;C:\\Program Files\\PHP\\v8.4"
+        );
+        assert_eq!(parse_reg_query_path_output("ERROR: Not found"), None);
     }
 }

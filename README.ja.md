@@ -10,13 +10,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v103-の更新内容">v1.0.3 の更新内容</a> ・
+    <a href="#v104-の更新内容">v1.0.4 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.3-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.0.4-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -38,7 +38,7 @@
 
 初回起動時は OS の言語設定を自動判定し、日本語環境では日本語 UI・日本語ネイティブメニューで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
 
-現在のバージョン: `v1.0.3`
+現在のバージョン: `v1.0.4`
 
 ## 主な機能
 
@@ -95,13 +95,22 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.0.3 の更新内容
+## v1.0.4 の更新内容
+
+- **Windows レジストリ `PATH` のリアルタイム参照**: `HKCU\Environment` および `HKLM\...\Environment` の `Path`（`%VAR%` 展開対応）を参照し、アプリを起動したまま PHP や各種 CLI を導入しても、再起動なしで「環境を再チェック」から即座に認識できるようにしました。
+- **Windows 版 PHP の検索パス拡充＆WinGet ID 修正**: WinGet（`WinGet\Links` / `WinGet\Packages\PHP.PHP*`）、Chocolatey、Laravel Herd / `php.new`、Scoop、XAMPP、Laragon、WampServer / MAMP、バージョン別 `Program Files\PHP\*`・`C:\php*`・`C:\tools\php*` を自動探索し、インストール案内も `PHP.PHP.8.4` に修正しました。
+- **起動中サーバーとの表示整合性改善**: 開発サーバーに正常接続中は左サイドバー等でも重複した環境エラーカードを表示しないようにし、ローカルサーバー確認タイムアウトも `750ms` に改善しました。
+
+<details>
+<summary>以前のリリース: v1.0.3</summary>
 
 - **Windows 内蔵 WebView2 ブラウザのデッドロック（だんまり）修正**: WebView の生成（`add_child`）・移動・リサイズ・終了コマンドを非同期 / `spawn_blocking` 化し、`.on_page_load` 内でメインスレッドをブロックしていた `webview.url()` 呼び出しを排除しました。また、既存の開発サーバーに正常接続している場合は不要な環境チェックカードを表示しないようにしました。
 - **外部ライブプレビューの LAN 共有**: 設定で `0.0.0.0` バインドを有効にすることで、同じ Wi-Fi / LAN 内のスマートフォンや他 PC からライブプレビュー URL を開けるようにしました（LAN IPv4 自動取得、URL ワンクリックコピー、パストラバーサル対策強化付き）。
 - **上部ヘッダーバー＆書式ツールバーの表示切替**: メニューの「表示」・設定・コマンドパレットから **上部ヘッダーバー** および **書式ツールバー** の表示／非表示（シンプルモードでの書式バー表示設定を含む）を切り替えられるようにしました。
 - **指定行へ移動（`⌘L` / `Ctrl+L`）**: `行番号` または `行:列`（全角数字・全角コロン対応）でジャンプできるモーダルを追加しました。編集メニュー・ショートカット・コマンドパレット・ステータスバーの行/列クリックから開けます。
 - **ヘルプ → オンラインマニュアル**: ヘルプメニューおよびコマンドパレットから公式ドキュメントを開けるようにしました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.0.2</summary>

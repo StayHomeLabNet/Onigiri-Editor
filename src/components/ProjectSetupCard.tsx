@@ -64,6 +64,10 @@ export const ProjectSetupCard: React.FC<ProjectSetupCardProps> = ({
   const serverLogs = matchesProject ? projectServer?.logs || [] : [];
   const activeLogs = setupLogs.length > 0 ? setupLogs : serverError ? serverLogs : [];
 
+  if (matchesProject && projectServer?.running && !serverError && !setupBusy && !setupFeedback) {
+    return null;
+  }
+
   if (
     diagnostics.length === 0 &&
     !serverError &&
