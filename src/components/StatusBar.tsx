@@ -28,6 +28,7 @@ interface StatusBarProps {
   topBarHidden?: boolean;
   onSwitchToBasic?: () => void;
   onOpenSettings?: () => void;
+  onOpenGoToLine?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -53,6 +54,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   topBarHidden,
   onSwitchToBasic,
   onOpenSettings,
+  onOpenGoToLine,
 }) => {
   const goalPct = wordGoal > 0 ? Math.min(100, Math.round((stats.words / wordGoal) * 100)) : 0;
   const [encMenuOpen, setEncMenuOpen] = useState(false);
@@ -242,13 +244,18 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           )}
         </div>
 
-        <span>
+        <button
+          type="button"
+          className="status-btn"
+          onClick={onOpenGoToLine}
+          title={`${t.actions.goToLine} (${formatShortcut('⌘L')})`}
+        >
           {t.status.line} {cursorLine}, {t.status.col} {cursorCol}
-        </span>
+        </button>
 
         {topBarHidden && (
           <>
-            {onSwitchToBasic && (
+            {mode === 'simple' && onSwitchToBasic && (
               <button
                 type="button"
                 className="status-btn"

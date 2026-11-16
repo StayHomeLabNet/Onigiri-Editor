@@ -876,6 +876,19 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                 />
                 <span>{t.inspector.settingsLabels.hideTopBarInSimpleMode}</span>
               </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.showFormatToolbarInSimpleMode}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      showFormatToolbarInSimpleMode: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.showFormatToolbarInSimpleMode}</span>
+              </label>
             </div>
 
             <div className="field-row">

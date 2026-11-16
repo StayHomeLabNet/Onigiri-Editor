@@ -540,11 +540,18 @@ export async function getOsLocale(): Promise<'ja' | 'en'> {
   return navLang.startsWith('ja') ? 'ja' : 'en';
 }
 
-export async function rebuildAppMenu(locale: 'ja' | 'en'): Promise<void> {
+export async function rebuildAppMenu(
+  locale: 'ja' | 'en',
+  state?: { showTopBar?: boolean; showFormatToolbar?: boolean }
+): Promise<void> {
   if (!isTauri()) return;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('rebuild_app_menu', { locale });
+    await invoke('rebuild_app_menu', {
+      locale,
+      showTopBar: state?.showTopBar ?? true,
+      showFormatToolbar: state?.showFormatToolbar ?? true,
+    });
   } catch {
     // ignore
   }
@@ -614,11 +621,14 @@ export interface ExternalPreviewStatus {
   running: boolean;
   url: string | null;
   port: number | null;
+  allowLan: boolean;
+  lanUrls: string[];
 }
 
 export async function startExternalPreview(
   preferredPort: number,
-  openBrowser: boolean
+  openBrowser: boolean,
+  allowLan?: boolean
 ): Promise<ExternalPreviewStatus> {
   if (!isTauri()) {
     throw new Error('External live preview server requires the desktop application');
@@ -627,6 +637,7 @@ export async function startExternalPreview(
   return invoke<ExternalPreviewStatus>('start_external_preview', {
     preferredPort: preferredPort || null,
     openBrowser,
+    allowLan: Boolean(allowLan),
   });
 }
 
@@ -667,7 +678,7 @@ export async function stopExternalPreview(): Promise<void> {
 }
 
 export async function getExternalPreviewStatus(): Promise<ExternalPreviewStatus> {
-  if (!isTauri()) return { running: false, url: null, port: null };
+  if (!isTauri()) return { running: false, url: null, port: null, allowLan: false, lanUrls: [] };
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<ExternalPreviewStatus>('get_external_preview_status');
 }

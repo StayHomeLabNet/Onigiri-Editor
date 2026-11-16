@@ -88,7 +88,7 @@ export interface EditorHandle {
   insertText: (text: string) => void;
   wrapSelection: (before: string, after: string, placeholder?: string) => void;
   toggleLinePrefix: (prefix: string) => void;
-  scrollToLine: (line: number) => void;
+  scrollToLine: (line: number, col?: number) => void;
   getScrollRatio: () => number;
   setScrollRatio: (ratio: number) => void;
   undoAction: () => void;
@@ -1268,14 +1268,16 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         }
         view.focus();
       },
-      scrollToLine: (lineNum: number) => {
+      scrollToLine: (lineNum: number, colNum?: number) => {
         const view = viewRef.current;
         if (!view) return;
         const clamped = Math.max(1, Math.min(lineNum, view.state.doc.lines));
         const line = view.state.doc.line(clamped);
+        const colOffset = colNum && colNum > 1 ? Math.min(colNum - 1, line.length) : 0;
+        const targetPos = line.from + colOffset;
         view.dispatch({
-          selection: { anchor: line.from },
-          effects: EditorView.scrollIntoView(line.from, { y: 'start', yMargin: 40 }),
+          selection: { anchor: targetPos },
+          effects: EditorView.scrollIntoView(targetPos, { y: 'center' }),
         });
         view.focus();
       },

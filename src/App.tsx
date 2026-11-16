@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import 'katex/dist/katex.min.css';
 import {
   AlertTriangle,
+  Copy,
   Eye,
   ExternalLink,
   GitCompare,
@@ -74,6 +75,7 @@ import {
   stopExternalPreview,
   stopProjectDevServer,
   updateExternalPreview,
+  writeClipboardText,
   writeFileSilently,
 } from './utils/platform';
 import { TopBar } from './components/TopBar';
@@ -94,12 +96,14 @@ import { AboutModal } from './components/AboutModal';
 import { ImageModal } from './components/ImageModal';
 import { SettingsModal } from './components/SettingsModal';
 import { EncodingModal, type EncodingModalMode } from './components/EncodingModal';
+import { GoToLineModal } from './components/GoToLineModal';
 import {
   AiDiffPreviewModal,
   type DiffPreviewRequest,
 } from './components/AiDiffPreviewModal';
 
 const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
+const ONLINE_MANUAL_URL = 'https://github.com/StayHomeLabNet/Onigiri-Editor/tree/main/doc';
 
 interface PersistedTabRecord {
   id: string;
@@ -160,9 +164,13 @@ const DEFAULT_SETTINGS: EditorSettings = {
   builtinBrowserDefaultUrl: 'https://www.google.com',
   externalBrowserPreviewEnabled: true,
   externalBrowserPort: 49123,
+  externalBrowserAllowLan: false,
   restoreSessionEnabled: true,
   autoSaveEnabled: false,
+  showTopBar: true,
   hideTopBarInSimpleMode: false,
+  showFormatToolbar: true,
+  showFormatToolbarInSimpleMode: false,
 };
 
 const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
@@ -377,6 +385,7 @@ export function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
+  const [showGoToLine, setShowGoToLine] = useState(false);
   const [encodingModalMode, setEncodingModalMode] = useState<EncodingModalMode | null>(null);
   const [diffPreview, setDiffPreview] = useState<DiffPreviewRequest | null>(null);
   const [zenMode, setZenMode] = useState(false);
@@ -391,6 +400,7 @@ export function App() {
     () => settings.builtinBrowserDefaultUrl || 'https://www.google.com'
   );
   const [externalPreviewUrl, setExternalPreviewUrl] = useState<string | null>(null);
+  const [externalPreviewLanUrls, setExternalPreviewLanUrls] = useState<string[]>([]);
 
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(
     () => initialSession.workspaceRoot
@@ -433,6 +443,41 @@ export function App() {
     () => tabs.find((tab) => tab.id === activeTabId) || tabs[0],
     [tabs, activeTabId]
   );
+
+  const isTopBarVisible =
+    mode === 'simple'
+      ? !settings.hideTopBarInSimpleMode && (settings.showTopBar ?? true)
+      : (settings.showTopBar ?? true);
+
+  const isFormatToolbarVisible =
+    mode === 'simple'
+      ? Boolean(settings.showFormatToolbarInSimpleMode)
+      : (settings.showFormatToolbar ?? true);
+
+  const handleToggleTopBar = useCallback(() => {
+    setSettings((s) => {
+      if (mode === 'simple') {
+        const currentlyVisible = !s.hideTopBarInSimpleMode && (s.showTopBar ?? true);
+        if (currentlyVisible) {
+          return { ...s, hideTopBarInSimpleMode: true };
+        }
+        return { ...s, hideTopBarInSimpleMode: false, showTopBar: true };
+      }
+      return { ...s, showTopBar: !(s.showTopBar ?? true) };
+    });
+  }, [mode]);
+
+  const handleToggleFormatToolbar = useCallback(() => {
+    setSettings((s) => {
+      if (mode === 'simple') {
+        return {
+          ...s,
+          showFormatToolbarInSimpleMode: !s.showFormatToolbarInSimpleMode,
+        };
+      }
+      return { ...s, showFormatToolbar: !(s.showFormatToolbar ?? true) };
+    });
+  }, [mode]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -505,13 +550,16 @@ export function App() {
     [layout]
   );
 
-  // Sync native menu bar on locale change (only persist to localStorage when user changed it)
+  // Sync native menu bar on locale or bar-visibility change
   useEffect(() => {
     if (hasSavedLocaleOnStartRef.current) {
       localStorage.setItem('onigiri-markdown.locale', locale);
     }
-    rebuildAppMenu(locale);
-  }, [locale]);
+    rebuildAppMenu(locale, {
+      showTopBar: isTopBarVisible,
+      showFormatToolbar: isFormatToolbarVisible,
+    });
+  }, [locale, isTopBarVisible, isFormatToolbarVisible]);
 
   useEffect(() => {
     localStorage.setItem('onigiri-markdown.mode', mode);
@@ -1884,9 +1932,15 @@ export function App() {
       if (externalPreviewUrl) {
         await stopExternalPreview();
         setExternalPreviewUrl(null);
+        setExternalPreviewLanUrls([]);
       } else {
-        const res = await startExternalPreview(settings.externalBrowserPort, true);
+        const res = await startExternalPreview(
+          settings.externalBrowserPort,
+          true,
+          settings.externalBrowserAllowLan
+        );
         setExternalPreviewUrl(res.url);
+        setExternalPreviewLanUrls(res.lanUrls ?? []);
         const { bodyHtml, isRawPage } = await buildExternalPreviewPayload();
         const docDir = activeTab.filePath
           ? activeTab.filePath.replace(/[/\\][^/\\]+$/, '')
@@ -1908,6 +1962,7 @@ export function App() {
   }, [
     externalPreviewUrl,
     settings.externalBrowserPort,
+    settings.externalBrowserAllowLan,
     settings.customCss,
     activeTab.title,
     activeTab.filePath,
@@ -1919,6 +1974,73 @@ export function App() {
     t.toasts.externalPreviewStarted,
     t.toasts.errorPrefix,
   ]);
+
+  // Rebind live preview server cleanly when LAN access or port setting changes while running
+  const externalPreviewRunning = Boolean(externalPreviewUrl);
+  const lastPreviewNetConfigRef = useRef({
+    allowLan: settings.externalBrowserAllowLan,
+    port: settings.externalBrowserPort,
+  });
+  useEffect(() => {
+    const prev = lastPreviewNetConfigRef.current;
+    const changed =
+      prev.allowLan !== settings.externalBrowserAllowLan ||
+      prev.port !== settings.externalBrowserPort;
+    lastPreviewNetConfigRef.current = {
+      allowLan: settings.externalBrowserAllowLan,
+      port: settings.externalBrowserPort,
+    };
+    if (!changed || !externalPreviewRunning || !isTauri()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await startExternalPreview(
+          settings.externalBrowserPort,
+          false,
+          settings.externalBrowserAllowLan
+        );
+        if (!cancelled) {
+          setExternalPreviewUrl(res.url);
+          setExternalPreviewLanUrls(res.lanUrls ?? []);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    externalPreviewRunning,
+    settings.externalBrowserAllowLan,
+    settings.externalBrowserPort,
+    notify,
+    t.toasts.errorPrefix,
+  ]);
+
+  const handleCopyLanUrl = useCallback(
+    async (lanUrl: string) => {
+      await writeClipboardText(lanUrl);
+      notify(`${t.toasts.copiedLanUrl}: ${lanUrl}`);
+    },
+    [notify, t.toasts.copiedLanUrl]
+  );
+
+  const handleGoToLine = useCallback(
+    (line: number, col?: number) => {
+      if (layout === 'preview') {
+        setLayout('split');
+        window.setTimeout(() => {
+          editorRef.current?.scrollToLine(line, col);
+        }, 40);
+      } else {
+        editorRef.current?.scrollToLine(line, col);
+      }
+    },
+    [layout]
+  );
 
   // Push debounced HTML updates to external live preview server
   useEffect(() => {
@@ -2282,8 +2404,11 @@ export function App() {
 
         const res = await startExternalPreview(
           settings.externalBrowserPort,
-          target === 'external'
+          target === 'external',
+          settings.externalBrowserAllowLan
         );
+        setExternalPreviewUrl(res.url);
+        setExternalPreviewLanUrls(res.lanUrls ?? []);
         await updateExternalPreview({
           title,
           bodyHtml: htmlContent,
@@ -2309,6 +2434,7 @@ export function App() {
       activeTab.title,
       workspaceRoot,
       settings.externalBrowserPort,
+      settings.externalBrowserAllowLan,
       settings.customCss,
       theme,
       handleOpenProjectUrl,
@@ -2317,6 +2443,12 @@ export function App() {
       t.toasts.errorPrefix,
     ]
   );
+
+  const handleOpenOnlineManual = useCallback(() => {
+    void openInExternalBrowser(ONLINE_MANUAL_URL).catch((err) => {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    });
+  }, [notify, t.toasts.errorPrefix]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -2343,6 +2475,9 @@ export function App() {
       } else if (meta && e.key.toLowerCase() === 'f' && !e.shiftKey) {
         e.preventDefault();
         openFindBar({ target: e.altKey ? 'replace' : 'find' });
+      } else if (meta && !e.shiftKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        setShowGoToLine((v) => !v);
       } else if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'h') {
         e.preventDefault();
         openFindBar({ target: 'replace' });
@@ -2369,7 +2504,8 @@ export function App() {
         handleToolbarAction('italic');
       } else if (e.key === 'Escape') {
         if (diffPreview) return;
-        if (showSettings) setShowSettings(false);
+        if (showGoToLine) setShowGoToLine(false);
+        else if (showSettings) setShowSettings(false);
         else if (showFind) {
           setShowFind(false);
           editorRef.current?.focus();
@@ -2386,6 +2522,7 @@ export function App() {
     handleNewFile,
     toggleZenMode,
     zenMode,
+    showGoToLine,
     showSettings,
     showFind,
     diffPreview,
@@ -2397,6 +2534,7 @@ export function App() {
   const menuActionsRef = useRef<Record<string, () => void>>({});
   menuActionsRef.current = {
     'open-about': () => setShowAbout(true),
+    'open-online-manual': handleOpenOnlineManual,
     'open-settings': () => setShowSettings(true),
     'new-file': () => handleNewFile(),
     'new-file-with-encoding': () => setEncodingModalMode('new'),
@@ -2415,10 +2553,13 @@ export function App() {
     'export-pdf': handleExportPdf,
     'close-tab': () => handleCloseTab(activeTab.id),
     find: () => openFindBar({ target: 'find' }),
+    'go-to-line': () => setShowGoToLine(true),
     'mode-simple': () => handleModeChange('simple'),
     'mode-basic': () => handleModeChange('basic'),
     'mode-advanced': () => handleModeChange('advanced'),
     palette: () => setShowPalette((v) => !v),
+    'toggle-top-bar': handleToggleTopBar,
+    'toggle-format-toolbar': handleToggleFormatToolbar,
     'toggle-inspector': () => {
       if (mode === 'simple') handleModeChange('basic');
       setShowInspector((v) => !v);
@@ -2475,6 +2616,18 @@ export function App() {
         action: () => handleModeChange('advanced'),
       },
       {
+        id: 'toggle-top-bar',
+        category: 'View',
+        label: t.actions.toggleTopBar,
+        action: handleToggleTopBar,
+      },
+      {
+        id: 'toggle-format-toolbar',
+        category: 'View',
+        label: t.actions.toggleFormatToolbar,
+        action: handleToggleFormatToolbar,
+      },
+      {
         id: 'toggle-simple-topbar',
         category: 'View',
         label: t.actions.toggleSimpleTopBar,
@@ -2482,6 +2635,16 @@ export function App() {
           setSettings((s) => ({
             ...s,
             hideTopBarInSimpleMode: !s.hideTopBarInSimpleMode,
+          })),
+      },
+      {
+        id: 'toggle-simple-format-toolbar',
+        category: 'View',
+        label: t.actions.toggleSimpleFormatToolbar,
+        action: () =>
+          setSettings((s) => ({
+            ...s,
+            showFormatToolbarInSimpleMode: !s.showFormatToolbarInSimpleMode,
           })),
       },
       {
@@ -2688,6 +2851,19 @@ export function App() {
         action: () => openFindBar({ target: 'find' }),
       },
       {
+        id: 'go-to-line',
+        category: 'Edit',
+        label: t.actions.goToLine,
+        shortcut: formatShortcut('⌘L'),
+        action: () => setShowGoToLine(true),
+      },
+      {
+        id: 'open-online-manual',
+        category: 'Help',
+        label: t.actions.onlineManual,
+        action: handleOpenOnlineManual,
+      },
+      {
         id: 'lang-toggle',
         category: 'UI',
         label: locale === 'ja' ? 'Switch to English' : '日本語に切り替え',
@@ -2726,6 +2902,9 @@ export function App() {
     activeTab.filePath,
     notify,
     handleModeChange,
+    handleToggleTopBar,
+    handleToggleFormatToolbar,
+    handleOpenOnlineManual,
     handleToggleExternalPreview,
     handleNewFile,
     handleOpenFile,
@@ -2773,6 +2952,7 @@ export function App() {
     showAbout ||
     showImageModal ||
     showPalette ||
+    showGoToLine ||
     Boolean(encodingModalMode) ||
     Boolean(diffPreview) ||
     isDraggingFile;
@@ -2785,7 +2965,6 @@ export function App() {
     !anyModalOpen;
   const showRightPaneHeader =
     settings.builtinBrowserEnabled || settings.externalBrowserPreviewEnabled;
-  const hideTopBarInSimple = mode === 'simple' && settings.hideTopBarInSimpleMode;
 
   return (
     <div
@@ -2804,7 +2983,7 @@ export function App() {
     >
       {!zenMode && (
         <>
-          {!hideTopBarInSimple && (
+          {isTopBarVisible && (
             <TopBar
               t={t}
               mode={mode}
@@ -2833,7 +3012,7 @@ export function App() {
               activeTitle={activeTab.title}
             />
           )}
-          {mode !== 'simple' && (
+          {isFormatToolbarVisible && (
             <FormatToolbar t={t} mode={mode} onAction={handleToolbarAction} />
           )}
         </>
@@ -3080,23 +3259,38 @@ export function App() {
                     )}
 
                     {settings.externalBrowserPreviewEnabled && (
-                      <button
-                        type="button"
-                        className={`mini-pill-btn ${externalPreviewUrl ? 'is-active' : ''}`}
-                        onClick={handleToggleExternalPreview}
-                        title={
-                          externalPreviewUrl
-                            ? externalPreviewUrl
-                            : t.browser.externalLiveTitle
-                        }
-                      >
-                        {externalPreviewUrl ? <Square size={11} /> : <ExternalLink size={12} />}
-                        <span>
-                          {externalPreviewUrl
-                            ? t.browser.externalStopBtn
-                            : t.browser.externalLiveBtn}
-                        </span>
-                      </button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {externalPreviewUrl &&
+                          settings.externalBrowserAllowLan &&
+                          externalPreviewLanUrls.length > 0 && (
+                            <button
+                              type="button"
+                              className="mini-pill-btn"
+                              onClick={() => void handleCopyLanUrl(externalPreviewLanUrls[0])}
+                              title={`${t.actions.copyLanUrl}: ${externalPreviewLanUrls[0]}`}
+                            >
+                              <Copy size={11} />
+                              <span>LAN: {externalPreviewLanUrls[0].replace(/^https?:\/\//, '')}</span>
+                            </button>
+                          )}
+                        <button
+                          type="button"
+                          className={`mini-pill-btn ${externalPreviewUrl ? 'is-active' : ''}`}
+                          onClick={handleToggleExternalPreview}
+                          title={
+                            externalPreviewUrl
+                              ? [externalPreviewUrl, ...externalPreviewLanUrls].join(' / ')
+                              : t.browser.externalLiveTitle
+                          }
+                        >
+                          {externalPreviewUrl ? <Square size={11} /> : <ExternalLink size={12} />}
+                          <span>
+                            {externalPreviewUrl
+                              ? t.browser.externalStopBtn
+                              : t.browser.externalLiveBtn}
+                          </span>
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -3299,9 +3493,10 @@ export function App() {
             setSettings((s) => ({ ...s, syncScroll: !s.syncScroll }))
           }
           wordGoal={settings.wordGoal}
-          topBarHidden={hideTopBarInSimple}
+          topBarHidden={!isTopBarVisible}
           onSwitchToBasic={() => handleModeChange('basic')}
           onOpenSettings={() => setShowSettings(true)}
+          onOpenGoToLine={() => setShowGoToLine(true)}
         />
       )}
 
@@ -3325,7 +3520,9 @@ export function App() {
         settings={settings}
         onSettingsChange={setSettings}
         externalPreviewUrl={externalPreviewUrl}
+        externalPreviewLanUrls={externalPreviewLanUrls}
         onToggleExternalPreview={handleToggleExternalPreview}
+        onCopyLanUrl={handleCopyLanUrl}
       />
 
       <ImageModal
@@ -3352,6 +3549,15 @@ export function App() {
         onCreateNewWithEncoding={(encoding, eol) => handleNewFile({ encoding, eol })}
         onReopenWithEncoding={handleReopenWithEncoding}
         onChangeSaveEncoding={handleChangeSaveEncoding}
+      />
+
+      <GoToLineModal
+        t={t}
+        open={showGoToLine}
+        currentLine={activeTab.cursorLine}
+        totalLines={stats.lines}
+        onClose={() => setShowGoToLine(false)}
+        onJump={handleGoToLine}
       />
 
       {isDraggingFile && (

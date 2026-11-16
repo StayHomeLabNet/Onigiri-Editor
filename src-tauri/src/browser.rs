@@ -42,7 +42,7 @@ fn normalize_url(raw: &str) -> Result<Url, String> {
 }
 
 #[tauri::command]
-pub fn browser_open_or_update(
+pub async fn browser_open_or_update(
     app: AppHandle,
     url: String,
     x: f64,
@@ -56,66 +56,68 @@ pub fn browser_open_or_update(
     let w = width.max(120.0);
     let h = height.max(120.0);
 
-    if let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
-        let _ = wv.set_bounds(Rect {
-            position: LogicalPosition::new(x, y).into(),
-            size: LogicalSize::new(w, h).into(),
-        });
-        if visible {
-            let _ = wv.show();
-        } else {
-            let _ = wv.hide();
-        }
-        let current = wv.url().map(|u| u.to_string()).unwrap_or_default();
-        if current != parsed_str || current == "about:blank" {
-            wv.navigate(parsed).map_err(|e| e.to_string())?;
-        }
-        return Ok(parsed_str);
-    }
-
-    let window = app
-        .get_window("main")
-        .ok_or_else(|| "Main window not found".to_string())?;
-
-    let app_for_nav = app.clone();
-    let app_for_load = app.clone();
-
-    let builder = WebviewBuilder::new(BROWSER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
-        .on_navigation(move |nav_url| {
-            let _ = app_for_nav.emit("browser-url-changed", nav_url.to_string());
-            true
-        })
-        .on_page_load(move |webview, payload| {
-            let url_str = payload.url().to_string();
-            let state = match payload.event() {
-                PageLoadEvent::Started => "loading",
-                PageLoadEvent::Finished => "finished",
-            };
-            let _ = app_for_load.emit(
-                "browser-load-state",
-                BrowserLoadEvent {
-                    state,
-                    url: url_str.clone(),
-                },
-            );
-            if let Ok(u) = webview.url() {
-                let _ = app_for_load.emit("browser-url-changed", u.to_string());
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
+            let _ = wv.set_bounds(Rect {
+                position: LogicalPosition::new(x, y).into(),
+                size: LogicalSize::new(w, h).into(),
+            });
+            if visible {
+                let _ = wv.show();
+            } else {
+                let _ = wv.hide();
             }
-        });
+            let current = wv.url().map(|u| u.to_string()).unwrap_or_default();
+            if current != parsed_str || current == "about:blank" {
+                wv.navigate(parsed).map_err(|e| e.to_string())?;
+            }
+            return Ok(parsed_str);
+        }
 
-    let child = window
-        .add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w, h))
-        .map_err(|e| format!("Failed to create embedded browser webview: {}", e))?;
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "Main window not found".to_string())?;
 
-    if !visible {
-        let _ = child.hide();
-    }
+        let app_for_nav = app.clone();
+        let app_for_load = app.clone();
 
-    Ok(parsed_str)
+        let builder = WebviewBuilder::new(BROWSER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
+            .on_navigation(move |nav_url| {
+                let _ = app_for_nav.emit("browser-url-changed", nav_url.to_string());
+                true
+            })
+            .on_page_load(move |_webview, payload| {
+                let url_str = payload.url().to_string();
+                let is_finished = matches!(payload.event(), PageLoadEvent::Finished);
+                let state = if is_finished { "finished" } else { "loading" };
+                let _ = app_for_load.emit(
+                    "browser-load-state",
+                    BrowserLoadEvent {
+                        state,
+                        url: url_str.clone(),
+                    },
+                );
+                if is_finished && !url_str.is_empty() {
+                    let _ = app_for_load.emit("browser-url-changed", url_str);
+                }
+            });
+
+        let child = window
+            .add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w, h))
+            .map_err(|e| format!("Failed to create embedded browser webview: {}", e))?;
+
+        if !visible {
+            let _ = child.hide();
+        }
+
+        Ok(parsed_str)
+    })
+    .await
+    .map_err(|e| format!("Embedded browser task failed: {}", e))?
 }
 
 #[tauri::command]
-pub fn browser_set_bounds(
+pub async fn browser_set_bounds(
     app: AppHandle,
     x: f64,
     y: f64,
@@ -141,7 +143,7 @@ pub fn browser_set_bounds(
 }
 
 #[tauri::command]
-pub fn browser_navigate(app: AppHandle, url: String) -> Result<String, String> {
+pub async fn browser_navigate(app: AppHandle, url: String) -> Result<String, String> {
     let parsed = normalize_url(&url)?;
     let parsed_str = parsed.to_string();
     if let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
@@ -151,7 +153,7 @@ pub fn browser_navigate(app: AppHandle, url: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn browser_nav_action(app: AppHandle, action: String) -> Result<(), String> {
+pub async fn browser_nav_action(app: AppHandle, action: String) -> Result<(), String> {
     let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) else {
         return Ok(());
     };
@@ -165,7 +167,7 @@ pub fn browser_nav_action(app: AppHandle, action: String) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub fn browser_close(app: AppHandle) -> Result<(), String> {
+pub async fn browser_close(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
         let _ = wv.hide();
         wv.close().map_err(|e| e.to_string())?;
@@ -174,7 +176,7 @@ pub fn browser_close(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn open_in_external_browser(url: String) -> Result<(), String> {
+pub async fn open_in_external_browser(url: String) -> Result<(), String> {
     let parsed = normalize_url(&url)?;
     let target = parsed.to_string();
 

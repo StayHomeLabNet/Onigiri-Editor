@@ -1,10 +1,12 @@
 use serde::Serialize;
+use std::net::{IpAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::State;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
+use tokio::sync::{watch, Mutex as AsyncMutex, RwLock};
+use tokio::task::JoinHandle;
 
 #[derive(Clone, Default)]
 pub struct LivePreviewContent {
@@ -18,9 +20,16 @@ pub struct LivePreviewContent {
     pub version: u64,
 }
 
+pub struct ServerControl {
+    pub shutdown_tx: watch::Sender<bool>,
+    pub join_handle: JoinHandle<()>,
+}
+
 pub struct LivePreviewState {
     pub inner: Arc<RwLock<LivePreviewContent>>,
     pub port: Arc<RwLock<Option<u16>>>,
+    pub allow_lan: Arc<RwLock<bool>>,
+    pub server_control: Arc<AsyncMutex<Option<ServerControl>>>,
 }
 
 impl LivePreviewState {
@@ -28,6 +37,8 @@ impl LivePreviewState {
         Self {
             inner: Arc::new(RwLock::new(LivePreviewContent::default())),
             port: Arc::new(RwLock::new(None)),
+            allow_lan: Arc::new(RwLock::new(false)),
+            server_control: Arc::new(AsyncMutex::new(None)),
         }
     }
 }
@@ -38,6 +49,8 @@ pub struct ExternalPreviewStatus {
     pub running: bool,
     pub url: Option<String>,
     pub port: Option<u16>,
+    pub allow_lan: bool,
+    pub lan_urls: Vec<String>,
 }
 
 fn theme_palette(theme: &str) -> (&'static str, &'static str, &'static str, &'static str, &'static str) {
@@ -321,12 +334,46 @@ fn safe_relative_subpath(req_path: &str) -> Option<PathBuf> {
     }
 }
 
+fn canonical_allowed_roots(doc_dir: Option<&str>, workspace_root: Option<&str>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(d) = doc_dir {
+        if let Ok(c) = std::fs::canonicalize(d) {
+            roots.push(c);
+        }
+    }
+    if let Some(w) = workspace_root {
+        let wp = PathBuf::from(w);
+        if let Ok(c) = std::fs::canonicalize(&wp) {
+            roots.push(c);
+        }
+        for sub in ["public", "dist"] {
+            if let Ok(c) = std::fs::canonicalize(wp.join(sub)) {
+                roots.push(c);
+            }
+        }
+    }
+    roots
+}
+
+fn is_within_allowed_roots(candidate: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
+    let canon = std::fs::canonicalize(candidate).ok()?;
+    if !canon.is_file() {
+        return None;
+    }
+    if roots.iter().any(|r| canon.starts_with(r)) {
+        Some(canon)
+    } else {
+        None
+    }
+}
+
 fn resolve_static_candidate(
     req_path: &str,
     doc_dir: Option<&str>,
     workspace_root: Option<&str>,
 ) -> Option<PathBuf> {
     let rel = safe_relative_subpath(req_path)?;
+    let roots = canonical_allowed_roots(doc_dir, workspace_root);
     let mut bases: Vec<PathBuf> = Vec::new();
     if let Some(d) = doc_dir {
         bases.push(PathBuf::from(d));
@@ -339,11 +386,96 @@ fn resolve_static_candidate(
     }
     for base in bases {
         let candidate = base.join(&rel);
-        if candidate.exists() && candidate.is_file() {
-            return Some(candidate);
+        if let Some(safe) = is_within_allowed_roots(&candidate, &roots) {
+            return Some(safe);
         }
     }
     None
+}
+
+fn resolve_asset_candidate(
+    raw_path: &str,
+    doc_dir: Option<&str>,
+    workspace_root: Option<&str>,
+) -> Option<PathBuf> {
+    let mut cleaned = raw_path.trim();
+    if let Some(rest) = cleaned.strip_prefix("file://") {
+        cleaned = rest;
+        #[cfg(target_os = "windows")]
+        {
+            let bytes = cleaned.as_bytes();
+            if bytes.len() >= 3 && bytes[0] == b'/' && bytes[2] == b':' {
+                cleaned = &cleaned[1..];
+            }
+        }
+    }
+    if cleaned.is_empty() {
+        return None;
+    }
+    let roots = canonical_allowed_roots(doc_dir, workspace_root);
+    if roots.is_empty() {
+        return None;
+    }
+
+    if cleaned.starts_with('/') {
+        if let Some(found) = resolve_static_candidate(cleaned, doc_dir, workspace_root) {
+            return Some(found);
+        }
+    }
+
+    let p = Path::new(cleaned);
+    if p.is_absolute() {
+        return is_within_allowed_roots(p, &roots);
+    }
+
+    for base_opt in [doc_dir, workspace_root] {
+        if let Some(base) = base_opt {
+            let candidate = Path::new(base).join(p);
+            if let Some(safe) = is_within_allowed_roots(&candidate, &roots) {
+                return Some(safe);
+            }
+        }
+    }
+    None
+}
+
+pub fn detect_lan_ipv4s() -> Vec<String> {
+    let mut ips = Vec::new();
+    for target in ["1.1.1.1:80", "192.168.1.1:80", "10.0.0.1:80", "172.16.0.1:80"] {
+        if let Ok(sock) = UdpSocket::bind("0.0.0.0:0") {
+            if sock.connect(target).is_ok() {
+                if let Ok(addr) = sock.local_addr() {
+                    if let IpAddr::V4(v4) = addr.ip() {
+                        if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() {
+                            let s = v4.to_string();
+                            if !ips.contains(&s) {
+                                ips.push(s);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    ips
+}
+
+fn build_preview_status(port: Option<u16>, allow_lan: bool) -> ExternalPreviewStatus {
+    let url = port.map(|p| format!("http://127.0.0.1:{}/", p));
+    let lan_urls = match (port, allow_lan) {
+        (Some(p), true) => detect_lan_ipv4s()
+            .into_iter()
+            .map(|ip| format!("http://{}:{}/", ip, p))
+            .collect(),
+        _ => Vec::new(),
+    };
+    ExternalPreviewStatus {
+        running: port.is_some(),
+        url,
+        port,
+        allow_lan,
+        lan_urls,
+    }
 }
 
 async fn write_http_response(
@@ -403,24 +535,13 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<RwLock<LivePreviewC
                 let guard = state.read().await;
                 (guard.doc_dir.clone(), guard.workspace_root.clone())
             };
-            let cleaned = raw_path.strip_prefix("file://").unwrap_or(&raw_path);
-            let p = PathBuf::from(cleaned);
-            let resolved = if cleaned.starts_with('/') {
-                if let Some(found) = resolve_static_candidate(
-                    cleaned,
-                    doc_dir.as_deref(),
-                    workspace_root.as_deref(),
-                ) {
-                    found
-                } else {
-                    p
-                }
-            } else if let Some(dir) = doc_dir {
-                Path::new(&dir).join(p)
-            } else if let Some(ws) = workspace_root {
-                Path::new(&ws).join(p)
-            } else {
-                p
+            let Some(resolved) = resolve_asset_candidate(
+                &raw_path,
+                doc_dir.as_deref(),
+                workspace_root.as_deref(),
+            ) else {
+                write_http_response(&mut stream, "404 Not Found", "text/plain", b"Not Found").await;
+                return;
             };
             match tokio::fs::read(&resolved).await {
                 Ok(bytes) => {
@@ -462,66 +583,94 @@ async fn handle_connection(mut stream: TcpStream, state: Arc<RwLock<LivePreviewC
     }
 }
 
-#[tauri::command]
-pub async fn start_external_preview(
-    state: State<'_, LivePreviewState>,
+async fn stop_server_locked(
+    state: &LivePreviewState,
+    ctrl_guard: &mut Option<ServerControl>,
+) {
+    *state.port.write().await = None;
+    if let Some(ctrl) = ctrl_guard.take() {
+        let _ = ctrl.shutdown_tx.send(true);
+        let _ = ctrl.join_handle.await;
+    }
+}
+
+async fn start_server_internal(
+    state: &LivePreviewState,
     preferred_port: Option<u16>,
-    open_browser: bool,
+    allow_lan: bool,
 ) -> Result<ExternalPreviewStatus, String> {
-    {
-        let existing = *state.port.read().await;
-        if let Some(p) = existing {
-            let url = format!("http://127.0.0.1:{}/", p);
-            if open_browser {
-                let _ = crate::browser::open_in_external_browser(url.clone());
-            }
-            return Ok(ExternalPreviewStatus {
-                running: true,
-                url: Some(url),
-                port: Some(p),
-            });
+    let mut ctrl_guard = state.server_control.lock().await;
+    let existing_port = *state.port.read().await;
+    let existing_lan = *state.allow_lan.read().await;
+
+    if let Some(p) = existing_port {
+        let port_matches = preferred_port.map_or(true, |req| req == 0 || req == p);
+        if existing_lan == allow_lan && port_matches {
+            return Ok(build_preview_status(Some(p), allow_lan));
         }
+        stop_server_locked(state, &mut ctrl_guard).await;
+    } else if ctrl_guard.is_some() {
+        stop_server_locked(state, &mut ctrl_guard).await;
     }
 
-    let bind_addr = format!("127.0.0.1:{}", preferred_port.unwrap_or(17420));
+    let bind_host = if allow_lan { "0.0.0.0" } else { "127.0.0.1" };
+    let req_port = preferred_port.unwrap_or(17420);
+    let bind_addr = format!("{}:{}", bind_host, req_port);
     let listener = match TcpListener::bind(&bind_addr).await {
         Ok(l) => l,
-        Err(_) => TcpListener::bind("127.0.0.1:0")
+        Err(_) => TcpListener::bind(format!("{}:0", bind_host))
             .await
             .map_err(|e| format!("Failed to bind live preview server: {}", e))?,
     };
     let actual_port = listener.local_addr().map_err(|e| e.to_string())?.port();
     *state.port.write().await = Some(actual_port);
+    *state.allow_lan.write().await = allow_lan;
 
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shared = state.inner.clone();
-    let port_flag = state.port.clone();
-    tokio::spawn(async move {
+    let join_handle = tokio::spawn(async move {
         loop {
-            if port_flag.read().await.is_none() {
-                break;
-            }
-            match listener.accept().await {
-                Ok((stream, _)) => {
-                    let st = shared.clone();
-                    tokio::spawn(async move {
-                        handle_connection(stream, st).await;
-                    });
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    break;
                 }
-                Err(_) => break,
+                accept_res = listener.accept() => {
+                    match accept_res {
+                        Ok((stream, _)) => {
+                            let st = shared.clone();
+                            tokio::spawn(async move {
+                                handle_connection(stream, st).await;
+                            });
+                        }
+                        Err(_) => break,
+                    }
+                }
             }
         }
     });
+    *ctrl_guard = Some(ServerControl {
+        shutdown_tx,
+        join_handle,
+    });
 
-    let url = format!("http://127.0.0.1:{}/", actual_port);
+    Ok(build_preview_status(Some(actual_port), allow_lan))
+}
+
+#[tauri::command]
+pub async fn start_external_preview(
+    state: State<'_, LivePreviewState>,
+    preferred_port: Option<u16>,
+    open_browser: bool,
+    allow_lan: Option<bool>,
+) -> Result<ExternalPreviewStatus, String> {
+    let want_lan = allow_lan.unwrap_or(false);
+    let status = start_server_internal(&state, preferred_port, want_lan).await?;
     if open_browser {
-        crate::browser::open_in_external_browser(url.clone())?;
+        if let Some(ref url) = status.url {
+            crate::browser::open_in_external_browser(url.clone()).await?;
+        }
     }
-
-    Ok(ExternalPreviewStatus {
-        running: true,
-        url: Some(url),
-        port: Some(actual_port),
-    })
+    Ok(status)
 }
 
 #[tauri::command]
@@ -549,7 +698,8 @@ pub async fn update_external_preview(
 
 #[tauri::command]
 pub async fn stop_external_preview(state: State<'_, LivePreviewState>) -> Result<(), String> {
-    *state.port.write().await = None;
+    let mut ctrl_guard = state.server_control.lock().await;
+    stop_server_locked(&state, &mut ctrl_guard).await;
     Ok(())
 }
 
@@ -558,9 +708,66 @@ pub async fn get_external_preview_status(
     state: State<'_, LivePreviewState>,
 ) -> Result<ExternalPreviewStatus, String> {
     let p = *state.port.read().await;
-    Ok(ExternalPreviewStatus {
-        running: p.is_some(),
-        url: p.map(|port| format!("http://127.0.0.1:{}/", port)),
-        port: p,
-    })
+    let lan = *state.allow_lan.read().await;
+    Ok(build_preview_status(p, lan))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_asset_candidate_allows_doc_and_blocks_traversal() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_preview_asset_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let ws = base.join("ws");
+        let doc_dir = ws.join("notes");
+        let img_dir = ws.join("images");
+        std::fs::create_dir_all(&doc_dir).unwrap();
+        std::fs::create_dir_all(&img_dir).unwrap();
+
+        let local_img = doc_dir.join("pic.png");
+        let shared_img = img_dir.join("shared.png");
+        let outside_secret = base.join("secret.txt");
+        std::fs::write(&local_img, b"png").unwrap();
+        std::fs::write(&shared_img, b"png").unwrap();
+        std::fs::write(&outside_secret, b"secret").unwrap();
+
+        let doc_str = doc_dir.to_string_lossy().to_string();
+        let ws_str = ws.to_string_lossy().to_string();
+
+        assert!(resolve_asset_candidate("pic.png", Some(&doc_str), Some(&ws_str)).is_some());
+        assert!(resolve_asset_candidate("../images/shared.png", Some(&doc_str), Some(&ws_str)).is_some());
+        assert!(resolve_asset_candidate("../../secret.txt", Some(&doc_str), Some(&ws_str)).is_none());
+        assert!(resolve_asset_candidate(&outside_secret.to_string_lossy(), Some(&doc_str), Some(&ws_str)).is_none());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[tokio::test]
+    async fn server_start_restart_lan_and_stop_works() {
+        let state = LivePreviewState::new();
+        let st1 = start_server_internal(&state, Some(0), false).await.unwrap();
+        assert!(st1.running);
+        assert!(!st1.allow_lan);
+        assert!(st1.lan_urls.is_empty());
+        let port1 = st1.port.unwrap();
+
+        // Switch to LAN mode cleanly on an available port
+        let st2 = start_server_internal(&state, Some(port1), true).await.unwrap();
+        assert!(st2.running);
+        assert!(st2.allow_lan);
+        assert_eq!(st2.port, Some(port1));
+
+        {
+            let mut ctrl_guard = state.server_control.lock().await;
+            stop_server_locked(&state, &mut ctrl_guard).await;
+        }
+        assert!(state.port.read().await.is_none());
+    }
 }

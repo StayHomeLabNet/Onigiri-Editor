@@ -193,9 +193,13 @@ export interface EditorSettings {
   builtinBrowserDefaultUrl: string;
   externalBrowserPreviewEnabled: boolean;
   externalBrowserPort: number;
+  externalBrowserAllowLan: boolean;
   restoreSessionEnabled: boolean;
   autoSaveEnabled: boolean;
+  showTopBar: boolean;
   hideTopBarInSimpleMode: boolean;
+  showFormatToolbar: boolean;
+  showFormatToolbarInSimpleMode: boolean;
 }
 
 export interface DocumentStats {

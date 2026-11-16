@@ -57,12 +57,18 @@ export interface Translations {
     openExternalPreview: string;
     stopExternalPreview: string;
     toggleSimpleTopBar: string;
+    toggleTopBar: string;
+    toggleFormatToolbar: string;
+    toggleSimpleFormatToolbar: string;
     toggleRuler: string;
     toggleNewlineSymbols: string;
     toggleWhitespaceSymbols: string;
     toggleLineNumbers: string;
     toggleStatusBar: string;
     cycleWrapMode: string;
+    goToLine: string;
+    onlineManual: string;
+    copyLanUrl: string;
     newFileWithEncoding: string;
     reopenWithEncoding: string;
     changeEncoding: string;
@@ -215,10 +221,15 @@ export interface Translations {
       builtinBrowserDefaultUrl: string;
       externalBrowserPreviewEnabled: string;
       externalBrowserPort: string;
+      externalBrowserAllowLan: string;
+      externalBrowserAllowLanHint: string;
       restoreSessionEnabled: string;
       autoSaveEnabled: string;
+      showTopBar: string;
       hideTopBarInSimpleMode: string;
       hideTopBarInSimpleModeHint: string;
+      showFormatToolbar: string;
+      showFormatToolbarInSimpleMode: string;
       wrapMode: string;
       wrapModeWindow: string;
       wrapModeColumn: string;
@@ -490,9 +501,17 @@ export interface Translations {
     imageInserted: string;
     folderFileWritten: string;
     externalPreviewStarted: string;
+    copiedLanUrl: string;
     devServerStarted: string;
     devServerStopped: string;
     errorPrefix: string;
+  };
+  goToLineModal: {
+    title: string;
+    prompt: string;
+    currentRange: string;
+    invalidInput: string;
+    jumpBtn: string;
   };
   dialogs: {
     unsavedCloseConfirm: string;

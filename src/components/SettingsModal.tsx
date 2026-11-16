@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Square,
   Info,
+  Copy,
 } from 'lucide-react';
 import type {
   AiFolderMode,
@@ -40,7 +41,9 @@ interface SettingsModalProps {
   settings: EditorSettings;
   onSettingsChange: (next: EditorSettings) => void;
   externalPreviewUrl: string | null;
+  externalPreviewLanUrls?: string[];
   onToggleExternalPreview: () => void;
+  onCopyLanUrl?: (url: string) => void;
 }
 
 const TOKEN_KEYS: Array<keyof SyntaxColorMap> = [
@@ -67,7 +70,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   settings,
   onSettingsChange,
   externalPreviewUrl,
+  externalPreviewLanUrls = [],
   onToggleExternalPreview,
+  onCopyLanUrl,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
 
@@ -301,6 +306,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <label className="check-row">
                     <input
                       type="checkbox"
+                      checked={settings.showTopBar ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          showTopBar: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.showTopBar}</span>
+                  </label>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.showFormatToolbar ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          showFormatToolbar: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.showFormatToolbar}</span>
+                  </label>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
                       checked={settings.hideTopBarInSimpleMode}
                       onChange={(e) =>
                         onSettingsChange({
@@ -310,6 +341,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }
                     />
                     <span>{t.inspector.settingsLabels.hideTopBarInSimpleMode}</span>
+                  </label>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.showFormatToolbarInSimpleMode}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          showFormatToolbarInSimpleMode: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.showFormatToolbarInSimpleMode}</span>
                   </label>
                   <div className="ai-hint-text">
                     {formatShortcut(t.inspector.settingsLabels.hideTopBarInSimpleModeHint)}
@@ -801,8 +845,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </button>
                     </div>
                   </div>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.externalBrowserAllowLan}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          externalBrowserAllowLan: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.externalBrowserAllowLan}</span>
+                  </label>
+                  <div className="ai-hint-text">
+                    {t.inspector.settingsLabels.externalBrowserAllowLanHint}
+                  </div>
                   {externalPreviewUrl && (
-                    <div className="ai-hint-text">Live URL: {externalPreviewUrl}</div>
+                    <div className="lan-url-list">
+                      <div className="lan-url-row">
+                        <span className="lan-url-badge">Local</span>
+                        <code>{externalPreviewUrl}</code>
+                      </div>
+                      {settings.externalBrowserAllowLan &&
+                        externalPreviewLanUrls.map((lanUrl) => (
+                          <div key={lanUrl} className="lan-url-row">
+                            <span className="lan-url-badge is-lan">LAN</span>
+                            <code>{lanUrl}</code>
+                            {onCopyLanUrl && (
+                              <button
+                                type="button"
+                                className="mini-pill-btn"
+                                onClick={() => onCopyLanUrl(lanUrl)}
+                                title={t.actions.copyLanUrl}
+                              >
+                                <Copy size={11} />
+                                <span>{t.actions.copyLanUrl}</span>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                    </div>
                   )}
                   <div className="ai-hint-text">
                     {t.settingsModal.externalPreviewCrossPlatformNote}

@@ -1,11 +1,22 @@
 use tauri::{
-    menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
+    menu::{
+        CheckMenuItemBuilder, Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
+    },
     AppHandle, Emitter, Runtime,
 };
 
 pub fn build_app_menu<R: Runtime>(
     app: &AppHandle<R>,
     locale: &str,
+) -> tauri::Result<Menu<R>> {
+    build_app_menu_with_state(app, locale, true, true)
+}
+
+pub fn build_app_menu_with_state<R: Runtime>(
+    app: &AppHandle<R>,
+    locale: &str,
+    show_top_bar: bool,
+    show_format_toolbar: bool,
 ) -> tauri::Result<Menu<R>> {
     let is_ja = locale == "ja";
 
@@ -85,11 +96,26 @@ pub fn build_app_menu<R: Runtime>(
     let paste_label = if is_ja { "貼り付け" } else { "Paste" };
     let select_all_label = if is_ja { "すべて選択" } else { "Select All" };
     let find_label = if is_ja { "検索・置換" } else { "Find & Replace" };
+    let goto_line_label = if is_ja {
+        "指定行へ移動…"
+    } else {
+        "Go to Line..."
+    };
 
     let view_title = if is_ja { "表示" } else { "View" };
     let mode_simple_label = if is_ja { "シンプルモード" } else { "Simple Mode" };
     let mode_basic_label = if is_ja { "標準モード" } else { "Basic Mode" };
     let mode_adv_label = if is_ja { "拡張モード" } else { "Advanced Mode" };
+    let top_bar_label = if is_ja {
+        "上部ヘッダーバーを表示"
+    } else {
+        "Show Header Bar"
+    };
+    let format_toolbar_label = if is_ja {
+        "書式ツールバーを表示"
+    } else {
+        "Show Format Toolbar"
+    };
     let palette_label = if is_ja {
         "コマンドパレット"
     } else {
@@ -112,6 +138,11 @@ pub fn build_app_menu<R: Runtime>(
     let close_win_label = if is_ja { "閉じる" } else { "Close Window" };
 
     let help_title = if is_ja { "ヘルプ" } else { "Help" };
+    let online_manual_label = if is_ja {
+        "オンラインマニュアル"
+    } else {
+        "Online Manual"
+    };
 
     let menu_about = MenuItemBuilder::with_id("open-about", about_label).build(app)?;
     let menu_settings = MenuItemBuilder::with_id("open-settings", settings_label)
@@ -146,10 +177,20 @@ pub fn build_app_menu<R: Runtime>(
     let edit_find = MenuItemBuilder::with_id("find", find_label)
         .accelerator("CmdOrCtrl+F")
         .build(app)?;
+    let edit_goto_line = MenuItemBuilder::with_id("go-to-line", goto_line_label)
+        .accelerator("CmdOrCtrl+L")
+        .build(app)?;
 
     let view_simple = MenuItemBuilder::with_id("mode-simple", mode_simple_label).build(app)?;
     let view_basic = MenuItemBuilder::with_id("mode-basic", mode_basic_label).build(app)?;
     let view_adv = MenuItemBuilder::with_id("mode-advanced", mode_adv_label).build(app)?;
+    let view_top_bar = CheckMenuItemBuilder::with_id("toggle-top-bar", top_bar_label)
+        .checked(show_top_bar)
+        .build(app)?;
+    let view_format_toolbar =
+        CheckMenuItemBuilder::with_id("toggle-format-toolbar", format_toolbar_label)
+            .checked(show_format_toolbar)
+            .build(app)?;
     let view_palette = MenuItemBuilder::with_id("palette", palette_label)
         .accelerator("CmdOrCtrl+K")
         .build(app)?;
@@ -159,6 +200,9 @@ pub fn build_app_menu<R: Runtime>(
     let view_zen = MenuItemBuilder::with_id("toggle-zen", zen_label)
         .accelerator("CmdOrCtrl+Shift+F")
         .build(app)?;
+
+    let help_online_manual =
+        MenuItemBuilder::with_id("open-online-manual", online_manual_label).build(app)?;
 
     #[cfg(target_os = "macos")]
     let app_submenu = SubmenuBuilder::new(app, "Onigiri Editor")
@@ -212,12 +256,16 @@ pub fn build_app_menu<R: Runtime>(
         .item(&PredefinedMenuItem::select_all(app, Some(select_all_label))?)
         .separator()
         .item(&edit_find)
+        .item(&edit_goto_line)
         .build()?;
 
     let view_submenu = SubmenuBuilder::new(app, view_title)
         .item(&view_simple)
         .item(&view_basic)
         .item(&view_adv)
+        .separator()
+        .item(&view_top_bar)
+        .item(&view_format_toolbar)
         .separator()
         .item(&view_palette)
         .item(&view_options)
@@ -230,7 +278,9 @@ pub fn build_app_menu<R: Runtime>(
         .item(&PredefinedMenuItem::close_window(app, Some(close_win_label))?)
         .build()?;
 
-    let mut help_builder = SubmenuBuilder::new(app, help_title);
+    let mut help_builder = SubmenuBuilder::new(app, help_title)
+        .item(&help_online_manual)
+        .separator();
     #[cfg(not(target_os = "macos"))]
     {
         help_builder = help_builder.item(&menu_about);
@@ -270,8 +320,19 @@ pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
 }
 
 #[tauri::command]
-pub fn rebuild_app_menu(app: AppHandle, locale: String) -> Result<(), String> {
-    let menu = build_app_menu(&app, &locale).map_err(|e| e.to_string())?;
+pub fn rebuild_app_menu(
+    app: AppHandle,
+    locale: String,
+    show_top_bar: Option<bool>,
+    show_format_toolbar: Option<bool>,
+) -> Result<(), String> {
+    let menu = build_app_menu_with_state(
+        &app,
+        &locale,
+        show_top_bar.unwrap_or(true),
+        show_format_toolbar.unwrap_or(true),
+    )
+    .map_err(|e| e.to_string())?;
     app.set_menu(menu).map_err(|e| e.to_string())?;
     Ok(())
 }

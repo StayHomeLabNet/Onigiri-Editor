@@ -81,6 +81,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   const lastNavigatedPropUrlRef = useRef(url);
   const latestUrlRef = useRef(url);
   latestUrlRef.current = url;
+  const latestVisibleRef = useRef(visible);
+  latestVisibleRef.current = visible;
 
   const showProjectBar =
     Boolean(projectServer?.running) ||
@@ -145,7 +147,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
               y: Math.round(postRect.top),
               width: Math.max(120, Math.round(postRect.width)),
               height: Math.max(120, Math.round(postRect.height)),
-              visible: isVisible && postRect.width > 20 && postRect.height > 20,
+              visible:
+                latestVisibleRef.current && postRect.width > 20 && postRect.height > 20,
             });
           }
 
@@ -412,7 +415,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         </div>
       )}
 
-      {showProjectBar && (
+      {showProjectBar && (!projectServer?.running || Boolean(projectServer?.error) || setupBusy) && (
         <ProjectSetupCard
           t={t}
           locale={locale}
