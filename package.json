@@ -1,7 +1,7 @@
 {
   "name": "onigiri-editor",
   "private": true,
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Onigiri Editor — AI-era cross-platform Markdown & code editor with Simple, Basic & Advanced modes",
   "type": "module",
   "scripts": {

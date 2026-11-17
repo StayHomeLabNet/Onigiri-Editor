@@ -38,7 +38,11 @@ import {
   renderMarkdownToEditableHtml,
   splitFrontmatter,
 } from '../utils/markdown';
-import { resolveImageSrc } from '../utils/platform';
+import {
+  readClipboardText,
+  resolveImageSrc,
+  writeClipboardText,
+} from '../utils/platform';
 
 const lowlight = createLowlight(all);
 
@@ -1076,6 +1080,58 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
             case 'redo':
               chain.redo().run();
               break;
+            case 'selectAll':
+              chain.selectAll().run();
+              break;
+            case 'copy': {
+              const { from, to } = editor.state.selection;
+              if (from < to) {
+                editor.commands.focus();
+                let copied = false;
+                try {
+                  copied = document.execCommand('copy');
+                } catch {
+                  copied = false;
+                }
+                if (!copied) {
+                  const selectedText = editor.state.doc.textBetween(from, to, '\n');
+                  void writeClipboardText(selectedText);
+                }
+              }
+              break;
+            }
+            case 'paste':
+              void readClipboardText().then((clip) => {
+                if (!editor || editor.isDestroyed || clip === null) return;
+                const normalized = clip.replace(/\r\n?/g, '\n');
+                if (!normalized) {
+                  editor.commands.focus();
+                  return;
+                }
+                const lines = normalized.split('\n');
+                if (lines.length === 1) {
+                  editor
+                    .chain()
+                    .focus()
+                    .command(({ tr, state }) => {
+                      tr.insertText(normalized, state.selection.from, state.selection.to);
+                      return true;
+                    })
+                    .run();
+                } else {
+                  editor
+                    .chain()
+                    .focus()
+                    .insertContent(
+                      lines.map((line) => ({
+                        type: 'paragraph',
+                        content: line ? [{ type: 'text', text: line }] : [],
+                      }))
+                    )
+                    .run();
+                }
+              });
+              break;
             case 'h1':
               chain.toggleHeading({ level: 1 }).run();
               break;
@@ -1166,6 +1222,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
     );
 
     const fmEntries = frontmatter.data ? Object.entries(frontmatter.data) : [];
+    const zoomScale = Math.max(25, Math.min(400, settings.editorZoom ?? 100)) / 100;
 
     return (
       <PreviewRuntimeContext.Provider value={runtimeValue}>
@@ -1177,7 +1234,12 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
           {settings.customCss ? <style>{settings.customCss}</style> : null}
           <div
             className="preview-inner"
-            style={{ maxWidth: `${settings.previewWidth}px` }}
+            style={
+              {
+                maxWidth: `${Math.round(settings.previewWidth * zoomScale)}px`,
+                '--preview-zoom': String(zoomScale),
+              } as React.CSSProperties
+            }
           >
             {settings.showFrontmatterCard && fmEntries.length > 0 && (
               <div className="mf-frontmatter-card">

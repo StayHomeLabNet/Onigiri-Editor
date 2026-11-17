@@ -288,7 +288,13 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
         <div
           className="code-preview-lines"
           style={{
-            fontSize: `${settings.fontSize}px`,
+            fontSize: `${
+              Math.round(
+                settings.fontSize *
+                  (Math.max(25, Math.min(400, settings.editorZoom ?? 100)) / 100) *
+                  10
+              ) / 10
+            }px`,
             lineHeight: settings.lineHeight,
           }}
         >

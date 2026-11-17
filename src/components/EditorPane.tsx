@@ -93,6 +93,9 @@ export interface EditorHandle {
   setScrollRatio: (ratio: number) => void;
   undoAction: () => void;
   redoAction: () => void;
+  selectAllAction: () => void;
+  copyAction: () => void;
+  pasteAction: () => void;
   selectRange: (from: number, to: number, options?: { focus?: boolean }) => void;
   replaceRange: (from: number, to: number, text: string, options?: { selectResult?: boolean }) => void;
   getSelectionRange: () => TextRange | null;
@@ -380,6 +383,11 @@ const ideographicSpacePlugin = ViewPlugin.fromClass(
   }
 );
 
+function getEffectiveEditorFontSize(settings: EditorSettings): number {
+  const zoom = Math.max(25, Math.min(400, settings.editorZoom ?? 100));
+  return Math.round(settings.fontSize * (zoom / 100) * 10) / 10;
+}
+
 function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
   const isDark = theme === 'dark' || theme === 'midnight';
   const effectiveWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
@@ -414,6 +422,7 @@ function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
     settings.editorFont === 'mono'
       ? "'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, Menlo, 'Ubuntu Mono', 'Noto Sans Mono', 'Yu Gothic UI', 'Noto Sans CJK JP', monospace"
       : "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', 'Meiryo', 'Noto Sans CJK JP', 'Noto Sans JP', 'Ubuntu', sans-serif";
+  const effectiveFontSize = getEffectiveEditorFontSize(settings);
 
   return EditorView.theme(
     {
@@ -421,7 +430,7 @@ function createEditorTheme(theme: ThemeId, settings: EditorSettings) {
         height: '100%',
         backgroundColor: bg,
         color: fg,
-        fontSize: `${settings.fontSize}px`,
+        fontSize: `${effectiveFontSize}px`,
       },
       '.cm-scroller': {
         overflow: 'auto',
@@ -847,6 +856,45 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       copyTextToClipboard(payload);
       onLineCopyNotify?.();
       return true;
+    };
+
+    const performCopy = (editorView: EditorView) => {
+      const { selection } = editorView.state;
+      if (selection.ranges.some((r) => !r.empty)) {
+        const text = selection.ranges
+          .map((r) => editorView.state.sliceDoc(r.from, r.to))
+          .join('\n');
+        void writeClipboardText(text);
+      } else {
+        tryOeditLineCopy(editorView);
+      }
+    };
+
+    const performPaste = () => {
+      void readClipboardText().then((clip) => {
+        const currentView = viewRef.current;
+        if (!currentView || clip === null) return;
+        const normalized = clip.replace(/\r\n?/g, '\n');
+        const ranges = currentView.state.selection.ranges;
+        if (ranges.length > 1) {
+          const clipLines = normalized.split('\n');
+          if (clipLines.length === ranges.length) {
+            let idx = 0;
+            const tr = currentView.state.changeByRange((range) => {
+              const insert = clipLines[idx++] ?? '';
+              return {
+                changes: { from: range.from, to: range.to, insert },
+                range: EditorSelection.cursor(range.from + insert.length),
+              };
+            });
+            currentView.dispatch(tr);
+            currentView.focus();
+            return;
+          }
+        }
+        currentView.dispatch(currentView.state.replaceSelection(normalized));
+        currentView.focus();
+      });
     };
 
     useEffect(() => {
@@ -1301,6 +1349,21 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       redoAction: () => {
         if (viewRef.current) redo(viewRef.current);
       },
+      selectAllAction: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        selectAll(view);
+        view.focus();
+      },
+      copyAction: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        performCopy(view);
+        view.focus();
+      },
+      pasteAction: () => {
+        performPaste();
+      },
       selectRange: (from: number, to: number, options?: { focus?: boolean }) => {
         const view = viewRef.current;
         if (!view) return;
@@ -1389,43 +1452,11 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           }
           break;
         }
-        case 'copy': {
-          const { selection } = view.state;
-          if (selection.ranges.some((r) => !r.empty)) {
-            const text = selection.ranges
-              .map((r) => view.state.sliceDoc(r.from, r.to))
-              .join('\n');
-            void writeClipboardText(text);
-          } else {
-            tryOeditLineCopy(view);
-          }
+        case 'copy':
+          performCopy(view);
           break;
-        }
         case 'paste':
-          void readClipboardText().then((clip) => {
-            const currentView = viewRef.current;
-            if (!currentView || clip === null) return;
-            const normalized = clip.replace(/\r\n?/g, '\n');
-            const ranges = currentView.state.selection.ranges;
-            if (ranges.length > 1) {
-              const clipLines = normalized.split('\n');
-              if (clipLines.length === ranges.length) {
-                let idx = 0;
-                const tr = currentView.state.changeByRange((range) => {
-                  const insert = clipLines[idx++] ?? '';
-                  return {
-                    changes: { from: range.from, to: range.to, insert },
-                    range: EditorSelection.cursor(range.from + insert.length),
-                  };
-                });
-                currentView.dispatch(tr);
-                currentView.focus();
-                return;
-              }
-            }
-            currentView.dispatch(currentView.state.replaceSelection(normalized));
-            currentView.focus();
-          });
+          performPaste();
           return;
         case 'delete':
           if (view.state.selection.ranges.some((r) => !r.empty)) {
@@ -1540,7 +1571,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           <EditorRuler
             viewRef={viewRef}
             theme={theme}
-            fontSize={settings.fontSize}
+            fontSize={getEffectiveEditorFontSize(settings)}
             editorFont={settings.editorFont}
             lineNumbers={settings.lineNumbers}
             wrapMode={effectiveWrapMode}

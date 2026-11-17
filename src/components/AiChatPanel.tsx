@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Send,
   Settings2,
+  Square,
   Terminal,
   Trash2,
   AlertCircle,
@@ -33,10 +34,12 @@ import type {
 import type { Translations } from '../i18n/types';
 import {
   assistAiConnection,
+  cancelAiChat,
   detectAiCapabilities,
   getHostOs,
   listLocalModels,
   listSubscriptionModels,
+  listenAiChatProgress,
   readWorkspaceContext,
   readWorkspaceFileIfExists,
   sendAiChat,
@@ -55,6 +58,7 @@ interface AiChatPanelProps {
   onCopyReply: (text: string) => void;
   workspaceRoot: string | null;
   aiFolderMode: AiFolderMode;
+  onAiFolderModeChange?: (mode: AiFolderMode) => void;
   onWorkspaceRefresh?: () => void;
   onFileWritten?: (relativePath: string) => void;
   onCliTurnComplete?: () => void;
@@ -171,6 +175,20 @@ function isSubscriptionCliProvider(provider: AiProviderId): boolean {
   );
 }
 
+function formatElapsed(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m${rem.toString().padStart(2, '0')}s`;
+}
+
+interface ProgressLogItem {
+  id: string;
+  kind: string;
+  text: string;
+  elapsedSecs: number;
+}
+
 export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   t,
   markdown,
@@ -182,6 +200,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   onCopyReply,
   workspaceRoot,
   aiFolderMode,
+  onAiFolderModeChange,
   onWorkspaceRefresh,
   onFileWritten,
   onCliTurnComplete,
@@ -205,9 +224,15 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [elapsedSecs, setElapsedSecs] = useState(0);
+  const [progressItems, setProgressItems] = useState<ProgressLogItem[]>([]);
   const [appliedProposals, setAppliedProposals] = useState<Record<string, boolean>>({});
 
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const progressLogRef = useRef<HTMLDivElement | null>(null);
+  const activeRequestIdRef = useRef<string | null>(null);
+  const cancellingRef = useRef(false);
 
   const runDetect = useCallback(async () => {
     setDetecting(true);
@@ -234,7 +259,59 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     if (threadRef.current) {
       threadRef.current.scrollTop = threadRef.current.scrollHeight;
     }
-  }, [messages, sending]);
+  }, [messages, sending, progressItems.length]);
+
+  useEffect(() => {
+    if (progressLogRef.current) {
+      progressLogRef.current.scrollTop = progressLogRef.current.scrollHeight;
+    }
+  }, [progressItems]);
+
+  useEffect(() => {
+    if (!sending) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const localElapsed = Math.floor((Date.now() - startedAt) / 1000);
+      setElapsedSecs((prev) => Math.max(prev, localElapsed));
+    }, 1000);
+
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    listenAiChatProgress((ev) => {
+      if (disposed) return;
+      if (!activeRequestIdRef.current || ev.requestId !== activeRequestIdRef.current) return;
+      if (typeof ev.elapsedSecs === 'number') {
+        setElapsedSecs((prev) => Math.max(prev, ev.elapsedSecs));
+      }
+      const text = ev.text?.trim();
+      if (ev.kind === 'heartbeat' || !text) return;
+      setProgressItems((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.text === text && last.kind === ev.kind) {
+          return prev;
+        }
+        const next: ProgressLogItem = {
+          id: `prog-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          kind: ev.kind,
+          text,
+          elapsedSecs: ev.elapsedSecs ?? 0,
+        };
+        return [...prev.slice(-29), next];
+      });
+    }).then((fn) => {
+      if (disposed) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    });
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      if (unlisten) unlisten();
+    };
+  }, [sending]);
 
   // Sync discovered local / subscription models when switching provider or updating caps
   useEffect(() => {
@@ -616,9 +693,24 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     }
   };
 
+  const handleCancelSending = async () => {
+    const reqId = activeRequestIdRef.current;
+    if (!sending || !reqId || cancellingRef.current) return;
+    cancellingRef.current = true;
+    setCancelling(true);
+    await cancelAiChat(reqId);
+  };
+
   const sendMessage = async (promptText: string) => {
     const trimmed = promptText.trim();
     if (!trimmed || sending) return;
+
+    const reqId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    activeRequestIdRef.current = reqId;
+    cancellingRef.current = false;
+    setCancelling(false);
+    setElapsedSecs(0);
+    setProgressItems([]);
 
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}-u`,
@@ -672,6 +764,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
 
     try {
       const res = await sendAiChat({
+        requestId: reqId,
         provider: config.provider,
         model: effectiveModel || undefined,
         apiKey: config.apiKeys[config.provider],
@@ -700,16 +793,31 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         onCliTurnComplete?.();
       }
     } catch (err) {
-      const errorMsg: ChatMessage = {
-        id: `msg-${Date.now()}-err`,
-        role: 'assistant',
-        content: err instanceof Error ? err.message : String(err),
-        timestamp: Date.now(),
-        error: true,
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-      setShowSupportCard(true);
+      const errText = err instanceof Error ? err.message : String(err);
+      if (cancellingRef.current || errText === 'CLI_CANCELLED') {
+        const cancelNote: ChatMessage = {
+          id: `msg-${Date.now()}-cancel`,
+          role: 'assistant',
+          content: t.aiChat.cancelledMsg,
+          timestamp: Date.now(),
+          error: true,
+        };
+        setMessages((prev) => [...prev, cancelNote]);
+      } else {
+        const errorMsg: ChatMessage = {
+          id: `msg-${Date.now()}-err`,
+          role: 'assistant',
+          content: errText,
+          timestamp: Date.now(),
+          error: true,
+        };
+        setMessages((prev) => [...prev, errorMsg]);
+        setShowSupportCard(true);
+      }
     } finally {
+      activeRequestIdRef.current = null;
+      cancellingRef.current = false;
+      setCancelling(false);
       setSending(false);
     }
   };
@@ -1460,11 +1568,36 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             </label>
           )}
           <div className="ai-folder-badge-row">
-            <span className={`ai-folder-badge is-${aiFolderMode}`}>
-              <FolderCheck size={11} />
-              <span>{folderBadgeLabel}</span>
-            </span>
+            {onAiFolderModeChange ? (
+              <label
+                className={`ai-folder-badge is-${aiFolderMode} is-interactive`}
+                title={t.aiChat.folderModeTooltip}
+              >
+                <FolderCheck size={11} />
+                <select
+                  className="ai-folder-badge-select"
+                  value={aiFolderMode}
+                  aria-label={t.aiChat.folderModeTooltip}
+                  onChange={(e) => onAiFolderModeChange(e.target.value as AiFolderMode)}
+                >
+                  <option value="disabled">{t.aiChat.folderBadgeDisabled}</option>
+                  <option value="read-only">{t.aiChat.folderBadgeRead}</option>
+                  <option value="read-write-approve">{t.aiChat.folderBadgeApprove}</option>
+                  <option value="cli-direct">{t.aiChat.folderBadgeCliDirect}</option>
+                </select>
+              </label>
+            ) : (
+              <span className={`ai-folder-badge is-${aiFolderMode}`}>
+                <FolderCheck size={11} />
+                <span>{folderBadgeLabel}</span>
+              </span>
+            )}
           </div>
+          {workspaceRoot &&
+            aiFolderMode === 'read-write-approve' &&
+            (isSubscriptionCliProvider(config.provider) || config.provider === 'custom-cli') && (
+              <div className="ai-folder-cli-hint">{t.aiChat.cliReadOnlyHint}</div>
+            )}
         </div>
       </div>
 
@@ -1610,7 +1743,34 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
 
         {sending && (
           <div className="ai-msg ai-msg-assistant is-loading">
-            <div className="ai-msg-content">{t.aiChat.sending}</div>
+            <div className="ai-progress-header">
+              <span className="ai-progress-title">
+                <Loader2 size={13} className="spin" />
+                <span>{t.aiChat.sending}</span>
+                <span className="ai-progress-elapsed">{formatElapsed(elapsedSecs)}</span>
+              </span>
+              <button
+                type="button"
+                className="ai-stop-btn"
+                disabled={cancelling}
+                onClick={handleCancelSending}
+              >
+                <Square size={10} />
+                <span>{cancelling ? t.aiChat.cancellingBtn : t.aiChat.cancelBtn}</span>
+              </button>
+            </div>
+            {progressItems.length > 0 ? (
+              <div ref={progressLogRef} className="ai-progress-log">
+                {progressItems.map((item) => (
+                  <div key={item.id} className={`ai-progress-line is-${item.kind}`}>
+                    <span className="ai-progress-line-time">{formatElapsed(item.elapsedSecs)}</span>
+                    <span className="ai-progress-line-text">{item.text}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="ai-progress-placeholder">{t.aiChat.progressStarting}</div>
+            )}
           </div>
         )}
       </div>
@@ -1636,14 +1796,26 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             }
           }}
         />
-        <button
-          type="submit"
-          className="primary-btn ai-send-btn"
-          disabled={sending || !input.trim()}
-        >
-          <Send size={13} />
-          <span>{sending ? t.aiChat.sending : t.aiChat.send}</span>
-        </button>
+        {sending ? (
+          <button
+            type="button"
+            className="primary-btn ai-send-btn is-stop"
+            disabled={cancelling}
+            onClick={handleCancelSending}
+          >
+            <Square size={12} />
+            <span>{cancelling ? t.aiChat.cancellingBtn : t.aiChat.cancelBtn}</span>
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="primary-btn ai-send-btn"
+            disabled={!input.trim()}
+          >
+            <Send size={13} />
+            <span>{t.aiChat.send}</span>
+          </button>
+        )}
       </form>
     </div>
   );

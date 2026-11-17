@@ -1,9 +1,69 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use tauri::Emitter;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::{mpsc, watch};
+
+pub struct AiChatState(Mutex<HashMap<String, watch::Sender<bool>>>);
+
+impl AiChatState {
+    pub fn new() -> Self {
+        Self(Mutex::new(HashMap::new()))
+    }
+
+    pub fn register(&self, request_id: &str) -> (watch::Receiver<bool>, ActiveAiChatGuard<'_>) {
+        let (tx, rx) = watch::channel(false);
+        if !request_id.is_empty() {
+            let mut guard = self.0.lock().unwrap();
+            guard.insert(request_id.to_string(), tx);
+        }
+        (
+            rx,
+            ActiveAiChatGuard {
+                state: self,
+                request_id: request_id.to_string(),
+            },
+        )
+    }
+
+    pub fn cancel(&self, request_id: &str) -> bool {
+        let guard = self.0.lock().unwrap();
+        if let Some(tx) = guard.get(request_id) {
+            let _ = tx.send(true);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+pub struct ActiveAiChatGuard<'a> {
+    state: &'a AiChatState,
+    request_id: String,
+}
+
+impl Drop for ActiveAiChatGuard<'_> {
+    fn drop(&mut self) {
+        if !self.request_id.is_empty() {
+            let mut guard = self.state.0.lock().unwrap();
+            guard.remove(&self.request_id);
+        }
+    }
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiChatProgressEvent {
+    pub request_id: String,
+    pub kind: String,
+    pub text: String,
+    pub elapsed_secs: u64,
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +103,8 @@ pub struct ChatMessageInput {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiChatRequest {
+    #[serde(default)]
+    pub request_id: Option<String>,
     pub provider: String,
     pub model: Option<String>,
     pub api_key: Option<String>,
@@ -1630,16 +1692,281 @@ fn clamp_utf16_prompt(prompt: &str, max_units: usize) -> String {
     }
 }
 
-async fn run_cli_with_timeout(
+const CLI_IDLE_TIMEOUT_SECS: u64 = 420;
+const CLI_MAX_TOTAL_SECS: u64 = 1800;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CliStdoutMode {
+    PlainText,
+    CodexJsonl,
+}
+
+struct StreamingCliResult {
+    stdout: String,
+    stderr: String,
+    codex_last_agent_message: Option<String>,
+    codex_error_message: Option<String>,
+    codex_parsed_any: bool,
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct CodexJsonEventUpdate {
+    kind: Option<&'static str>,
+    progress_text: Option<String>,
+    agent_message: Option<String>,
+    error_message: Option<String>,
+    parsed_json: bool,
+}
+
+fn strip_ansi_escape_sequences(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            match chars.peek().copied() {
+                Some('[') => {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == '\x07' {
+                            break;
+                        }
+                        if c == '\x1b' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                Some(_) => {
+                    chars.next();
+                }
+                None => {}
+            }
+        } else if ch != '\r' {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn truncate_progress_text(text: &str, max_chars: usize) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = String::new();
+    let mut count = 0usize;
+    for ch in collapsed.chars() {
+        if count >= max_chars {
+            out.push('…');
+            return out;
+        }
+        out.push(ch);
+        count += 1;
+    }
+    out
+}
+
+fn parse_codex_jsonl_line(line: &str) -> CodexJsonEventUpdate {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || !trimmed.starts_with('{') {
+        return CodexJsonEventUpdate::default();
+    }
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+        return CodexJsonEventUpdate::default();
+    };
+    let mut update = CodexJsonEventUpdate {
+        parsed_json: true,
+        ..Default::default()
+    };
+
+    match val.get("type").and_then(|v| v.as_str()) {
+        Some("turn.started") => {
+            update.kind = Some("status");
+            update.progress_text = Some("Analyzing request...".to_string());
+        }
+        Some("item.started") => {
+            let item = &val["item"];
+            match item.get("type").and_then(|v| v.as_str()) {
+                Some("command_execution") => {
+                    let cmd = item
+                        .get("command")
+                        .and_then(|v| v.as_str())
+                        .map(|s| truncate_progress_text(s, 110))
+                        .unwrap_or_else(|| "command".to_string());
+                    update.kind = Some("tool");
+                    update.progress_text = Some(format!("$ {}", cmd));
+                }
+                Some("mcp_tool_call") => {
+                    let server = item.get("server").and_then(|v| v.as_str()).unwrap_or("");
+                    let tool = item.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                    let label = if server.is_empty() {
+                        tool.to_string()
+                    } else {
+                        format!("{}/{}", server, tool)
+                    };
+                    update.kind = Some("tool");
+                    update.progress_text = Some(format!("Tool: {}", label));
+                }
+                Some("web_search") => {
+                    let query = item
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .map(|s| truncate_progress_text(s, 90))
+                        .unwrap_or_default();
+                    update.kind = Some("tool");
+                    update.progress_text = Some(if query.is_empty() {
+                        "Web search...".to_string()
+                    } else {
+                        format!("Search: {}", query)
+                    });
+                }
+                Some("file_change") => {
+                    update.kind = Some("tool");
+                    update.progress_text = Some("Editing files...".to_string());
+                }
+                Some("reasoning") => {
+                    update.kind = Some("status");
+                    update.progress_text = Some("Reasoning...".to_string());
+                }
+                _ => {}
+            }
+        }
+        Some("item.completed") => {
+            let item = &val["item"];
+            match item.get("type").and_then(|v| v.as_str()) {
+                Some("agent_message") => {
+                    if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                        let trimmed_msg = text.trim();
+                        if !trimmed_msg.is_empty() {
+                            update.agent_message = Some(trimmed_msg.to_string());
+                            update.kind = Some("commentary");
+                            update.progress_text = Some(truncate_progress_text(trimmed_msg, 220));
+                        }
+                    }
+                }
+                Some("command_execution") => {
+                    if let Some(code) = item.get("exit_code").and_then(|v| v.as_i64()) {
+                        if code != 0 {
+                            let cmd = item
+                                .get("command")
+                                .and_then(|v| v.as_str())
+                                .map(|s| truncate_progress_text(s, 70))
+                                .unwrap_or_else(|| "command".to_string());
+                            update.kind = Some("tool");
+                            update.progress_text = Some(format!("Exit {}: {}", code, cmd));
+                        }
+                    }
+                }
+                Some("file_change") => {
+                    if let Some(changes) = item.get("changes").and_then(|v| v.as_array()) {
+                        let paths: Vec<String> = changes
+                            .iter()
+                            .filter_map(|c| c.get("path").and_then(|p| p.as_str()))
+                            .take(3)
+                            .map(|p| truncate_progress_text(p, 50))
+                            .collect();
+                        if !paths.is_empty() {
+                            let suffix = if changes.len() > 3 {
+                                format!(" (+{})", changes.len() - 3)
+                            } else {
+                                String::new()
+                            };
+                            update.kind = Some("tool");
+                            update.progress_text =
+                                Some(format!("Updated: {}{}", paths.join(", "), suffix));
+                        }
+                    }
+                }
+                Some("error") => {
+                    if let Some(msg) = item.get("message").and_then(|v| v.as_str()) {
+                        let trimmed_err = msg.trim();
+                        if !trimmed_err.is_empty() {
+                            update.error_message = Some(trimmed_err.to_string());
+                            update.kind = Some("status");
+                            update.progress_text = Some(truncate_progress_text(trimmed_err, 180));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Some("error") => {
+            if let Some(msg) = val.get("message").and_then(|v| v.as_str()) {
+                let trimmed_err = msg.trim();
+                if !trimmed_err.is_empty() {
+                    update.error_message = Some(trimmed_err.to_string());
+                    update.kind = Some("status");
+                    update.progress_text = Some(truncate_progress_text(trimmed_err, 180));
+                }
+            }
+        }
+        Some("turn.failed") => {
+            if let Some(msg) = val
+                .get("error")
+                .and_then(|e| e.get("message"))
+                .and_then(|v| v.as_str())
+            {
+                let trimmed_err = msg.trim();
+                if !trimmed_err.is_empty() {
+                    update.error_message = Some(trimmed_err.to_string());
+                    update.kind = Some("status");
+                    update.progress_text = Some(truncate_progress_text(trimmed_err, 180));
+                }
+            }
+        }
+        Some("turn.completed") => {
+            update.kind = Some("status");
+            update.progress_text = Some("Finalizing response...".to_string());
+        }
+        _ => {}
+    }
+
+    update
+}
+
+fn emit_ai_progress(
+    app: Option<&tauri::AppHandle>,
+    request_id: &str,
+    kind: &str,
+    text: &str,
+    elapsed_secs: u64,
+) {
+    if let Some(handle) = app {
+        if !request_id.is_empty() {
+            let _ = handle.emit(
+                "ai-chat-progress",
+                AiChatProgressEvent {
+                    request_id: request_id.to_string(),
+                    kind: kind.to_string(),
+                    text: text.to_string(),
+                    elapsed_secs,
+                },
+            );
+        }
+    }
+}
+
+async fn run_cli_streaming(
+    app: Option<&tauri::AppHandle>,
+    request_id: &str,
+    mut cancel_rx: Option<watch::Receiver<bool>>,
     bin: &str,
     args: &[String],
     stdin_input: Option<&str>,
     working_dir: Option<&str>,
-    timeout_secs: u64,
-) -> Result<(String, String), String> {
+    idle_timeout_secs: u64,
+    max_total_secs: u64,
+    stdout_mode: CliStdoutMode,
+) -> Result<StreamingCliResult, String> {
     let mut cmd = build_cli_command(bin, args);
     cmd.env("PATH", extended_path())
         .env("GEMINI_CLI_TRUST_WORKSPACE", "true")
+        .kill_on_drop(true)
         .stdin(if stdin_input.is_some() {
             std::process::Stdio::piped()
         } else {
@@ -1666,26 +1993,271 @@ async fn run_cli_with_timeout(
         }
     }
 
-    let output = tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait_with_output())
-        .await
-        .map_err(|_| format!("CLI '{}' timed out after {}s", bin, timeout_secs))?
-        .map_err(|e| format!("CLI '{}' execution failed: {}", bin, e))?;
+    let (line_tx, mut line_rx) = mpsc::unbounded_channel::<(bool, String)>();
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let mut stdout_task = child.stdout.take().map(|out| {
+        let tx = line_tx.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(out);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf)
+                            .trim_end_matches(&['\r', '\n'][..])
+                            .to_string();
+                        if tx.send((false, line)).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+    });
 
-    if !output.status.success() && stdout.is_empty() {
-        return Err(if stderr.is_empty() {
-            format!("CLI exited with status {}", output.status)
-        } else {
-            stderr
-        });
+    let mut stderr_task = child.stderr.take().map(|err| {
+        let tx = line_tx.clone();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(err);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match reader.read_until(b'\n', &mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf)
+                            .trim_end_matches(&['\r', '\n'][..])
+                            .to_string();
+                        if tx.send((true, line)).is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        })
+    });
+
+    drop(line_tx);
+
+    let started = Instant::now();
+    let mut last_activity = Instant::now();
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(2));
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    let mut stdout_lines: Vec<String> = Vec::new();
+    let mut stderr_lines: Vec<String> = Vec::new();
+    let mut codex_last_agent_message: Option<String> = None;
+    let mut codex_error_message: Option<String> = None;
+    let mut codex_parsed_any = false;
+    let mut channel_closed = false;
+
+    let process_line = |is_stderr: bool,
+                        raw_line: String,
+                        elapsed_secs: u64,
+                        stdout_lines: &mut Vec<String>,
+                        stderr_lines: &mut Vec<String>,
+                        codex_last_agent_message: &mut Option<String>,
+                        codex_error_message: &mut Option<String>,
+                        codex_parsed_any: &mut bool| {
+        if is_stderr {
+            let clean = strip_ansi_escape_sequences(&raw_line);
+            let trimmed = clean.trim();
+            if !trimmed.is_empty() {
+                stderr_lines.push(clean.clone());
+                let preview = truncate_progress_text(trimmed, 180);
+                if !preview.is_empty() {
+                    emit_ai_progress(app, request_id, "status", &preview, elapsed_secs);
+                }
+            }
+            return;
+        }
+
+        stdout_lines.push(raw_line.clone());
+        match stdout_mode {
+            CliStdoutMode::CodexJsonl => {
+                let update = parse_codex_jsonl_line(&raw_line);
+                if update.parsed_json {
+                    *codex_parsed_any = true;
+                    if let Some(msg) = update.agent_message {
+                        *codex_last_agent_message = Some(msg);
+                    }
+                    if let Some(err) = update.error_message {
+                        *codex_error_message = Some(err);
+                    }
+                    if let (Some(kind), Some(text)) = (update.kind, update.progress_text) {
+                        emit_ai_progress(app, request_id, kind, &text, elapsed_secs);
+                    }
+                } else {
+                    let clean = strip_ansi_escape_sequences(&raw_line);
+                    let preview = truncate_progress_text(clean.trim(), 180);
+                    if !preview.is_empty() {
+                        emit_ai_progress(app, request_id, "output", &preview, elapsed_secs);
+                    }
+                }
+            }
+            CliStdoutMode::PlainText => {
+                let clean = strip_ansi_escape_sequences(&raw_line);
+                let preview = truncate_progress_text(clean.trim(), 180);
+                if !preview.is_empty() {
+                    emit_ai_progress(app, request_id, "output", &preview, elapsed_secs);
+                }
+            }
+        }
+    };
+
+    let status = loop {
+        tokio::select! {
+            _ = async {
+                if let Some(rx) = cancel_rx.as_mut() {
+                    while !*rx.borrow() {
+                        if rx.changed().await.is_err() {
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err("CLI_CANCELLED".to_string());
+            }
+            msg = line_rx.recv(), if !channel_closed => {
+                match msg {
+                    Some((is_stderr, raw_line)) => {
+                        last_activity = Instant::now();
+                        process_line(
+                            is_stderr,
+                            raw_line,
+                            started.elapsed().as_secs(),
+                            &mut stdout_lines,
+                            &mut stderr_lines,
+                            &mut codex_last_agent_message,
+                            &mut codex_error_message,
+                            &mut codex_parsed_any,
+                        );
+                    }
+                    None => {
+                        channel_closed = true;
+                    }
+                }
+            }
+            _ = heartbeat.tick() => {
+                let elapsed_secs = started.elapsed().as_secs();
+                emit_ai_progress(app, request_id, "heartbeat", "", elapsed_secs);
+                if last_activity.elapsed() >= Duration::from_secs(idle_timeout_secs) {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    return Err(format!(
+                        "CLI '{}' timed out after {}s without output (elapsed {}s)",
+                        bin, idle_timeout_secs, elapsed_secs
+                    ));
+                }
+                if started.elapsed() >= Duration::from_secs(max_total_secs) {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    return Err(format!(
+                        "CLI '{}' reached max runtime limit ({}s)",
+                        bin, max_total_secs
+                    ));
+                }
+            }
+            status_res = child.wait() => {
+                break status_res.map_err(|e| format!("CLI '{}' execution failed: {}", bin, e))?;
+            }
+        }
+    };
+
+    let _ = tokio::time::timeout(Duration::from_millis(750), async {
+        if let Some(h) = stdout_task.take() {
+            let _ = h.await;
+        }
+        if let Some(h) = stderr_task.take() {
+            let _ = h.await;
+        }
+    })
+    .await;
+
+    let final_elapsed = started.elapsed().as_secs();
+    while let Ok((is_stderr, raw_line)) = line_rx.try_recv() {
+        process_line(
+            is_stderr,
+            raw_line,
+            final_elapsed,
+            &mut stdout_lines,
+            &mut stderr_lines,
+            &mut codex_last_agent_message,
+            &mut codex_error_message,
+            &mut codex_parsed_any,
+        );
     }
-    Ok((stdout, stderr))
+
+    let stdout = stdout_lines.join("\n").trim().to_string();
+    let stderr = stderr_lines.join("\n").trim().to_string();
+
+    if !status.success() {
+        let no_usable_output = match stdout_mode {
+            CliStdoutMode::CodexJsonl => {
+                codex_last_agent_message
+                    .as_deref()
+                    .map(|s| s.trim().is_empty())
+                    .unwrap_or(true)
+                    && (codex_parsed_any || stdout.is_empty())
+            }
+            CliStdoutMode::PlainText => stdout.is_empty(),
+        };
+        if no_usable_output {
+            return Err(codex_error_message
+                .filter(|s| !s.trim().is_empty())
+                .or_else(|| (!stderr.is_empty()).then_some(stderr))
+                .unwrap_or_else(|| format!("CLI exited with status {}", status)));
+        }
+    }
+
+    Ok(StreamingCliResult {
+        stdout,
+        stderr,
+        codex_last_agent_message,
+        codex_error_message,
+        codex_parsed_any,
+    })
 }
 
 #[tauri::command]
-pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
+pub fn cancel_ai_chat(
+    state: tauri::State<'_, AiChatState>,
+    request_id: String,
+) -> Result<bool, String> {
+    Ok(state.cancel(request_id.trim()))
+}
+
+async fn send_http_with_cancel(
+    req: reqwest::RequestBuilder,
+    mut cancel_rx: watch::Receiver<bool>,
+) -> Result<reqwest::Response, String> {
+    tokio::select! {
+        _ = async {
+            while !*cancel_rx.borrow() {
+                if cancel_rx.changed().await.is_err() {
+                    std::future::pending::<()>().await;
+                }
+            }
+        } => Err("CLI_CANCELLED".to_string()),
+        res = req.send() => res.map_err(|e| e.to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn ai_chat(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AiChatState>,
+    request: AiChatRequest,
+) -> Result<AiChatResponse, String> {
+    let request_id = request.request_id.as_deref().unwrap_or("").trim().to_string();
+    let (cancel_rx, _active_guard) = state.register(&request_id);
+
     let provider = request.provider.as_str();
     let model_opt = request
         .model
@@ -1719,6 +2291,7 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
             };
             let mut args = vec![
                 "exec".to_string(),
+                "--json".to_string(),
                 "--skip-git-repo-check".to_string(),
                 "--sandbox".to_string(),
                 sandbox_mode.to_string(),
@@ -1735,20 +2308,35 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
             }
             args.push("-".to_string());
 
-            let (stdout, stderr) =
-                run_cli_with_timeout(&bin, &args, Some(&prompt), workspace_dir, 180).await?;
+            let cli_res = run_cli_streaming(
+                Some(&app),
+                &request_id,
+                Some(cancel_rx),
+                &bin,
+                &args,
+                Some(&prompt),
+                workspace_dir,
+                CLI_IDLE_TIMEOUT_SECS,
+                CLI_MAX_TOTAL_SECS,
+                CliStdoutMode::CodexJsonl,
+            )
+            .await;
             let file_text = std::fs::read_to_string(&out_file).unwrap_or_default();
             let _ = std::fs::remove_file(&out_file);
+            let res = cli_res?;
+
             let content = if !file_text.trim().is_empty() {
                 file_text.trim().to_string()
-            } else if !stdout.is_empty() {
-                stdout
+            } else if let Some(msg) = res.codex_last_agent_message.filter(|s| !s.trim().is_empty()) {
+                msg.trim().to_string()
+            } else if !res.codex_parsed_any && !res.stdout.is_empty() {
+                res.stdout
             } else {
-                return Err(if stderr.is_empty() {
-                    "Codex CLI returned an empty response.".to_string()
-                } else {
-                    stderr
-                });
+                return Err(res
+                    .codex_error_message
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| (!res.stderr.is_empty()).then_some(res.stderr))
+                    .unwrap_or_else(|| "Codex CLI returned an empty response.".to_string()));
             };
             Ok(AiChatResponse {
                 content,
@@ -1773,17 +2361,28 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
                 args.push(prompt.clone());
                 None
             };
-            let (stdout, stderr) =
-                run_cli_with_timeout(&bin, &args, stdin_opt, workspace_dir, 180).await?;
-            if stdout.is_empty() {
-                return Err(if stderr.is_empty() {
+            let res = run_cli_streaming(
+                Some(&app),
+                &request_id,
+                Some(cancel_rx),
+                &bin,
+                &args,
+                stdin_opt,
+                workspace_dir,
+                CLI_IDLE_TIMEOUT_SECS,
+                CLI_MAX_TOTAL_SECS,
+                CliStdoutMode::PlainText,
+            )
+            .await?;
+            if res.stdout.is_empty() {
+                return Err(if res.stderr.is_empty() {
                     "Claude CLI returned an empty response.".to_string()
                 } else {
-                    stderr
+                    res.stderr
                 });
             }
             Ok(AiChatResponse {
-                content: stdout,
+                content: res.stdout,
                 model_used: model_opt.unwrap_or("claude-subscription").to_string(),
             })
         }
@@ -1819,17 +2418,28 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
                 args.push(prompt.clone());
                 None
             };
-            let (stdout, stderr) =
-                run_cli_with_timeout(&bin, &args, stdin_opt, workspace_dir, 180).await?;
-            if stdout.is_empty() {
-                return Err(if stderr.is_empty() {
+            let res = run_cli_streaming(
+                Some(&app),
+                &request_id,
+                Some(cancel_rx),
+                &bin,
+                &args,
+                stdin_opt,
+                workspace_dir,
+                CLI_IDLE_TIMEOUT_SECS,
+                CLI_MAX_TOTAL_SECS,
+                CliStdoutMode::PlainText,
+            )
+            .await?;
+            if res.stdout.is_empty() {
+                return Err(if res.stderr.is_empty() {
                     "Gemini CLI returned an empty response.".to_string()
                 } else {
-                    stderr
+                    res.stderr
                 });
             }
             Ok(AiChatResponse {
-                content: stdout,
+                content: res.stdout,
                 model_used: model_opt.unwrap_or("gemini-cli").to_string(),
             })
         }
@@ -1855,17 +2465,28 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
             }
             args.push("-p".to_string());
             args.push(prompt);
-            let (stdout, stderr) =
-                run_cli_with_timeout(&bin, &args, None, workspace_dir, 180).await?;
-            if stdout.is_empty() {
-                return Err(if stderr.is_empty() {
+            let res = run_cli_streaming(
+                Some(&app),
+                &request_id,
+                Some(cancel_rx),
+                &bin,
+                &args,
+                None,
+                workspace_dir,
+                CLI_IDLE_TIMEOUT_SECS,
+                CLI_MAX_TOTAL_SECS,
+                CliStdoutMode::PlainText,
+            )
+            .await?;
+            if res.stdout.is_empty() {
+                return Err(if res.stderr.is_empty() {
                     "Antigravity CLI returned an empty response.".to_string()
                 } else {
-                    stderr
+                    res.stderr
                 });
             }
             Ok(AiChatResponse {
-                content: stdout,
+                content: res.stdout,
                 model_used: model_opt.unwrap_or("antigravity-cli").to_string(),
             })
         }
@@ -1889,23 +2510,28 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
                     used_placeholder = true;
                 }
             }
-            let (stdout, stderr) = run_cli_with_timeout(
+            let res = run_cli_streaming(
+                Some(&app),
+                &request_id,
+                Some(cancel_rx),
                 &bin,
                 &tokens,
                 if used_placeholder { None } else { Some(&prompt) },
                 workspace_dir,
-                180,
+                CLI_IDLE_TIMEOUT_SECS,
+                CLI_MAX_TOTAL_SECS,
+                CliStdoutMode::PlainText,
             )
             .await?;
-            if stdout.is_empty() {
-                return Err(if stderr.is_empty() {
+            if res.stdout.is_empty() {
+                return Err(if res.stderr.is_empty() {
                     "Custom CLI returned an empty response.".to_string()
                 } else {
-                    stderr
+                    res.stderr
                 });
             }
             Ok(AiChatResponse {
-                content: stdout,
+                content: res.stdout,
                 model_used: raw_cmd.to_string(),
             })
         }
@@ -1971,7 +2597,7 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
                 }
             }
 
-            let resp = req.send().await.map_err(|e| e.to_string())?;
+            let resp = send_http_with_cancel(req, cancel_rx).await?;
             let status = resp.status();
             let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
@@ -2031,14 +2657,12 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
                 .timeout(Duration::from_secs(120))
                 .build()
                 .map_err(|e| e.to_string())?;
-            let resp = client
+            let req = client
                 .post(&endpoint)
                 .header("x-api-key", api_key)
                 .header("anthropic-version", "2023-06-01")
-                .json(&payload)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
+                .json(&payload);
+            let resp = send_http_with_cancel(req, cancel_rx).await?;
             let status = resp.status();
             let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
@@ -2093,12 +2717,8 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
                 .timeout(Duration::from_secs(120))
                 .build()
                 .map_err(|e| e.to_string())?;
-            let resp = client
-                .post(&endpoint)
-                .json(&payload)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
+            let req = client.post(&endpoint).json(&payload);
+            let resp = send_http_with_cancel(req, cancel_rx).await?;
             let status = resp.status();
             let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
@@ -2140,16 +2760,18 @@ pub async fn ai_chat(request: AiChatRequest) -> Result<AiChatResponse, String> {
                 .timeout(Duration::from_secs(180))
                 .build()
                 .map_err(|e| e.to_string())?;
-            let resp = client
-                .post(&endpoint)
-                .json(&serde_json::json!({
-                    "model": model,
-                    "messages": msg_list,
-                    "stream": false
-                }))
-                .send()
-                .await
-                .map_err(|e| format!("Failed to connect to Ollama ({}): {}", endpoint, e))?;
+            let req = client.post(&endpoint).json(&serde_json::json!({
+                "model": model,
+                "messages": msg_list,
+                "stream": false
+            }));
+            let resp = send_http_with_cancel(req, cancel_rx).await.map_err(|e| {
+                if e == "CLI_CANCELLED" {
+                    e
+                } else {
+                    format!("Failed to connect to Ollama ({}): {}", endpoint, e)
+                }
+            })?;
             let status = resp.status();
             let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
             if !status.is_success() {
@@ -2339,5 +2961,67 @@ endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\node_
         assert_eq!(resolve_windows_executable_candidate(&dir, "posix_only"), None);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_codex_jsonl_events_for_progress_and_fallback() {
+        let turn_started = parse_codex_jsonl_line(r#"{"type":"turn.started"}"#);
+        assert!(turn_started.parsed_json);
+        assert_eq!(turn_started.kind, Some("status"));
+        assert_eq!(turn_started.progress_text.as_deref(), Some("Analyzing request..."));
+
+        let cmd_started = parse_codex_jsonl_line(
+            r#"{"type":"item.started","item":{"id":"1","type":"command_execution","command":"mkdir -p docs"}}"#,
+        );
+        assert_eq!(cmd_started.kind, Some("tool"));
+        assert_eq!(cmd_started.progress_text.as_deref(), Some("$ mkdir -p docs"));
+
+        let mcp_started = parse_codex_jsonl_line(
+            r#"{"type":"item.started","item":{"id":"2","type":"mcp_tool_call","server":"imagegen","tool":"image_gen"}}"#,
+        );
+        assert_eq!(mcp_started.kind, Some("tool"));
+        assert_eq!(mcp_started.progress_text.as_deref(), Some("Tool: imagegen/image_gen"));
+
+        let commentary = parse_codex_jsonl_line(
+            r#"{"type":"item.completed","item":{"id":"3","type":"agent_message","text":"最初の3案を生成中です..."}}"#,
+        );
+        assert_eq!(commentary.kind, Some("commentary"));
+        assert_eq!(
+            commentary.agent_message.as_deref(),
+            Some("最初の3案を生成中です...")
+        );
+
+        let file_changed = parse_codex_jsonl_line(
+            r#"{"type":"item.completed","item":{"id":"4","type":"file_change","changes":[{"path":"docs/design-1.png","kind":"add"},{"path":"docs/design-2.png","kind":"add"}]}}"#,
+        );
+        assert_eq!(file_changed.kind, Some("tool"));
+        assert_eq!(
+            file_changed.progress_text.as_deref(),
+            Some("Updated: docs/design-1.png, docs/design-2.png")
+        );
+
+        let failed = parse_codex_jsonl_line(
+            r#"{"type":"turn.failed","error":{"message":"Sandbox denied write"}}"#,
+        );
+        assert_eq!(failed.error_message.as_deref(), Some("Sandbox denied write"));
+    }
+
+    #[test]
+    fn strips_ansi_sequences_cleanly() {
+        let raw = "\x1b[32mOK\x1b[0m \x1b]0;title\x07line\r";
+        assert_eq!(strip_ansi_escape_sequences(raw), "OK line");
+    }
+
+    #[test]
+    fn ai_chat_state_cancels_and_cleans_up_on_drop() {
+        let state = AiChatState::new();
+        {
+            let (rx, _guard) = state.register("req-1");
+            assert!(!*rx.borrow());
+            assert!(state.cancel("req-1"));
+            assert!(*rx.borrow());
+            assert!(!state.cancel("missing"));
+        }
+        assert!(!state.cancel("req-1"));
     }
 }

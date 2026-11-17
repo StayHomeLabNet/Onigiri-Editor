@@ -235,6 +235,9 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             onCopyReply={onCopyAiReply}
             workspaceRoot={workspaceRoot}
             aiFolderMode={settings.aiFolderMode}
+            onAiFolderModeChange={(nextMode) =>
+              onSettingsChange({ ...settings, aiFolderMode: nextMode })
+            }
             onWorkspaceRefresh={onWorkspaceRefresh}
             onFileWritten={onFileWritten}
             onCliTurnComplete={onCliTurnComplete}

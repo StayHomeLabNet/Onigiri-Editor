@@ -49,6 +49,7 @@ import {
   assistProjectSetup,
   browserClose,
   browserNavAction,
+  browserSetBounds,
   checkFilesSync,
   createFileInDir,
   formatShortcut,
@@ -98,6 +99,11 @@ import { SettingsModal } from './components/SettingsModal';
 import { EncodingModal, type EncodingModalMode } from './components/EncodingModal';
 import { GoToLineModal } from './components/GoToLineModal';
 import {
+  FolderSwitchGuardModal,
+  type FolderSwitchGuardMode,
+} from './components/FolderSwitchGuardModal';
+import { WorkspaceImageModal } from './components/WorkspaceImageModal';
+import {
   AiDiffPreviewModal,
   type DiffPreviewRequest,
 } from './components/AiDiffPreviewModal';
@@ -135,6 +141,7 @@ interface PersistedSession {
 
 const DEFAULT_SETTINGS: EditorSettings = {
   fontSize: 15,
+  editorZoom: 100,
   lineHeight: 1.7,
   previewWidth: 820,
   editorFont: 'mono',
@@ -391,6 +398,11 @@ export function App() {
   const [showGoToLine, setShowGoToLine] = useState(false);
   const [encodingModalMode, setEncodingModalMode] = useState<EncodingModalMode | null>(null);
   const [diffPreview, setDiffPreview] = useState<DiffPreviewRequest | null>(null);
+  const [folderSwitchGuardMode, setFolderSwitchGuardMode] =
+    useState<FolderSwitchGuardMode | null>(null);
+  const [stoppingServerForSwitch, setStoppingServerForSwitch] = useState(false);
+  const [nativeDialogOpen, setNativeDialogOpen] = useState(false);
+  const [previewWorkspaceImagePath, setPreviewWorkspaceImagePath] = useState<string | null>(null);
   const [zenMode, setZenMode] = useState(false);
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -1021,9 +1033,18 @@ export function App() {
 
   useEffect(() => {
     if (!isTauri()) return;
+    let lastWorkspaceScanMs = 0;
     const onFocusOrVisible = () => {
       if (document.visibilityState === 'visible') {
         void syncOpenTabsWithDisk();
+        const root = workspaceRootRef.current;
+        const now = Date.now();
+        if (root && now - lastWorkspaceScanMs > 2500) {
+          lastWorkspaceScanMs = now;
+          scanWorkspaceDir(root)
+            .then(setWorkspaceEntries)
+            .catch(() => {});
+        }
       }
     };
     window.addEventListener('focus', onFocusOrVisible);
@@ -1317,9 +1338,34 @@ export function App() {
     ]
   );
 
+  const runWithHiddenNativeBrowser = useCallback(
+    async <T,>(task: () => Promise<T>): Promise<T> => {
+      if (isTauri()) {
+        setNativeDialogOpen(true);
+        if (settings.builtinBrowserEnabled && rightPaneMode === 'browser') {
+          await browserSetBounds({
+            x: 0,
+            y: 0,
+            width: 120,
+            height: 120,
+            visible: false,
+          }).catch(() => {});
+        }
+      }
+      try {
+        return await task();
+      } finally {
+        if (isTauri()) {
+          setNativeDialogOpen(false);
+        }
+      }
+    },
+    [settings.builtinBrowserEnabled, rightPaneMode]
+  );
+
   const handleOpenFile = useCallback(async () => {
     try {
-      const opened = await openMarkdownFileDialog();
+      const opened = await runWithHiddenNativeBrowser(() => openMarkdownFileDialog());
       if (!opened) return;
       const existing = tabsRef.current.find((tb) => tb.filePath && tb.filePath === opened.path);
       if (existing) {
@@ -1343,7 +1389,14 @@ export function App() {
     } catch (err) {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     }
-  }, [mode, activeTab.dirty, notify, t.dialogs.unsavedCloseConfirm, t.toasts.errorPrefix]);
+  }, [
+    runWithHiddenNativeBrowser,
+    mode,
+    activeTab.dirty,
+    notify,
+    t.dialogs.unsavedCloseConfirm,
+    t.toasts.errorPrefix,
+  ]);
 
   const handleSave = useCallback(
     async (forceSaveAs = false) => {
@@ -1359,12 +1412,22 @@ export function App() {
           targetEol === '\r\n'
             ? savedSnapshot.replace(/\n/g, '\r\n')
             : savedSnapshot;
-        const res = await saveMarkdownFile(
-          contentToWrite,
-          forceSaveAs ? undefined : activeTab.filePath,
-          activeTab.title,
-          targetEncoding
-        );
+        const needsDialog = forceSaveAs || !activeTab.filePath;
+        const res = needsDialog
+          ? await runWithHiddenNativeBrowser(() =>
+              saveMarkdownFile(
+                contentToWrite,
+                forceSaveAs ? undefined : activeTab.filePath,
+                activeTab.title,
+                targetEncoding
+              )
+            )
+          : await saveMarkdownFile(
+              contentToWrite,
+              activeTab.filePath,
+              activeTab.title,
+              targetEncoding
+            );
         if (!res) return;
         savingPathsRef.current.add(res.path);
         const syncRes = await checkFilesSync([res.path]).catch(() => []);
@@ -1426,6 +1489,7 @@ export function App() {
     },
     [
       activeTab,
+      runWithHiddenNativeBrowser,
       notify,
       t.toasts.errorPrefix,
       t.toasts.savedSuccess,
@@ -1570,15 +1634,70 @@ export function App() {
     }
   }, [notify, t.toasts.errorPrefix]);
 
-  const handleOpenFolder = useCallback(async () => {
-    const dir = await openFolderDialog();
-    if (!dir) return;
-    setWorkspaceRoot(dir);
-    setSidebarTab('files');
-    setShowSidebar(true);
-    if (mode !== 'advanced') handleModeChange('advanced');
-    await refreshWorkspace(dir);
-  }, [mode, handleModeChange, refreshWorkspace]);
+  const proceedOpenFolderPicker = useCallback(async () => {
+    try {
+      const dir = await runWithHiddenNativeBrowser(() => openFolderDialog());
+      if (!dir) return;
+      setWorkspaceRoot(dir);
+      setSidebarTab('files');
+      setShowSidebar(true);
+      if (mode !== 'advanced') handleModeChange('advanced');
+      await refreshWorkspace(dir);
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    }
+  }, [runWithHiddenNativeBrowser, mode, handleModeChange, refreshWorkspace, notify, t.toasts.errorPrefix]);
+
+  const handleOpenFolder = useCallback(() => {
+    if (projectSetupBusy) {
+      setFolderSwitchGuardMode('setup-busy');
+      return;
+    }
+    if (projectServer?.running || projectServer?.starting) {
+      setFolderSwitchGuardMode('server-running');
+      return;
+    }
+    void proceedOpenFolderPicker();
+  }, [
+    projectSetupBusy,
+    projectServer?.running,
+    projectServer?.starting,
+    proceedOpenFolderPicker,
+  ]);
+
+  const handleConfirmStopAndSwitchFolder = useCallback(async () => {
+    const stoppedUrl = projectServer?.url;
+    setStoppingServerForSwitch(true);
+    try {
+      pendingBrowseTargetRef.current = null;
+      const st = await stopProjectDevServer();
+      setProjectServer(st);
+      notify(t.toasts.devServerStopped);
+
+      if (
+        rightPaneMode === 'browser' &&
+        stoppedUrl &&
+        browserUrl.startsWith(stoppedUrl.replace(/\/+$/, ''))
+      ) {
+        setRightPaneMode('markdown');
+      }
+
+      setFolderSwitchGuardMode(null);
+      await proceedOpenFolderPicker();
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    } finally {
+      setStoppingServerForSwitch(false);
+    }
+  }, [
+    projectServer?.url,
+    rightPaneMode,
+    browserUrl,
+    notify,
+    t.toasts.devServerStopped,
+    t.toasts.errorPrefix,
+    proceedOpenFolderPicker,
+  ]);
 
   const handleCreateFileInFolder = useCallback(
     async (fileName: string) => {
@@ -1688,9 +1807,19 @@ export function App() {
     const htmlBody = await renderMarkdownToHtml(activeTab.content);
     const full = exportStandaloneHtml(activeTab.title, htmlBody, theme, settings.customCss);
     const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '');
-    const ok = await saveExportFile(full, `${baseName}.html`, 'HTML', ['html'], 'text/html');
+    const ok = await runWithHiddenNativeBrowser(() =>
+      saveExportFile(full, `${baseName}.html`, 'HTML', ['html'], 'text/html')
+    );
     if (ok) notify(t.toasts.exportedSuccess);
-  }, [activeTab.content, activeTab.title, theme, settings.customCss, notify, t.toasts.exportedSuccess]);
+  }, [
+    activeTab.content,
+    activeTab.title,
+    theme,
+    settings.customCss,
+    runWithHiddenNativeBrowser,
+    notify,
+    t.toasts.exportedSuccess,
+  ]);
 
   const handleExportPdf = useCallback(() => {
     window.print();
@@ -1715,6 +1844,34 @@ export function App() {
     [showFind]
   );
 
+  const clampZoom = useCallback((pct: number) => {
+    if (!Number.isFinite(pct)) return 100;
+    return Math.max(25, Math.min(400, Math.round(pct)));
+  }, []);
+
+  const zoomPercent = clampZoom(settings.editorZoom ?? 100);
+
+  const handleSetZoom = useCallback(
+    (nextZoom: number) => {
+      setSettings((s) => ({ ...s, editorZoom: clampZoom(nextZoom) }));
+    },
+    [clampZoom]
+  );
+
+  const handleZoomIn = useCallback(() => {
+    setSettings((s) => ({
+      ...s,
+      editorZoom: clampZoom((s.editorZoom ?? 100) + 10),
+    }));
+  }, [clampZoom]);
+
+  const handleZoomOut = useCallback(() => {
+    setSettings((s) => ({
+      ...s,
+      editorZoom: clampZoom((s.editorZoom ?? 100) - 10),
+    }));
+  }, [clampZoom]);
+
   const handleToolbarAction = useCallback(
     (action: string) => {
       if (action === 'image') {
@@ -1731,6 +1888,14 @@ export function App() {
       }
       if (action === 'find') {
         openFindBar({ target: 'find', toggleIfEmpty: true });
+        return;
+      }
+      if (action === 'zoomOut') {
+        handleZoomOut();
+        return;
+      }
+      if (action === 'zoomIn') {
+        handleZoomIn();
         return;
       }
 
@@ -1750,6 +1915,15 @@ export function App() {
           break;
         case 'redo':
           ed?.redoAction();
+          break;
+        case 'selectAll':
+          ed?.selectAllAction();
+          break;
+        case 'copy':
+          ed?.copyAction();
+          break;
+        case 'paste':
+          ed?.pasteAction();
           break;
         case 'h1':
           ed?.toggleLinePrefix('# ');
@@ -1811,7 +1985,7 @@ export function App() {
           break;
       }
     },
-    [layout, handleAiClean, handleCopyRichText]
+    [layout, handleAiClean, handleCopyRichText, openFindBar, handleZoomOut, handleZoomIn]
   );
 
   // Snapshots
@@ -2506,9 +2680,20 @@ export function App() {
       } else if (meta && e.key.toLowerCase() === 'i') {
         e.preventDefault();
         handleToolbarAction('italic');
+      } else if (meta && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        handleZoomIn();
+      } else if (meta && e.key === '-') {
+        e.preventDefault();
+        handleZoomOut();
+      } else if (meta && e.key === '0') {
+        e.preventDefault();
+        handleSetZoom(100);
       } else if (e.key === 'Escape') {
         if (diffPreview) return;
-        if (showGoToLine) setShowGoToLine(false);
+        if (folderSwitchGuardMode) {
+          if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
+        } else if (showGoToLine) setShowGoToLine(false);
         else if (showSettings) setShowSettings(false);
         else if (showFind) {
           setShowFind(false);
@@ -2526,12 +2711,17 @@ export function App() {
     handleNewFile,
     toggleZenMode,
     zenMode,
+    folderSwitchGuardMode,
+    stoppingServerForSwitch,
     showGoToLine,
     showSettings,
     showFind,
     diffPreview,
     handleToolbarAction,
     openFindBar,
+    handleZoomIn,
+    handleZoomOut,
+    handleSetZoom,
   ]);
 
   // Listen to native macOS/Win/Linux menu bar actions
@@ -2715,6 +2905,27 @@ export function App() {
             ...s,
             showStatusBar: !(s.showStatusBar ?? true),
           })),
+      },
+      {
+        id: 'zoom-in',
+        category: 'View',
+        label: t.actions.zoomIn,
+        shortcut: formatShortcut('⌘+'),
+        action: handleZoomIn,
+      },
+      {
+        id: 'zoom-out',
+        category: 'View',
+        label: t.actions.zoomOut,
+        shortcut: formatShortcut('⌘-'),
+        action: handleZoomOut,
+      },
+      {
+        id: 'zoom-reset',
+        category: 'View',
+        label: t.actions.resetZoom,
+        shortcut: formatShortcut('⌘0'),
+        action: () => handleSetZoom(100),
       },
       {
         id: 'toggle-right-browser',
@@ -2922,6 +3133,9 @@ export function App() {
     toggleZenMode,
     openPathInTab,
     openFindBar,
+    handleZoomIn,
+    handleZoomOut,
+    handleSetZoom,
   ]);
 
   const handleJumpToHeading = (h: HeadingItem) => {
@@ -2959,6 +3173,9 @@ export function App() {
     showGoToLine ||
     Boolean(encodingModalMode) ||
     Boolean(diffPreview) ||
+    Boolean(folderSwitchGuardMode) ||
+    Boolean(previewWorkspaceImagePath) ||
+    nativeDialogOpen ||
     isDraggingFile;
   const showRightBrowser = settings.builtinBrowserEnabled && rightPaneMode === 'browser';
   const nativeBrowserVisible =
@@ -3048,9 +3265,12 @@ export function App() {
             workspaceRoot={workspaceRoot}
             entries={workspaceEntries}
             searchMatches={searchMatches}
+            activeFilePath={activeTab.filePath}
+            activeImagePath={previewWorkspaceImagePath}
             onChooseFolder={handleOpenFolder}
             onRefreshFolder={() => workspaceRoot && refreshWorkspace(workspaceRoot)}
             onOpenWorkspaceFile={openPathInTab}
+            onOpenWorkspaceImage={(p) => setPreviewWorkspaceImagePath(p)}
             onCreateFileInFolder={handleCreateFileInFolder}
             onSearchWorkspace={handleSearchWorkspace}
             headings={headings}
@@ -3467,7 +3687,10 @@ export function App() {
               notify(`${t.toasts.folderFileWritten}: ${relPath}`);
               void syncOpenTabsWithDisk();
             }}
-            onCliTurnComplete={() => void syncOpenTabsWithDisk()}
+            onCliTurnComplete={() => {
+              void syncOpenTabsWithDisk();
+              if (workspaceRoot) void refreshWorkspace(workspaceRoot);
+            }}
             onRequestDiffPreview={setDiffPreview}
             onOpenFullSettings={() => setShowSettings(true)}
           />
@@ -3497,6 +3720,8 @@ export function App() {
             setSettings((s) => ({ ...s, syncScroll: !s.syncScroll }))
           }
           wordGoal={settings.wordGoal}
+          zoomPercent={zoomPercent}
+          onChangeZoom={handleSetZoom}
           topBarHidden={!isTopBarVisible}
           onSwitchToBasic={() => handleModeChange('basic')}
           onOpenSettings={() => setShowSettings(true)}
@@ -3562,6 +3787,31 @@ export function App() {
         totalLines={stats.lines}
         onClose={() => setShowGoToLine(false)}
         onJump={handleGoToLine}
+      />
+
+      <FolderSwitchGuardModal
+        t={t}
+        mode={folderSwitchGuardMode}
+        externalServer={Boolean(projectServer?.external)}
+        commandLabel={projectInfo?.devCommandLabel || projectServer?.kind || null}
+        serverUrl={projectServer?.url || null}
+        rootPath={projectServer?.rootPath || workspaceRoot || null}
+        stopping={stoppingServerForSwitch}
+        onClose={() => {
+          if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
+        }}
+        onConfirmStopAndSwitch={handleConfirmStopAndSwitchFolder}
+      />
+
+      <WorkspaceImageModal
+        t={t}
+        imagePath={previewWorkspaceImagePath}
+        workspaceRoot={workspaceRoot}
+        entries={workspaceEntries}
+        activeDocPath={activeTab.filePath}
+        onSelectImagePath={setPreviewWorkspaceImagePath}
+        onClose={() => setPreviewWorkspaceImagePath(null)}
+        onInsertToEditor={(src, alt) => insertImageIntoActivePane(src, alt)}
       />
 
       {isDraggingFile && (

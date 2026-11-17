@@ -54,6 +54,12 @@ export interface Translations {
     reset: string;
     undo: string;
     redo: string;
+    selectAll: string;
+    copy: string;
+    paste: string;
+    zoomIn: string;
+    zoomOut: string;
+    resetZoom: string;
     openExternalPreview: string;
     stopExternalPreview: string;
     toggleSimpleTopBar: string;
@@ -109,6 +115,8 @@ export interface Translations {
     noHeadings: string;
     newNoteInFolder: string;
     refreshFolder: string;
+    collapseAll: string;
+    clearFilter: string;
     newFilePrompt: string;
     insertSnippet: string;
   };
@@ -403,6 +411,8 @@ export interface Translations {
     folderBadgeRead: string;
     folderBadgeApprove: string;
     folderBadgeCliDirect: string;
+    folderModeTooltip: string;
+    cliReadOnlyHint: string;
     applyFileBtn: string;
     appliedFileBtn: string;
     clearChat: string;
@@ -410,6 +420,10 @@ export interface Translations {
     inputPlaceholder: string;
     send: string;
     sending: string;
+    cancelBtn: string;
+    cancellingBtn: string;
+    cancelledMsg: string;
+    progressStarting: string;
     insertAtCursor: string;
     replaceDoc: string;
     copyReply: string;
@@ -458,6 +472,10 @@ export interface Translations {
     syncOn: string;
     syncOff: string;
     dropHint: string;
+    zoomTitle: string;
+    zoomInputLabel: string;
+    zoomRangeHint: string;
+    zoomResetBtn: string;
   };
   externalChange: {
     modifiedTitle: string;
@@ -512,6 +530,28 @@ export interface Translations {
     currentRange: string;
     invalidInput: string;
     jumpBtn: string;
+  };
+  folderGuardModal: {
+    serverRunningTitle: string;
+    serverRunningDesc: string;
+    externalServerDesc: string;
+    setupBusyTitle: string;
+    setupBusyDesc: string;
+    commandLabel: string;
+    urlLabel: string;
+    folderLabel: string;
+    stopAndSwitchBtn: string;
+    disconnectAndSwitchBtn: string;
+    stoppingBtn: string;
+    okBtn: string;
+  };
+  workspaceImageModal: {
+    title: string;
+    prev: string;
+    next: string;
+    insertBtn: string;
+    loading: string;
+    loadError: string;
   };
   dialogs: {
     unsavedCloseConfirm: string;

@@ -287,10 +287,8 @@ pub fn build_app_menu_with_state<R: Runtime>(
     }
     #[cfg(target_os = "macos")]
     {
-        let help_settings =
-            MenuItemBuilder::with_id("open-settings-help", settings_label).build(app)?;
         let help_about = MenuItemBuilder::with_id("open-about-help", about_label).build(app)?;
-        help_builder = help_builder.item(&help_settings).item(&help_about);
+        help_builder = help_builder.item(&help_about);
     }
     let help_submenu = help_builder.build()?;
 
@@ -312,7 +310,6 @@ pub fn build_app_menu_with_state<R: Runtime>(
 
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     let normalized = match id {
-        "open-settings-help" => "open-settings",
         "open-about-help" => "open-about",
         other => other,
     };

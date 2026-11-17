@@ -3,6 +3,7 @@ mod browser;
 mod live_preview;
 mod menu;
 mod project;
+mod window_state;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::Serialize;
@@ -94,10 +95,35 @@ fn is_supported_text_file(path: &Path) -> bool {
     )
 }
 
+fn is_supported_image_file(path: &Path) -> bool {
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "avif"
+    )
+}
+
+fn is_workspace_visible_file(path: &Path) -> bool {
+    is_supported_text_file(path) || is_supported_image_file(path)
+}
+
 fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
-        "node_modules" | ".git" | "target" | "dist" | "build" | ".next" | ".nuxt" | ".venv"
+        "node_modules"
+            | ".git"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".nuxt"
+            | ".venv"
+            | "venv"
+            | "vendor"
+            | "__pycache__"
+            | "coverage"
     ) || name.starts_with('.')
 }
 
@@ -421,140 +447,149 @@ fn write_clipboard_text(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn scan_workspace(root_path: String) -> Result<Vec<WorkspaceEntry>, String> {
-    let root = PathBuf::from(&root_path);
-    if !root.exists() || !root.is_dir() {
-        return Err("Workspace path is not a directory".to_string());
-    }
+async fn scan_workspace(root_path: String) -> Result<Vec<WorkspaceEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<WorkspaceEntry>, String> {
+        let root = PathBuf::from(&root_path);
+        if !root.exists() || !root.is_dir() {
+            return Err("Workspace path is not a directory".to_string());
+        }
 
-    let mut entries = Vec::new();
-    let mut count = 0usize;
-    let walker = WalkDir::new(&root)
-        .max_depth(8)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
+        let mut entries = Vec::new();
+        let mut count = 0usize;
+        let walker = WalkDir::new(&root)
+            .max_depth(8)
+            .sort_by_file_name()
+            .into_iter()
+            .filter_entry(|e| {
+                if e.depth() == 0 {
+                    return true;
+                }
+                let name = e.file_name().to_string_lossy();
+                if e.file_type().is_dir() {
+                    !should_skip_dir(&name)
+                } else {
+                    is_workspace_visible_file(e.path())
+                }
+            });
+
+        for entry in walker.flatten() {
+            if entry.depth() == 0 {
+                continue;
             }
-            let name = e.file_name().to_string_lossy();
-            if e.file_type().is_dir() {
-                !should_skip_dir(&name)
-            } else {
-                is_supported_text_file(e.path())
+            let path = entry.path();
+            let is_dir = entry.file_type().is_dir();
+            if !is_dir && !is_workspace_visible_file(path) {
+                continue;
             }
+
+            let Ok(rel) = path.strip_prefix(&root) else {
+                continue;
+            };
+            let meta = entry.metadata().ok();
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified_ms = meta
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+
+            entries.push(WorkspaceEntry {
+                name: entry.file_name().to_string_lossy().to_string(),
+                path: path.to_string_lossy().to_string(),
+                relative_path: rel.to_string_lossy().to_string(),
+                is_dir,
+                size,
+                modified_ms,
+            });
+
+            count += 1;
+            if count >= 2000 {
+                break;
+            }
+        }
+
+        entries.sort_by(|a, b| {
+            b.is_dir
+                .cmp(&a.is_dir)
+                .then_with(|| a.relative_path.to_lowercase().cmp(&b.relative_path.to_lowercase()))
         });
 
-    for entry in walker.flatten() {
-        if entry.depth() == 0 {
-            continue;
-        }
-        let path = entry.path();
-        let is_dir = entry.file_type().is_dir();
-        if !is_dir && !is_supported_text_file(path) {
-            continue;
-        }
-
-        let Ok(rel) = path.strip_prefix(&root) else {
-            continue;
-        };
-        let meta = entry.metadata().ok();
-        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-        let modified_ms = meta
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-
-        entries.push(WorkspaceEntry {
-            name: entry.file_name().to_string_lossy().to_string(),
-            path: path.to_string_lossy().to_string(),
-            relative_path: rel.to_string_lossy().to_string(),
-            is_dir,
-            size,
-            modified_ms,
-        });
-
-        count += 1;
-        if count >= 2000 {
-            break;
-        }
-    }
-
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.relative_path.to_lowercase().cmp(&b.relative_path.to_lowercase()))
-    });
-
-    Ok(entries)
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| format!("Workspace scan task failed: {}", e))?
 }
 
 #[tauri::command]
-fn search_workspace(root_path: String, query: String) -> Result<Vec<SearchMatch>, String> {
-    let q = query.trim().to_lowercase();
-    if q.is_empty() {
-        return Ok(Vec::new());
-    }
-    let root = PathBuf::from(&root_path);
-    if !root.exists() || !root.is_dir() {
-        return Err("Workspace path is not a directory".to_string());
-    }
-
-    let mut matches = Vec::new();
-    let walker = WalkDir::new(&root)
-        .max_depth(8)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
-            }
-            let name = e.file_name().to_string_lossy();
-            if e.file_type().is_dir() {
-                !should_skip_dir(&name)
-            } else {
-                is_supported_text_file(e.path())
-            }
-        });
-
-    for entry in walker.flatten() {
-        if entry.file_type().is_dir() || !is_supported_text_file(entry.path()) {
-            continue;
+async fn search_workspace(root_path: String, query: String) -> Result<Vec<SearchMatch>, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<SearchMatch>, String> {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return Ok(Vec::new());
         }
-        let Ok(meta) = entry.metadata() else {
-            continue;
-        };
-        if meta.len() > 2 * 1024 * 1024 {
-            continue;
+        let root = PathBuf::from(&root_path);
+        if !root.exists() || !root.is_dir() {
+            return Err("Workspace path is not a directory".to_string());
         }
-        let Ok(content) = fs::read_to_string(entry.path()) else {
-            continue;
-        };
-        let rel = entry
-            .path()
-            .strip_prefix(&root)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let name = entry.file_name().to_string_lossy().to_string();
-        let path_str = entry.path().to_string_lossy().to_string();
 
-        for (idx, line) in content.lines().enumerate() {
-            if line.to_lowercase().contains(&q) {
-                let snippet: String = line.trim().chars().take(140).collect();
-                matches.push(SearchMatch {
-                    path: path_str.clone(),
-                    relative_path: rel.clone(),
-                    name: name.clone(),
-                    line: idx + 1,
-                    snippet,
-                });
-                if matches.len() >= 150 {
-                    return Ok(matches);
+        let mut matches = Vec::new();
+        let walker = WalkDir::new(&root)
+            .max_depth(8)
+            .into_iter()
+            .filter_entry(|e| {
+                if e.depth() == 0 {
+                    return true;
+                }
+                let name = e.file_name().to_string_lossy();
+                if e.file_type().is_dir() {
+                    !should_skip_dir(&name)
+                } else {
+                    is_supported_text_file(e.path())
+                }
+            });
+
+        for entry in walker.flatten() {
+            if entry.file_type().is_dir() || !is_supported_text_file(entry.path()) {
+                continue;
+            }
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.len() > 2 * 1024 * 1024 {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            let rel = entry
+                .path()
+                .strip_prefix(&root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path_str = entry.path().to_string_lossy().to_string();
+
+            for (idx, line) in content.lines().enumerate() {
+                if line.to_lowercase().contains(&q) {
+                    let snippet: String = line.trim().chars().take(140).collect();
+                    matches.push(SearchMatch {
+                        path: path_str.clone(),
+                        relative_path: rel.clone(),
+                        name: name.clone(),
+                        line: idx + 1,
+                        snippet,
+                    });
+                    if matches.len() >= 150 {
+                        return Ok(matches);
+                    }
                 }
             }
         }
-    }
 
-    Ok(matches)
+        Ok(matches)
+    })
+    .await
+    .map_err(|e| format!("Workspace search task failed: {}", e))?
 }
 
 #[tauri::command]
@@ -737,71 +772,75 @@ fn is_readable_workspace_text(path: &Path) -> bool {
 }
 
 #[tauri::command]
-fn read_workspace_context(
+async fn read_workspace_context(
     root_path: String,
     max_bytes: Option<usize>,
 ) -> Result<String, String> {
-    let root = PathBuf::from(&root_path);
-    if !root.exists() || !root.is_dir() {
-        return Err("Workspace path is not a directory".to_string());
-    }
-    let budget = max_bytes.unwrap_or(36_000).min(120_000);
-    let mut tree_list = Vec::new();
-    let mut snippets = String::new();
-    let mut used = 0usize;
-
-    let walker = WalkDir::new(&root)
-        .max_depth(6)
-        .sort_by_file_name()
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
-            }
-            let name = e.file_name().to_string_lossy();
-            if e.file_type().is_dir() {
-                !should_skip_dir(&name)
-            } else {
-                is_readable_workspace_text(e.path())
-            }
-        });
-
-    for entry in walker.flatten() {
-        if entry.depth() == 0 || entry.file_type().is_dir() {
-            continue;
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let root = PathBuf::from(&root_path);
+        if !root.exists() || !root.is_dir() {
+            return Err("Workspace path is not a directory".to_string());
         }
-        let Ok(rel) = entry.path().strip_prefix(&root) else {
-            continue;
-        };
-        let rel_str = rel.to_string_lossy().to_string();
-        tree_list.push(rel_str.clone());
+        let budget = max_bytes.unwrap_or(36_000).min(120_000);
+        let mut tree_list = Vec::new();
+        let mut snippets = String::new();
+        let mut used = 0usize;
 
-        if used < budget {
-            if let Ok(meta) = entry.metadata() {
-                if meta.len() <= 128 * 1024 {
-                    if let Ok(content) = fs::read_to_string(entry.path()) {
-                        let remaining = budget - used;
-                        let truncated: String = content.chars().take(remaining.min(4000)).collect();
-                        let block = format!("\n--- File: {} ---\n{}\n", rel_str, truncated);
-                        used += block.len();
-                        snippets.push_str(&block);
+        let walker = WalkDir::new(&root)
+            .max_depth(6)
+            .sort_by_file_name()
+            .into_iter()
+            .filter_entry(|e| {
+                if e.depth() == 0 {
+                    return true;
+                }
+                let name = e.file_name().to_string_lossy();
+                if e.file_type().is_dir() {
+                    !should_skip_dir(&name)
+                } else {
+                    is_readable_workspace_text(e.path())
+                }
+            });
+
+        for entry in walker.flatten() {
+            if entry.depth() == 0 || entry.file_type().is_dir() {
+                continue;
+            }
+            let Ok(rel) = entry.path().strip_prefix(&root) else {
+                continue;
+            };
+            let rel_str = rel.to_string_lossy().to_string();
+            tree_list.push(rel_str.clone());
+
+            if used < budget {
+                if let Ok(meta) = entry.metadata() {
+                    if meta.len() <= 128 * 1024 {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            let remaining = budget - used;
+                            let truncated: String = content.chars().take(remaining.min(4000)).collect();
+                            let block = format!("\n--- File: {} ---\n{}\n", rel_str, truncated);
+                            used += block.len();
+                            snippets.push_str(&block);
+                        }
                     }
                 }
             }
         }
-    }
 
-    Ok(format!(
-        "Workspace root: {}\nFiles:\n{}\n{}",
-        root_path,
-        tree_list
-            .iter()
-            .take(120)
-            .map(|f| format!("- {}", f))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        snippets
-    ))
+        Ok(format!(
+            "Workspace root: {}\nFiles:\n{}\n{}",
+            root_path,
+            tree_list
+                .iter()
+                .take(120)
+                .map(|f| format!("- {}", f))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            snippets
+        ))
+    })
+    .await
+    .map_err(|e| format!("Workspace context task failed: {}", e))?
 }
 
 #[derive(Serialize)]
@@ -1060,7 +1099,10 @@ pub fn run() {
         .manage(OpenedFilesState(Mutex::new(initial_files)))
         .manage(live_preview::LivePreviewState::new())
         .manage(project::ProjectServerState::new())
+        .manage(window_state::WindowStateManager::new())
+        .manage(ai::AiChatState::new())
         .setup(|app| {
+            window_state::restore_main_window_state(app.handle());
             let initial_locale = detect_os_locale_impl();
             let menu = menu::build_app_menu(app.handle(), initial_locale)?;
             app.set_menu(menu)?;
@@ -1091,6 +1133,7 @@ pub fn run() {
             ai::list_local_models,
             ai::assist_ai_connection,
             ai::ai_chat,
+            ai::cancel_ai_chat,
             menu::rebuild_app_menu,
             browser::browser_open_or_update,
             browser::browser_set_bounds,
@@ -1114,13 +1157,32 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         match &event {
-            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } => {
-                project::stop_project_dev_server_sync(app_handle);
-            }
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: win_event,
+                ..
+            } if label == window_state::MAIN_WINDOW_LABEL => match win_event {
+                tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) => {
+                    window_state::capture_main_window_state(app_handle, false);
+                }
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    window_state::capture_main_window_state(app_handle, true);
+                }
+                tauri::WindowEvent::Destroyed => {
+                    window_state::flush_window_state(app_handle);
+                    project::stop_project_dev_server_sync(app_handle);
+                }
+                _ => {}
+            },
             tauri::RunEvent::WindowEvent {
                 event: tauri::WindowEvent::Destroyed,
                 ..
             } => {
+                project::stop_project_dev_server_sync(app_handle);
+            }
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } => {
+                window_state::capture_main_window_state(app_handle, true);
+                window_state::flush_window_state(app_handle);
                 project::stop_project_dev_server_sync(app_handle);
             }
             _ => {}

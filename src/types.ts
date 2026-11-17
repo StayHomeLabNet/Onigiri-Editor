@@ -161,6 +161,7 @@ export interface SearchMatch {
 
 export interface EditorSettings {
   fontSize: number;
+  editorZoom: number;
   lineHeight: number;
   previewWidth: number;
   editorFont: 'mono' | 'sans';

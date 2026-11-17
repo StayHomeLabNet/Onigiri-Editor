@@ -24,6 +24,11 @@ import {
   MessageSquareQuote,
   ClipboardCopy,
   Search,
+  TextSelect,
+  Copy,
+  ClipboardPaste,
+  ZoomOut,
+  ZoomIn,
 } from 'lucide-react';
 import type { AppMode } from '../types';
 import type { Translations } from '../i18n/types';
@@ -36,6 +41,10 @@ interface FormatToolbarProps {
 }
 
 export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction }) => {
+  const keepFocusMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+  };
+
   return (
     <div className="format-toolbar">
       <div className="tb-group">
@@ -44,6 +53,38 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction 
         </button>
         <button type="button" className="tb-btn" onClick={() => onAction('redo')} title={t.actions.redo}>
           <Redo2 size={15} />
+        </button>
+      </div>
+
+      <span className="tb-sep" />
+
+      <div className="tb-group">
+        <button
+          type="button"
+          className="tb-btn"
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('selectAll')}
+          title={`${t.actions.selectAll} (${formatShortcut('⌘A')})`}
+        >
+          <TextSelect size={15} />
+        </button>
+        <button
+          type="button"
+          className="tb-btn"
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('copy')}
+          title={`${t.actions.copy} (${formatShortcut('⌘C')})`}
+        >
+          <Copy size={15} />
+        </button>
+        <button
+          type="button"
+          className="tb-btn"
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('paste')}
+          title={`${t.actions.paste} (${formatShortcut('⌘V')})`}
+        >
+          <ClipboardPaste size={15} />
         </button>
       </div>
 
@@ -158,8 +199,28 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction 
               <ClipboardCopy size={13} />
               <span className="hide-md">{t.actions.copyRichText}</span>
             </button>
+            <span className="tb-sep" />
           </>
         )}
+        <button
+          type="button"
+          className="tb-btn"
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('zoomOut')}
+          title={`${t.actions.zoomOut} (${formatShortcut('⌘-')})`}
+        >
+          <ZoomOut size={15} />
+        </button>
+        <button
+          type="button"
+          className="tb-btn"
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('zoomIn')}
+          title={`${t.actions.zoomIn} (${formatShortcut('⌘+')})`}
+        >
+          <ZoomIn size={15} />
+        </button>
+        <span className="tb-sep" />
         <button
           type="button"
           className="tb-btn"

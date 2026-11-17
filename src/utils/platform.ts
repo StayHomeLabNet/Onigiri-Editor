@@ -446,7 +446,15 @@ export async function listLocalModels(
   return [];
 }
 
+export interface AiChatProgressEvent {
+  requestId: string;
+  kind: 'status' | 'commentary' | 'tool' | 'output' | 'heartbeat';
+  text: string;
+  elapsedSecs: number;
+}
+
 export async function sendAiChat(params: {
+  requestId?: string;
   provider: AiProviderId;
   model?: string;
   apiKey?: string;
@@ -461,6 +469,7 @@ export async function sendAiChat(params: {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<{ content: string; modelUsed: string }>('ai_chat', {
       request: {
+        requestId: params.requestId || null,
         provider: params.provider,
         model: params.model || null,
         apiKey: params.apiKey || null,
@@ -474,6 +483,30 @@ export async function sendAiChat(params: {
     });
   }
   throw new Error('AI integration requires the desktop application');
+}
+
+export async function cancelAiChat(requestId: string): Promise<boolean> {
+  if (!isTauri() || !requestId) return false;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<boolean>('cancel_ai_chat', { requestId });
+  } catch {
+    return false;
+  }
+}
+
+export async function listenAiChatProgress(
+  handler: (event: AiChatProgressEvent) => void
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<AiChatProgressEvent>('ai-chat-progress', (ev) => {
+      handler(ev.payload);
+    });
+  } catch {
+    return () => {};
+  }
 }
 
 export async function checkFilesSync(paths: string[]): Promise<FileSyncInfo[]> {

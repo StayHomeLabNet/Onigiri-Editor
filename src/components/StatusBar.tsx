@@ -1,9 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, FilePlus2, RefreshCw, Save, Settings } from 'lucide-react';
+import { Check, FilePlus2, Minus, Plus, RefreshCw, Save, Settings } from 'lucide-react';
 import type { AppMode, DocumentStats, Locale, TextEncodingId } from '../types';
 import type { Translations } from '../i18n/types';
 import { formatShortcut } from '../utils/platform';
 import { getEncodingShortLabel, TEXT_ENCODINGS } from '../utils/encodings';
+
+const ZOOM_PRESETS = [50, 75, 100, 125, 150, 200] as const;
+
+function clampZoomValue(val: number): number {
+  return Math.max(25, Math.min(400, Math.round(val)));
+}
 
 interface StatusBarProps {
   t: Translations;
@@ -25,6 +31,8 @@ interface StatusBarProps {
   syncScroll: boolean;
   onToggleSyncScroll: () => void;
   wordGoal: number;
+  zoomPercent: number;
+  onChangeZoom: (nextZoom: number) => void;
   topBarHidden?: boolean;
   onSwitchToBasic?: () => void;
   onOpenSettings?: () => void;
@@ -51,6 +59,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   syncScroll,
   onToggleSyncScroll,
   wordGoal,
+  zoomPercent,
+  onChangeZoom,
   topBarHidden,
   onSwitchToBasic,
   onOpenSettings,
@@ -62,6 +72,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     filePath ? 'reopen' : 'save'
   );
   const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
+  const [zoomDraft, setZoomDraft] = useState(String(zoomPercent));
+  const zoomPopoverRef = useRef<HTMLDivElement | null>(null);
+  const zoomInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!filePath && encMenuAction === 'reopen') {
@@ -88,6 +103,50 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [encMenuOpen]);
+
+  useEffect(() => {
+    setZoomDraft(String(zoomPercent));
+  }, [zoomPercent]);
+
+  useEffect(() => {
+    if (!zoomMenuOpen) return;
+    setZoomDraft(String(zoomPercent));
+    const focusTimer = window.setTimeout(() => {
+      zoomInputRef.current?.focus();
+      zoomInputRef.current?.select();
+    }, 0);
+    const onPointerDown = (e: MouseEvent) => {
+      if (zoomPopoverRef.current && !zoomPopoverRef.current.contains(e.target as Node)) {
+        setZoomMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setZoomMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [zoomMenuOpen, zoomPercent]);
+
+  const applyZoomDraft = () => {
+    const parsed = Number(zoomDraft.trim());
+    if (!Number.isFinite(parsed) || zoomDraft.trim() === '') {
+      setZoomDraft(String(zoomPercent));
+      zoomInputRef.current?.focus();
+      zoomInputRef.current?.select();
+      return;
+    }
+    const clamped = clampZoomValue(parsed);
+    onChangeZoom(clamped);
+    setZoomDraft(String(clamped));
+    setZoomMenuOpen(false);
+  };
 
   return (
     <footer className="statusbar">
@@ -252,6 +311,112 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         >
           {t.status.line} {cursorLine}, {t.status.col} {cursorCol}
         </button>
+
+        <div className="status-zoom-wrap" ref={zoomPopoverRef}>
+          <button
+            type="button"
+            className={`status-btn status-zoom-btn ${zoomMenuOpen ? 'is-open' : ''}`}
+            onClick={() => {
+              setEncMenuOpen(false);
+              setZoomMenuOpen((v) => !v);
+            }}
+            title={t.status.zoomTitle}
+            aria-label={t.status.zoomTitle}
+          >
+            {zoomPercent}%
+          </button>
+
+          {zoomMenuOpen && (
+            <div className="status-zoom-popover" role="dialog" aria-label={t.status.zoomTitle}>
+              <div className="status-zoom-header">
+                <span className="status-zoom-title">{t.status.zoomTitle}</span>
+                <button
+                  type="button"
+                  className="status-zoom-reset-btn"
+                  disabled={zoomPercent === 100}
+                  onClick={() => {
+                    onChangeZoom(100);
+                    setZoomDraft('100');
+                    setZoomMenuOpen(false);
+                  }}
+                >
+                  {t.status.zoomResetBtn}
+                </button>
+              </div>
+
+              <form
+                className="status-zoom-form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  applyZoomDraft();
+                }}
+              >
+                <div className="status-zoom-stepper">
+                  <button
+                    type="button"
+                    className="status-zoom-step-btn"
+                    title={t.actions.zoomOut}
+                    onClick={() => {
+                      const next = clampZoomValue(zoomPercent - 10);
+                      onChangeZoom(next);
+                      setZoomDraft(String(next));
+                    }}
+                  >
+                    <Minus size={12} />
+                  </button>
+                  <div className="status-zoom-input-wrap">
+                    <input
+                      ref={zoomInputRef}
+                      type="number"
+                      min={25}
+                      max={400}
+                      step={5}
+                      className="status-zoom-input"
+                      aria-label={t.status.zoomInputLabel}
+                      value={zoomDraft}
+                      onChange={(e) => setZoomDraft(e.target.value)}
+                    />
+                    <span className="status-zoom-unit">%</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="status-zoom-step-btn"
+                    title={t.actions.zoomIn}
+                    onClick={() => {
+                      const next = clampZoomValue(zoomPercent + 10);
+                      onChangeZoom(next);
+                      setZoomDraft(String(next));
+                    }}
+                  >
+                    <Plus size={12} />
+                  </button>
+                </div>
+                <button type="submit" className="status-zoom-apply-btn">
+                  {t.actions.apply}
+                </button>
+              </form>
+
+              <div className="status-zoom-presets">
+                {ZOOM_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={`status-zoom-preset ${zoomPercent === preset ? 'is-current' : ''}`}
+                    onClick={() => {
+                      onChangeZoom(preset);
+                      setZoomDraft(String(preset));
+                      setZoomMenuOpen(false);
+                    }}
+                  >
+                    {preset}%
+                  </button>
+                ))}
+              </div>
+
+              <div className="status-zoom-hint">{t.status.zoomRangeHint}</div>
+            </div>
+          )}
+        </div>
 
         {topBarHidden && (
           <>

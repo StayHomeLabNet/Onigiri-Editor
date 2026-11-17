@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.0.4)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.0.5)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -67,8 +67,9 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 - **Active Line / Block Sync Highlight**: When enabled in Settings, editing in one pane highlights the corresponding block or line in the opposite pane.
 - **Sync Scroll & Typewriter Scroll**: Toggle synchronized scrolling between editor and preview, or keep the active line centered vertically in **Typewriter Scroll** mode.
 
-### Format Toolbar & Rich Content
+### Format Toolbar, Edit/Zoom Controls & Rich Content
 
+- **Edit & Display Zoom**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons directly on the Format Toolbar (also works in Visual Preview), plus a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
 - **Headings & Text Styling**: `H1` / `H2` / `H3`, Bold (`⌘B` / `Ctrl+B`), Italic (`⌘I` / `Ctrl+I`), Strikethrough, Inline Code, and Code Block.
 - **Lists & Structure**: Bullet List, Numbered List, Task List (`- [ ]`), Blockquote (`>`), GFM Table, and Divider (`---`).
 - **Links & Images**:
@@ -169,13 +170,13 @@ Right-click inside the editor to access:
 
 ### Folder Explorer & Sidebar (Advanced Mode)
 
-- **Files Tab**: Open a workspace folder (`⌘⇧O` / `Ctrl+Shift+O`) to browse the file tree, filter by filename, run **Full-Text Search** across the folder, or create a **New Note in Folder**.
+- **Files Tab**: Open a workspace folder (`⌘⇧O` / `Ctrl+Shift+O`) to browse a **collapsible hierarchical folder tree** (with **Collapse All** and auto-refresh), preview workspace images in the **Image Gallery Modal** (with Next/Prev and Markdown insertion), filter by filename, run **Full-Text Search** across the folder, or create a **New Note in Folder**. Switching folders while a dev server is running prompts with **Stop & Switch** / **Disconnect & Switch**.
 - **Outline Tab**: Lists Markdown headings (`#` to `######`); click any heading to jump to it.
 - **Snippets Tab**: Click to insert Markdown templates, tables, Mermaid diagrams, KaTeX blocks, or callouts at the cursor.
 
-### Session Restore, Draft Recovery & Auto-Save
+### Session Restore, Window Geometry, Draft Recovery & Auto-Save
 
-- Automatically saves and restores open tabs, unsaved drafts, cursor positions, and the open workspace folder across restarts (configurable in Settings).
+- Automatically saves and restores open tabs, unsaved drafts, cursor positions, window position/size, and the open workspace folder across restarts (configurable in Settings).
 - **Auto-Save**: Enable **Auto-save modified files to disk** under **Settings → General & View** to save file-backed tabs automatically after 1.5 seconds of inactivity (pauses safely on external file conflicts).
 
 ### External File Change Detection
@@ -238,8 +239,8 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 
 ### Document & Folder Context with Diff Preview
 
-- **Include current document context**: Share the active file with AI for Q&A, proofreading, summarizing, polishing, or translating (with one-click quick prompts).
-- **AI Folder Access (Advanced Mode)** under **Settings → AI & Browser**:
+- **Include current document context**: Share the active file with AI for Q&A, proofreading, summarizing, polishing, or translating (with one-click quick prompts). CLI runs stream live progress updates and provide a **Stop** button to cancel long tasks cleanly.
+- **AI Folder Access (Advanced Mode)** (switchable directly from the AI Chat **Folder Access** pill or **Settings → AI & Browser**):
   - **Disabled**: Active document only
   - **Read-Only**: Reference files inside the open folder
   - **Read + Write (Apply after approval)**: Inspect AI file proposals in a **line-by-line Diff Preview Modal** before writing to the folder
@@ -297,6 +298,7 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 | Go to Line | `⌘ + L` | `Ctrl + L` |
 | Smart Line Copy (no selection) | `⌘ + C` | `Ctrl + C` |
 | Bold / Italic | `⌘ + B` / `⌘ + I` | `Ctrl + B` / `Ctrl + I` |
+| Zoom In / Zoom Out / Reset (`25%`–`400%`) | `⌘ + +` / `⌘ + -` / `⌘ + 0` | `Ctrl + +` / `Ctrl + -` / `Ctrl + 0` |
 | Switch Mode (Simple/Basic/Advanced) | `⌘ + \` | `Ctrl + \` |
 | Toggle Zen Mode | `⌘ + ⇧ + F` | `Ctrl + Shift + F` |
 | Send AI Chat Message | `⌘ + Enter` | `Ctrl + Enter` |
@@ -308,4 +310,4 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 - **Edit**: Undo, Redo, Cut, Copy, Paste, Select All, Find & Replace, Go to Line...
 - **View**: Simple Mode, Basic Mode, Advanced Mode, Show Header Bar, Show Format Toolbar, Command Palette, Options / AI Chat, Live Preview in External Browser, Zen Mode
 - **Window**: Minimize, Close Window
-- **Help**: **Online Manual**, About Onigiri Editor *(on macOS, Settings is also accessible from the App and Help menus)*
+- **Help**: **Online Manual**, About Onigiri Editor *(on macOS, Settings is in the **Onigiri Editor** app menu)*
