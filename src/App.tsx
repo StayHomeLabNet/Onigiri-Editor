@@ -44,7 +44,7 @@ import {
   htmlToMarkdown,
   renderMarkdownToHtml,
 } from './utils/markdown';
-import { resolveEditorLanguageLabel } from './utils/language';
+import { resolveEditorLanguageLabel, resolveEffectiveLanguageId } from './utils/language';
 import { resolveSyntaxColors, syntaxColorsToCssVars, SYNTAX_PRESETS } from './utils/syntaxThemes';
 import {
   appendMacroStep,
@@ -3081,9 +3081,26 @@ export function App() {
     window.addEventListener('mouseup', onUp);
   };
 
+  const detectedLanguageId = useMemo(
+    () =>
+      resolveEffectiveLanguageId({
+        fileName: activeTab.title,
+        filePath: activeTab.filePath,
+        content: activeTab.content,
+        languageOverride: activeTab.languageOverride,
+      }),
+    [activeTab.title, activeTab.filePath, activeTab.content, activeTab.languageOverride]
+  );
+
   const previewKind = useMemo(
-    () => getDocumentPreviewKind(activeTab.title, activeTab.filePath, activeTab.languageOverride),
-    [activeTab.title, activeTab.filePath, activeTab.languageOverride]
+    () =>
+      getDocumentPreviewKind(
+        activeTab.title,
+        activeTab.filePath,
+        activeTab.languageOverride,
+        activeTab.content
+      ),
+    [activeTab.title, activeTab.filePath, activeTab.languageOverride, activeTab.content]
   );
 
   const languageLabel = useMemo(
@@ -3091,9 +3108,10 @@ export function App() {
       resolveEditorLanguageLabel(
         activeTab.title || activeTab.filePath,
         locale,
-        activeTab.languageOverride
+        activeTab.languageOverride,
+        detectedLanguageId
       ),
-    [activeTab.title, activeTab.filePath, locale, activeTab.languageOverride]
+    [activeTab.title, activeTab.filePath, locale, activeTab.languageOverride, detectedLanguageId]
   );
 
   const buildExternalPreviewPayload = useCallback(async () => {
@@ -4649,8 +4667,11 @@ export function App() {
                         docId={activeTab.id}
                         fileName={activeTab.title}
                         languageOverride={activeTab.languageOverride}
+                        detectedLanguageId={detectedLanguageId}
                         value={activeTab.content}
-                        onChange={updateActiveContent}
+                        onChange={(next, sourceDocId) =>
+                          updateTabContentById(sourceDocId || activeTab.id, next)
+                        }
                         onFocusPane={() => handleFocusSplitPane('top')}
                         onCursorChange={(line, col) => {
                           if (activeEditorSlotRef.current !== 'top') return;
@@ -4704,8 +4725,11 @@ export function App() {
                         docId={activeTab.id}
                         fileName={activeTab.title}
                         languageOverride={activeTab.languageOverride}
+                        detectedLanguageId={detectedLanguageId}
                         value={activeTab.content}
-                        onChange={updateActiveContent}
+                        onChange={(next, sourceDocId) =>
+                          updateTabContentById(sourceDocId || activeTab.id, next)
+                        }
                         onFocusPane={() => handleFocusSplitPane('bottom')}
                         onCursorChange={(line, col) => {
                           if (activeEditorSlotRef.current !== 'bottom') return;
@@ -4750,8 +4774,11 @@ export function App() {
                     docId={activeTab.id}
                     fileName={activeTab.title}
                     languageOverride={activeTab.languageOverride}
+                    detectedLanguageId={detectedLanguageId}
                     value={activeTab.content}
-                    onChange={updateActiveContent}
+                    onChange={(next, sourceDocId) =>
+                      updateTabContentById(sourceDocId || activeTab.id, next)
+                    }
                     onFocusPane={() => {
                       activePaneRef.current = 'code';
                       setActivePane('code');
@@ -4912,6 +4939,8 @@ export function App() {
                       t={t}
                       locale={locale}
                       fileName={activeTab.title}
+                      languageOverride={activeTab.languageOverride}
+                      detectedLanguageId={detectedLanguageId}
                       content={activeTab.content}
                       activeLine={activeTab.cursorLine}
                       settings={settings}
@@ -4941,7 +4970,9 @@ export function App() {
                       docPath={activeTab.filePath}
                       theme={theme}
                       settings={settings}
-                      onMarkdownChange={updateActiveContent}
+                      onMarkdownChange={(next, sourceDocId) =>
+                        updateTabContentById(sourceDocId || activeTab.id, next)
+                      }
                       onFocusPane={() => {
                         activePaneRef.current = 'visual';
                         setActivePane('visual');

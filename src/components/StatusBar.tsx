@@ -262,7 +262,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({
               setZoomMenuOpen(false);
               setLangMenuOpen((v) => !v);
             }}
-            title={`${t.status.languageSelectTitle}: ${languageLabel}`}
+            title={
+              languageOverride
+                ? `${t.status.languageSelectTitle}: ${languageLabel}`
+                : `${t.status.languageAuto}: ${languageLabel} — ${t.status.languageSelectTitle}`
+            }
             aria-label={t.status.languageSelectTitle}
           >
             {languageLabel}

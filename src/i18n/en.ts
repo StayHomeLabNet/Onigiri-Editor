@@ -548,7 +548,7 @@ export const en: Translations = {
     macroRecording: 'REC',
     languageLabel: 'Language',
     languageSelectTitle: 'Click to override syntax highlighting language',
-    languageAuto: 'Auto-Detect (by filename)',
+    languageAuto: 'Auto-Detect (filename & content)',
   },
   externalChange: {
     modifiedTitle: 'This file was modified on disk by an external tool (or AI CLI).',

@@ -3,6 +3,7 @@ import { diffLines } from 'diff';
 import { ArrowLeftRight, Columns2, GitCompare, X } from 'lucide-react';
 import type { DocumentTab, EditorSettings, ThemeId } from '../types';
 import type { Translations } from '../i18n/types';
+import { resolveEffectiveLanguageId } from '../utils/language';
 import { EditorPane } from './EditorPane';
 
 interface SideComparePaneProps {
@@ -43,6 +44,17 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
   theme,
   settings,
 }) => {
+  const sideDetectedLanguageId = useMemo(
+    () =>
+      resolveEffectiveLanguageId({
+        fileName: sideTab.title,
+        filePath: sideTab.filePath,
+        content: sideTab.content,
+        languageOverride: sideTab.languageOverride,
+      }),
+    [sideTab.title, sideTab.filePath, sideTab.content, sideTab.languageOverride]
+  );
+
   const diffData = useMemo(() => {
     if (mode !== 'diff') {
       return { lines: [] as DiffDisplayLine[], additions: 0, deletions: 0 };
@@ -148,6 +160,7 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
             docId={`side:${sideTab.id}`}
             fileName={sideTab.title}
             languageOverride={sideTab.languageOverride}
+            detectedLanguageId={sideDetectedLanguageId}
             value={sideTab.content}
             onChange={(nextContent) => onChangeTabContent(sideTab.id, nextContent)}
             onCursorChange={() => {}}

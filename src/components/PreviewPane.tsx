@@ -63,7 +63,7 @@ interface PreviewPaneProps {
   docPath?: string;
   theme: ThemeId;
   settings: EditorSettings;
-  onMarkdownChange: (nextMarkdown: string) => void;
+  onMarkdownChange: (nextMarkdown: string, sourceDocId?: string) => void;
   onFocusPane?: () => void;
   onScrollRatio?: (ratio: number) => void;
   onCopyNotify: (kind: 'code' | 'svg') => void;
@@ -776,6 +776,8 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
     const frontmatterBlockRef = useRef<string>('');
     frontmatterBlockRef.current = splitFrontmatter(markdown).frontmatterBlock;
 
+    const currentDocIdRef = useRef<string>(docId);
+    currentDocIdRef.current = docId;
     const lastDocIdRef = useRef<string>(docId);
     const lastEmittedMdRef = useRef<string>('');
     const lastSyncedMdRef = useRef<string>('');
@@ -851,12 +853,13 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       );
     }, []);
 
-    const emitMarkdownFromEditor = useCallback((html: string) => {
+    const emitMarkdownFromEditor = useCallback((html: string, expectedDocId: string) => {
+      if (expectedDocId !== currentDocIdRef.current) return;
       const nextMd = editableHtmlToMarkdown(html, frontmatterBlockRef.current);
       if (nextMd === lastSyncedMdRef.current) return;
       lastEmittedMdRef.current = nextMd;
       lastSyncedMdRef.current = nextMd;
-      callbacksRef.current.onMarkdownChange(nextMd);
+      callbacksRef.current.onMarkdownChange(nextMd, expectedDocId);
     }, []);
 
     const editor = useEditor({
@@ -907,9 +910,10 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
           },
           compositionend: (view) => {
             isComposingRef.current = false;
+            const scheduledDocId = currentDocIdRef.current;
             window.setTimeout(() => {
-              if (!suppressingUpdateRef.current) {
-                emitMarkdownFromEditor(view.dom.innerHTML);
+              if (!suppressingUpdateRef.current && scheduledDocId === currentDocIdRef.current) {
+                emitMarkdownFromEditor(view.dom.innerHTML, scheduledDocId);
               }
             }, 0);
             return false;
@@ -946,9 +950,13 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       onUpdate: ({ editor: ed }) => {
         if (suppressingUpdateRef.current || isComposingRef.current) return;
         reportActiveBlockLines(ed);
+        const scheduledDocId = currentDocIdRef.current;
         if (emitTimerRef.current) window.clearTimeout(emitTimerRef.current);
         emitTimerRef.current = window.setTimeout(() => {
-          emitMarkdownFromEditor(ed.getHTML());
+          emitTimerRef.current = null;
+          if (!suppressingUpdateRef.current && scheduledDocId === currentDocIdRef.current) {
+            emitMarkdownFromEditor(ed.getHTML(), scheduledDocId);
+          }
         }, 70);
       },
     });
@@ -958,10 +966,13 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       applyPreviewBlockHighlight();
     }, [activePane, editorSyncLine, blockRanges, settings.activeLineSyncHighlight, applyPreviewBlockHighlight]);
 
-    // Flush pending visual update on unmount or tab change
+    // Clear pending visual update timer on unmount
     useEffect(() => {
       return () => {
-        if (emitTimerRef.current) window.clearTimeout(emitTimerRef.current);
+        if (emitTimerRef.current) {
+          window.clearTimeout(emitTimerRef.current);
+          emitTimerRef.current = null;
+        }
       };
     }, []);
 
@@ -973,6 +984,12 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
         lastDocIdRef.current = docId;
         lastEmittedMdRef.current = '';
         lastSyncedMdRef.current = '';
+        isComposingRef.current = false;
+        suppressingUpdateRef.current = true;
+        if (emitTimerRef.current) {
+          window.clearTimeout(emitTimerRef.current);
+          emitTimerRef.current = null;
+        }
       }
 
       if (!docSwitched && markdown === lastEmittedMdRef.current) {
@@ -983,13 +1000,16 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       }
 
       let cancelled = false;
+      const targetDocId = docId;
       const delay = docSwitched || lastSyncedMdRef.current === '' ? 0 : 95;
 
       const timer = window.setTimeout(async () => {
         try {
           const { body } = splitFrontmatter(markdown);
           const html = await renderMarkdownToEditableHtml(body);
-          if (cancelled || !editor || editor.isDestroyed) return;
+          if (cancelled || !editor || editor.isDestroyed || targetDocId !== currentDocIdRef.current) {
+            return;
+          }
           // If the user is actively composing IME in preview, defer sync
           if (!docSwitched && isComposingRef.current) return;
 
@@ -1000,8 +1020,10 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
             scrollRef.current.scrollTop = 0;
           }
           window.setTimeout(() => {
-            suppressingUpdateRef.current = false;
-            applyPreviewBlockHighlight();
+            if (targetDocId === currentDocIdRef.current) {
+              suppressingUpdateRef.current = false;
+              applyPreviewBlockHighlight();
+            }
           }, 0);
         } catch (err) {
           suppressingUpdateRef.current = false;

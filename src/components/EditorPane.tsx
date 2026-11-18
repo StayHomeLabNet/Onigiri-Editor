@@ -241,8 +241,9 @@ interface EditorPaneProps {
   docId: string;
   fileName?: string;
   languageOverride?: string | null;
+  detectedLanguageId?: string | null;
   value: string;
-  onChange: (nextValue: string) => void;
+  onChange: (nextValue: string, sourceDocId?: string) => void;
   onCursorChange: (line: number, col: number) => void;
   onFocusPane?: () => void;
   onScrollRatio?: (ratio: number) => void;
@@ -897,6 +898,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       docId,
       fileName,
       languageOverride,
+      detectedLanguageId,
       value,
       onChange,
       onCursorChange,
@@ -942,6 +944,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       t,
       fileName,
       languageOverride,
+      detectedLanguageId,
       onChange,
       onCursorChange,
       onFocusPane,
@@ -961,6 +964,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       t,
       fileName,
       languageOverride,
+      detectedLanguageId,
       onChange,
       onCursorChange,
       onFocusPane,
@@ -982,6 +986,8 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     const suppressingMacroRecordRef = useRef(false);
     const runningCmCommandRef = useRef(false);
     const composingBaseRef = useRef<{ prefix: string; suffix: string } | null>(null);
+    const currentDocIdRef = useRef(docId);
+    currentDocIdRef.current = docId;
     const lastDocIdRef = useRef(docId);
 
     const recordMacroStep = useCallback((step: MacroStep) => {
@@ -1296,8 +1302,10 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
               compositionend() {
                 const base = composingBaseRef.current;
                 composingBaseRef.current = null;
+                const scheduledDocId = currentDocIdRef.current;
                 if (base && callbacksRef.current.isRecordingMacro && !suppressingMacroRecordRef.current) {
                   window.setTimeout(() => {
+                    if (scheduledDocId !== currentDocIdRef.current) return;
                     const currentView = viewRef.current;
                     if (!currentView) return;
                     const docStr = currentView.state.doc.toString();
@@ -1421,7 +1429,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             EditorView.updateListener.of((update) => {
               if (update.docChanged && !suppressingExternalRef.current) {
                 const next = update.state.doc.toString();
-                callbacksRef.current.onChange(next);
+                callbacksRef.current.onChange(next, currentDocIdRef.current);
               }
               if (
                 update.docChanged &&
@@ -1557,13 +1565,14 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       });
     }, [syncHighlightRange, settings.activeLineSyncHighlight]);
 
-    // Dynamic language mode based on active filename extension or manual languageOverride
+    // Dynamic language mode based on active filename extension, auto-detection, or manual languageOverride
     useEffect(() => {
       const view = viewRef.current;
       if (!view) return;
       let cancelled = false;
+      const effectiveOverride = languageOverride ?? detectedLanguageId ?? null;
 
-      if (isMarkdownFilename(fileName, languageOverride)) {
+      if (isMarkdownFilename(fileName, effectiveOverride)) {
         view.dispatch({
           effects: langComp.current.reconfigure(
             markdown({ base: markdownLanguage, codeLanguages: languages })
@@ -1572,7 +1581,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         return;
       }
 
-      const desc = resolveEditorLanguageDescription(fileName, languageOverride);
+      const desc = resolveEditorLanguageDescription(fileName, languageOverride, detectedLanguageId);
       if (!desc) {
         view.dispatch({
           effects: langComp.current.reconfigure([]),
@@ -1590,7 +1599,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       return () => {
         cancelled = true;
       };
-    }, [fileName, languageOverride]);
+    }, [fileName, languageOverride, detectedLanguageId]);
 
     // Sync external value changes (tab switches, split sibling edits, AI cleanup, checkbox toggle, snapshot restore)
     useEffect(() => {
@@ -1600,6 +1609,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       const tabChanged = lastDocIdRef.current !== docId;
       if (tabChanged) {
         lastDocIdRef.current = docId;
+        composingBaseRef.current = null;
       }
       if (current === value) {
         if (tabChanged) {
@@ -1972,7 +1982,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           case 'insertComment': {
             const effName = resolveEffectiveFilename(
               callbacksRef.current.fileName,
-              callbacksRef.current.languageOverride
+              callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
             );
             applyPerLineTransform(view, (line) => insertCommentLine(line, effName));
             if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
@@ -1981,7 +1991,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           case 'removeComment': {
             const effName = resolveEffectiveFilename(
               callbacksRef.current.fileName,
-              callbacksRef.current.languageOverride
+              callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
             );
             applyPerLineTransform(view, (line) => removeCommentLine(line, effName));
             if (shouldRecord) recordMacroStep({ type: 'contextAction', action });

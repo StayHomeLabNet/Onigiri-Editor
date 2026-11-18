@@ -14,6 +14,7 @@ import yaml from 'js-yaml';
 import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import type { AiCleanOptions, DocumentStats, HeadingItem, ThemeId } from '../types';
+import { resolveEffectiveLanguageId } from './language';
 
 const CALLOUT_TYPES = new Set(['note', 'tip', 'important', 'warning', 'caution']);
 
@@ -837,15 +838,27 @@ export type DocumentPreviewKind = 'markdown' | 'webpage' | 'code';
 export function getDocumentPreviewKind(
   fileName?: string,
   filePath?: string,
-  languageOverride?: string | null
+  languageOverride?: string | null,
+  content?: string
 ): DocumentPreviewKind {
   if (languageOverride) {
     if (languageOverride === 'markdown') return 'markdown';
     if (languageOverride === 'html') return 'webpage';
     return 'code';
   }
+  const effectiveLangId = resolveEffectiveLanguageId({
+    fileName,
+    filePath,
+    content,
+    languageOverride: null,
+  });
   const target = (filePath || fileName || '').trim().toLowerCase();
   const base = target.split(/[/\\]/).pop() || '';
+  if (effectiveLangId === 'markdown') return 'markdown';
+  if (effectiveLangId === 'html') return 'webpage';
+  if (/\.svg$/i.test(base)) return 'webpage';
+  if (effectiveLangId) return 'code';
+
   const dotIdx = base.lastIndexOf('.');
   if (dotIdx <= 0 || dotIdx === base.length - 1) return 'markdown';
   const ext = base.slice(dotIdx + 1);

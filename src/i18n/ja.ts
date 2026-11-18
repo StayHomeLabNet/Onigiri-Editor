@@ -548,7 +548,7 @@ export const ja: Translations = {
     macroRecording: 'マクロ記録中',
     languageLabel: '言語',
     languageSelectTitle: 'クリックしてシンタックスハイライト言語を切り替え',
-    languageAuto: '自動判定（ファイル名から判別）',
+    languageAuto: '自動判定（ファイル名・内容から判別）',
   },
   externalChange: {
     modifiedTitle: 'このファイルは外部ツール（または AI CLI）によってディスク上で更新されました。',

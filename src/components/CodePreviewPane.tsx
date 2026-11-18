@@ -3,6 +3,7 @@ import { ClipboardCopy, ExternalLink, Globe, Info, Loader2, Play, Square } from 
 import { all, createLowlight } from 'lowlight';
 import type { Translations } from '../i18n/types';
 import type { EditorSettings, Locale, ProjectInfo, ProjectServerStatus } from '../types';
+import { resolveEditorLanguageLabel, resolveHljsLanguage } from '../utils/language';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 
 const lowlight = createLowlight(all);
@@ -11,6 +12,8 @@ interface CodePreviewPaneProps {
   t: Translations;
   locale: Locale;
   fileName: string;
+  languageOverride?: string | null;
+  detectedLanguageId?: string | null;
   content: string;
   activeLine: number;
   settings: EditorSettings;
@@ -29,50 +32,6 @@ interface CodePreviewPaneProps {
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
   onRecheckProjectEnv?: () => void;
 }
-
-const EXT_TO_HLJS: Record<string, string> = {
-  php: 'php',
-  phtml: 'php',
-  js: 'javascript',
-  jsx: 'javascript',
-  mjs: 'javascript',
-  cjs: 'javascript',
-  ts: 'typescript',
-  tsx: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  py: 'python',
-  rs: 'rust',
-  go: 'go',
-  java: 'java',
-  kt: 'kotlin',
-  swift: 'swift',
-  rb: 'ruby',
-  c: 'c',
-  h: 'c',
-  cpp: 'cpp',
-  hpp: 'cpp',
-  cs: 'csharp',
-  css: 'css',
-  scss: 'scss',
-  sass: 'scss',
-  less: 'less',
-  json: 'json',
-  jsonc: 'json',
-  yaml: 'yaml',
-  yml: 'yaml',
-  toml: 'ini',
-  ini: 'ini',
-  conf: 'ini',
-  env: 'ini',
-  xml: 'xml',
-  sql: 'sql',
-  sh: 'bash',
-  bash: 'bash',
-  zsh: 'bash',
-  vue: 'xml',
-  svelte: 'xml',
-};
 
 type HastNode = {
   type: string;
@@ -98,10 +57,64 @@ function renderHast(node: HastNode, keyPrefix: string): React.ReactNode {
   return null;
 }
 
+function splitHastByLines(root: HastNode): HastNode[][] {
+  const lines: HastNode[][] = [[]];
+  const activeClasses: string[][] = [];
+
+  const pushText = (text: string) => {
+    if (!text) return;
+    let node: HastNode = { type: 'text', value: text };
+    for (let i = activeClasses.length - 1; i >= 0; i--) {
+      node = {
+        type: 'element',
+        tagName: 'span',
+        properties: { className: activeClasses[i] },
+        children: [node],
+      };
+    }
+    lines[lines.length - 1].push(node);
+  };
+
+  const walk = (node: HastNode) => {
+    if (node.type === 'text') {
+      const val = node.value || '';
+      const parts = val.split('\n');
+      for (let i = 0; i < parts.length; i++) {
+        if (i > 0) {
+          lines.push([]);
+        }
+        if (parts[i]) {
+          pushText(parts[i]);
+        }
+      }
+      return;
+    }
+    const cls = node.type === 'element' ? node.properties?.className : undefined;
+    if (cls && cls.length > 0) {
+      activeClasses.push(cls);
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) {
+        walk(child);
+      }
+    }
+    if (cls && cls.length > 0) {
+      activeClasses.pop();
+    }
+  };
+
+  walk(root);
+  return lines;
+}
+
+const MAX_HIGHLIGHT_CHARS = 120_000;
+
 export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   t,
   locale,
   fileName,
+  languageOverride,
+  detectedLanguageId,
   content,
   activeLine,
   settings,
@@ -128,9 +141,17 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
     return idx >= 0 ? base.slice(idx + 1) : '';
   }, [fileName]);
 
-  const isBlade = fileName.toLowerCase().endsWith('.blade.php');
-  const lang = EXT_TO_HLJS[ext] || '';
-  const isPhp = ext === 'php' || ext === 'phtml';
+  const effectiveLangId = languageOverride ?? detectedLanguageId ?? null;
+  const isBlade = fileName.toLowerCase().endsWith('.blade.php') && !languageOverride;
+  const hljsLang = useMemo(
+    () => resolveHljsLanguage(effectiveLangId, fileName),
+    [effectiveLangId, fileName]
+  );
+  const isPlainText =
+    effectiveLangId === 'plaintext' ||
+    (hljsLang === null && (ext === 'txt' || ext === 'text' || ext === 'log'));
+  const isPhp =
+    effectiveLangId === 'php' || (!effectiveLangId && (ext === 'php' || ext === 'phtml'));
   const hasProjectServerOption = Boolean(
     projectInfo && projectInfo.kind !== 'none' && projectInfo.devCommandLabel
   );
@@ -141,22 +162,53 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
 
   const lines = useMemo(() => content.split(/\r?\n/), [content]);
 
-  const highlightedLines = useMemo(() => {
-    return lines.map((lineText) => {
-      if (!lineText) return null;
-      try {
-        if (lang && lowlight.registered(lang)) {
-          return lowlight.highlight(lang, lineText) as unknown as HastNode;
-        }
-        if (ext !== 'txt') {
-          return lowlight.highlightAuto(lineText) as unknown as HastNode;
-        }
-      } catch {
-        // fallback to plain text
+  const { highlightedLines, autoDetectedLang } = useMemo(() => {
+    if (!content || isPlainText) {
+      return { highlightedLines: null as HastNode[][] | null, autoDetectedLang: null as string | null };
+    }
+    const normalized = lines.join('\n');
+    const targetText =
+      normalized.length > MAX_HIGHLIGHT_CHARS
+        ? normalized.slice(0, MAX_HIGHLIGHT_CHARS)
+        : normalized;
+    try {
+      if (hljsLang && lowlight.registered(hljsLang)) {
+        const root = lowlight.highlight(hljsLang, targetText) as unknown as HastNode;
+        return { highlightedLines: splitHastByLines(root), autoDetectedLang: null };
       }
-      return null;
-    });
-  }, [lines, lang, ext]);
+      if (!effectiveLangId && targetText.trim()) {
+        const sample = targetText.length > 8000 ? targetText.slice(0, 8000) : targetText;
+        const autoRes = lowlight.highlightAuto(sample) as unknown as HastNode & {
+          data?: { language?: string };
+        };
+        const detected = autoRes.data?.language || null;
+        if (detected && targetText.length > 8000 && lowlight.registered(detected)) {
+          const fullRoot = lowlight.highlight(detected, targetText) as unknown as HastNode;
+          return { highlightedLines: splitHastByLines(fullRoot), autoDetectedLang: detected };
+        }
+        return { highlightedLines: splitHastByLines(autoRes), autoDetectedLang: detected };
+      }
+    } catch {
+      // fallback to plain text
+    }
+    return { highlightedLines: null as HastNode[][] | null, autoDetectedLang: null as string | null };
+  }, [content, isPlainText, lines, hljsLang, effectiveLangId]);
+
+  const badgeTitle = useMemo(() => {
+    if (isBlade) return 'BLADE / PHP';
+    if (effectiveLangId) {
+      return resolveEditorLanguageLabel(
+        fileName,
+        locale,
+        languageOverride,
+        detectedLanguageId
+      ).toUpperCase();
+    }
+    if (hljsLang) return hljsLang.toUpperCase();
+    if (autoDetectedLang) return autoDetectedLang.toUpperCase();
+    if (ext) return ext.toUpperCase();
+    return 'CODE';
+  }, [isBlade, effectiveLangId, fileName, locale, languageOverride, detectedLanguageId, hljsLang, autoDetectedLang, ext]);
 
   useEffect(() => {
     if (!settings.activeLineSyncHighlight) return;
@@ -167,7 +219,7 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
     <div className="code-preview-pane">
       <div className="webpage-preview-bar">
         <span className="webpage-preview-badge">
-          {isBlade ? 'BLADE / PHP' : lang ? lang.toUpperCase() : ext ? ext.toUpperCase() : 'CODE'} — {t.browser.codePreviewLabel}
+          {badgeTitle} — {t.browser.codePreviewLabel}
         </span>
         <div className="webpage-preview-actions">
           <button
@@ -301,7 +353,7 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
           {lines.map((lineText, idx) => {
             const lineNum = idx + 1;
             const isSyncActive = settings.activeLineSyncHighlight && lineNum === activeLine;
-            const ast = highlightedLines[idx];
+            const lineNodes = highlightedLines?.[idx];
             return (
               <div
                 key={lineNum}
@@ -310,7 +362,9 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
               >
                 <span className="code-preview-ln">{lineNum}</span>
                 <code className="code-preview-code">
-                  {ast ? renderHast(ast, `l-${lineNum}`) : lineText || ' '}
+                  {lineNodes && lineNodes.length > 0
+                    ? lineNodes.map((node, nIdx) => renderHast(node, `l-${lineNum}-${nIdx}`))
+                    : lineText || ' '}
                 </code>
               </div>
             );
