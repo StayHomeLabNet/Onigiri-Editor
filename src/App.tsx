@@ -44,7 +44,16 @@ import {
   htmlToMarkdown,
   renderMarkdownToHtml,
 } from './utils/markdown';
+import { resolveEditorLanguageLabel } from './utils/language';
 import { resolveSyntaxColors, syntaxColorsToCssVars, SYNTAX_PRESETS } from './utils/syntaxThemes';
+import {
+  appendMacroStep,
+  isRecordableToolbarAction,
+  loadSavedMacroSteps,
+  MAX_MACRO_STEPS,
+  saveMacroSteps,
+  type MacroStep,
+} from './utils/macro';
 import {
   assistProjectSetup,
   browserClose,
@@ -52,6 +61,9 @@ import {
   browserSetBounds,
   checkFilesSync,
   createFileInDir,
+  createWorkspaceFolder,
+  deleteWorkspaceEntry,
+  duplicateWorkspaceFile,
   formatShortcut,
   getOsLocale,
   getProjectDevServerStatus,
@@ -63,6 +75,9 @@ import {
   openMarkdownFileDialog,
   readFileByPath,
   rebuildAppMenu,
+  renameWorkspaceEntry,
+  replaceInWorkspace,
+  revealInFileManager,
   saveExportFile,
   saveImageAsset,
   saveMarkdownFile,
@@ -88,6 +103,7 @@ import { PreviewPane, type PreviewHandle } from './components/PreviewPane';
 import { WebPagePreviewPane } from './components/WebPagePreviewPane';
 import { CodePreviewPane } from './components/CodePreviewPane';
 import { RightBrowserPane } from './components/RightBrowserPane';
+import { SideComparePane } from './components/SideComparePane';
 import { type ProjectSetupActionParams } from './components/ProjectSetupCard';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { FindReplaceBar, type FindReplaceBarHandle } from './components/FindReplaceBar';
@@ -98,6 +114,7 @@ import { ImageModal } from './components/ImageModal';
 import { SettingsModal } from './components/SettingsModal';
 import { EncodingModal, type EncodingModalMode } from './components/EncodingModal';
 import { GoToLineModal } from './components/GoToLineModal';
+import { InlineAiEditModal } from './components/InlineAiEditModal';
 import {
   FolderSwitchGuardModal,
   type FolderSwitchGuardMode,
@@ -109,10 +126,28 @@ import {
 } from './components/AiDiffPreviewModal';
 
 const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
+const RECENT_FILES_KEY = 'onigiri-markdown.recentFiles.v1';
+const RECENT_FOLDERS_KEY = 'onigiri-markdown.recentFolders.v1';
+const MAX_RECENT_FILES = 12;
+const MAX_RECENT_FOLDERS = 10;
 const ONLINE_MANUAL_URL_EN =
   'https://github.com/StayHomeLabNet/Onigiri-Editor/blob/main/doc/README.md';
 const ONLINE_MANUAL_URL_JA =
   'https://github.com/StayHomeLabNet/Onigiri-Editor/blob/main/doc/README.ja.md';
+
+function loadStringList(key: string, maxItems: number): string[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .slice(0, maxItems);
+  } catch {
+    return [];
+  }
+}
 
 interface PersistedTabRecord {
   id: string;
@@ -122,6 +157,8 @@ interface PersistedTabRecord {
   savedEol?: '\n' | '\r\n';
   encoding?: TextEncodingId;
   savedEncoding?: TextEncodingId;
+  languageOverride?: string | null;
+  pinned?: boolean;
   dirty: boolean;
   content?: string;
   savedContent?: string;
@@ -154,6 +191,9 @@ const DEFAULT_SETTINGS: EditorSettings = {
   showNewlineSymbols: false,
   showWhitespaceSymbols: false,
   bracketMatchingEnabled: true,
+  codeFoldingEnabled: true,
+  highlightSelectionMatches: true,
+  autoCloseBrackets: true,
   showStatusBar: true,
   defaultNewFileEncoding: 'utf-8',
   defaultNewFileEol: '\n',
@@ -295,6 +335,8 @@ function buildInitialSessionState(
               savedEol: rec.savedEol || eol,
               encoding,
               savedEncoding: rec.savedEncoding || encoding,
+              languageOverride: rec.languageOverride ?? null,
+              pinned: Boolean(rec.pinned),
               content,
               savedContent,
               dirty: Boolean(rec.dirty),
@@ -385,6 +427,26 @@ export function App() {
 
   const [tabs, setTabs] = useState<DocumentTab[]>(() => initialSession.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(() => initialSession.activeTabId);
+  const [sideTabId, setSideTabId] = useState<string | null>(null);
+  const [sidePaneMode, setSidePaneMode] = useState<'edit' | 'diff'>('edit');
+
+  const [recentFiles, setRecentFiles] = useState<string[]>(() =>
+    loadStringList(RECENT_FILES_KEY, MAX_RECENT_FILES)
+  );
+  const [recentFolders, setRecentFolders] = useState<string[]>(() =>
+    loadStringList(RECENT_FOLDERS_KEY, MAX_RECENT_FOLDERS)
+  );
+  const recentFilesRef = useRef<string[]>(recentFiles);
+  recentFilesRef.current = recentFiles;
+  const recentFoldersRef = useRef<string[]>(recentFolders);
+  recentFoldersRef.current = recentFolders;
+
+  const [inlineAiState, setInlineAiState] = useState<{
+    selectedText: string;
+    from: number;
+    to: number;
+  } | null>(null);
+  const [printMode, setPrintMode] = useState<'preview' | 'source'>('preview');
 
   const [showSidebar, setShowSidebar] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('outline');
@@ -437,12 +499,61 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
 
-  const editorRef = useRef<EditorHandle | null>(null);
+  const [editorSplitVertical, setEditorSplitVertical] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('onigiri-markdown.editorSplitVertical') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [editorSplitRatio, setEditorSplitRatio] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('onigiri-markdown.editorSplitRatio'));
+      return Number.isFinite(v) && v >= 0.15 && v <= 0.85 ? v : 0.5;
+    } catch {
+      return 0.5;
+    }
+  });
+  const [activeEditorSlot, setActiveEditorSlot] = useState<'top' | 'bottom'>('top');
+  const activeEditorSlotRef = useRef<'top' | 'bottom'>('top');
+  const editorSplitVerticalRef = useRef(editorSplitVertical);
+  editorSplitVerticalRef.current = editorSplitVertical;
+
+  const topEditorRef = useRef<EditorHandle | null>(null);
+  const bottomEditorRef = useRef<EditorHandle | null>(null);
+  const editorPaneRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useMemo(
+    () => ({
+      get current(): EditorHandle | null {
+        if (editorSplitVerticalRef.current && activeEditorSlotRef.current === 'bottom') {
+          return bottomEditorRef.current ?? topEditorRef.current;
+        }
+        return topEditorRef.current;
+      },
+    }),
+    []
+  );
   const previewRef = useRef<PreviewHandle | null>(null);
   const findBarRef = useRef<FindReplaceBarHandle | null>(null);
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollSyncLock = useRef<'editor' | 'preview' | null>(null);
   const activePaneRef = useRef<'code' | 'visual'>('code');
+
+  const [macroSteps, setMacroSteps] = useState<MacroStep[]>(() => loadSavedMacroSteps());
+  const [recordingMacroSteps, setRecordingMacroSteps] = useState<MacroStep[]>([]);
+  const [isRecordingMacro, setIsRecordingMacro] = useState(false);
+  const [isPlayingMacro, setIsPlayingMacro] = useState(false);
+
+  const isRecordingMacroRef = useRef(false);
+  isRecordingMacroRef.current = isRecordingMacro;
+  const isPlayingMacroRef = useRef(false);
+  isPlayingMacroRef.current = isPlayingMacro;
+  const recordingMacroStepsRef = useRef<MacroStep[]>([]);
+  const macroStepsRef = useRef<MacroStep[]>(macroSteps);
+  macroStepsRef.current = macroSteps;
+  const executeToolbarActionRef = useRef<(action: string, fromMacro?: boolean) => Promise<void>>(
+    async () => {}
+  );
 
   const tabsRef = useRef<DocumentTab[]>(tabs);
   tabsRef.current = tabs;
@@ -498,6 +609,57 @@ export function App() {
     setToast(msg);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  const sideTab = useMemo(
+    () => (sideTabId ? tabs.find((tab) => tab.id === sideTabId) || null : null),
+    [tabs, sideTabId]
+  );
+
+  useEffect(() => {
+    if (sideTabId && !tabs.some((tab) => tab.id === sideTabId)) {
+      setSideTabId(null);
+    }
+  }, [tabs, sideTabId]);
+
+  const pushRecentFile = useCallback((filePath?: string | null) => {
+    if (!filePath || !filePath.trim()) return;
+    setRecentFiles((prev) => {
+      const next = [filePath, ...prev.filter((p) => p !== filePath)].slice(0, MAX_RECENT_FILES);
+      try {
+        localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const pushRecentFolder = useCallback((folderPath?: string | null) => {
+    if (!folderPath || !folderPath.trim()) return;
+    setRecentFolders((prev) => {
+      const next = [folderPath, ...prev.filter((p) => p !== folderPath)].slice(
+        0,
+        MAX_RECENT_FOLDERS
+      );
+      try {
+        localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearRecent = useCallback(() => {
+    setRecentFiles([]);
+    setRecentFolders([]);
+    try {
+      localStorage.removeItem(RECENT_FILES_KEY);
+      localStorage.removeItem(RECENT_FOLDERS_KEY);
+    } catch {
+      // ignore
+    }
   }, []);
 
   const setLocale = useCallback((next: React.SetStateAction<Locale>) => {
@@ -565,7 +727,81 @@ export function App() {
     [layout]
   );
 
-  // Sync native menu bar on locale or bar-visibility change
+  const handleFocusSplitPane = useCallback((slot: 'top' | 'bottom') => {
+    activePaneRef.current = 'code';
+    setActivePane('code');
+    activeEditorSlotRef.current = slot;
+    setActiveEditorSlot(slot);
+    const handle = slot === 'bottom' ? bottomEditorRef.current : topEditorRef.current;
+    if (handle) {
+      const pos = handle.getCursorPosition();
+      setTabs((prev) =>
+        prev.map((tb) =>
+          tb.id === activeTabIdRef.current && (tb.cursorLine !== pos.line || tb.cursorCol !== pos.col)
+            ? { ...tb, cursorLine: pos.line, cursorCol: pos.col }
+            : tb
+        )
+      );
+    }
+  }, []);
+
+  const handleToggleEditorSplit = useCallback(() => {
+    setEditorSplitVertical((prev) => {
+      const next = !prev;
+      if (next) {
+        setLayout((cur) => (cur === 'preview' ? 'split' : cur));
+      } else {
+        activeEditorSlotRef.current = 'top';
+        setActiveEditorSlot('top');
+        requestAnimationFrame(() => {
+          const handle = topEditorRef.current;
+          if (handle) {
+            handle.focus();
+            const pos = handle.getCursorPosition();
+            setTabs((prevTabs) =>
+              prevTabs.map((tb) =>
+                tb.id === activeTabIdRef.current
+                  ? { ...tb, cursorLine: pos.line, cursorCol: pos.col }
+                  : tb
+              )
+            );
+          }
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  const handleFocusOtherSplitPane = useCallback(() => {
+    if (!editorSplitVerticalRef.current) return;
+    const nextSlot: 'top' | 'bottom' =
+      activeEditorSlotRef.current === 'bottom' ? 'top' : 'bottom';
+    handleFocusSplitPane(nextSlot);
+    requestAnimationFrame(() => {
+      const target = nextSlot === 'bottom' ? bottomEditorRef.current : topEditorRef.current;
+      target?.focus();
+    });
+  }, [handleFocusSplitPane]);
+
+  const startEditorSplitDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const pane = editorPaneRef.current;
+    if (!pane) return;
+    const onMove = (ev: MouseEvent) => {
+      const rect = pane.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const raw = (ev.clientY - rect.top) / rect.height;
+      setEditorSplitRatio(Math.max(0.15, Math.min(0.85, raw)));
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
+  // Sync native menu bar on locale, bar-visibility, editor-split, or recent history change
   useEffect(() => {
     if (hasSavedLocaleOnStartRef.current) {
       localStorage.setItem('onigiri-markdown.locale', locale);
@@ -573,8 +809,33 @@ export function App() {
     rebuildAppMenu(locale, {
       showTopBar: isTopBarVisible,
       showFormatToolbar: isFormatToolbarVisible,
+      editorSplit: editorSplitVertical,
+      recentFiles,
+      recentFolders,
     });
-  }, [locale, isTopBarVisible, isFormatToolbarVisible]);
+  }, [locale, isTopBarVisible, isFormatToolbarVisible, editorSplitVertical, recentFiles, recentFolders]);
+
+  useEffect(() => {
+    const onAfterPrint = () => setPrintMode('preview');
+    window.addEventListener('afterprint', onAfterPrint);
+    return () => window.removeEventListener('afterprint', onAfterPrint);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('onigiri-markdown.editorSplitVertical', String(editorSplitVertical));
+    } catch {
+      // ignore
+    }
+  }, [editorSplitVertical]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('onigiri-markdown.editorSplitRatio', String(editorSplitRatio));
+    } catch {
+      // ignore
+    }
+  }, [editorSplitRatio]);
 
   useEffect(() => {
     localStorage.setItem('onigiri-markdown.mode', mode);
@@ -618,6 +879,8 @@ export function App() {
         savedEol: tb.savedEol,
         encoding: tb.encoding,
         savedEncoding: tb.savedEncoding,
+        languageOverride: tb.languageOverride ?? null,
+        pinned: Boolean(tb.pinned),
         dirty: tb.dirty,
         content: trimmedContent,
         savedContent: trimmedSaved,
@@ -833,6 +1096,39 @@ export function App() {
     [activeTab.id]
   );
 
+  const updateTabContentById = useCallback((tabId: string, nextContent: string) => {
+    setTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === tabId
+          ? {
+              ...tab,
+              content: nextContent,
+              dirty: computeTabDirty(
+                tab,
+                nextContent,
+                tab.encoding ?? 'utf-8',
+                tab.eol ?? '\n'
+              ),
+              updatedAt: Date.now(),
+            }
+          : tab
+      )
+    );
+  }, []);
+
+  const handleChangeLanguageOverride = useCallback(
+    (langId: string | null) => {
+      setTabs((prev) =>
+        prev.map((tab) =>
+          tab.id === activeTab.id
+            ? { ...tab, languageOverride: langId, updatedAt: Date.now() }
+            : tab
+        )
+      );
+    },
+    [activeTab.id]
+  );
+
   const insertImageIntoActivePane = useCallback(
     (src: string, alt = '') => {
       const targetVisual =
@@ -874,6 +1170,7 @@ export function App() {
       const existing = tabsRef.current.find((tb) => tb.filePath === filePath);
       if (existing) {
         setActiveTabId(existing.id);
+        pushRecentFile(filePath);
         return;
       }
       try {
@@ -889,11 +1186,12 @@ export function App() {
           return [...prev, created];
         });
         setActiveTabId(created.id);
+        pushRecentFile(res.path);
       } catch (err) {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
       }
     },
-    [notify, t.toasts.errorPrefix]
+    [notify, pushRecentFile, t.toasts.errorPrefix]
   );
 
   const syncOpenTabsWithDisk = useCallback(async () => {
@@ -1370,6 +1668,7 @@ export function App() {
       const existing = tabsRef.current.find((tb) => tb.filePath && tb.filePath === opened.path);
       if (existing) {
         setActiveTabId(existing.id);
+        pushRecentFile(opened.path);
         return;
       }
       const syncInfo = await checkFilesSync([opened.path]).catch(() => []);
@@ -1386,6 +1685,7 @@ export function App() {
         setTabs((prev) => [...prev, created]);
         setActiveTabId(created.id);
       }
+      pushRecentFile(opened.path);
     } catch (err) {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     }
@@ -1393,6 +1693,7 @@ export function App() {
     runWithHiddenNativeBrowser,
     mode,
     activeTab.dirty,
+    pushRecentFile,
     notify,
     t.dialogs.unsavedCloseConfirm,
     t.toasts.errorPrefix,
@@ -1457,6 +1758,7 @@ export function App() {
             };
           })
         );
+        pushRecentFile(res.path);
         notify(t.toasts.savedSuccess);
         if (
           isTauri() &&
@@ -1490,6 +1792,7 @@ export function App() {
     [
       activeTab,
       runWithHiddenNativeBrowser,
+      pushRecentFile,
       notify,
       t.toasts.errorPrefix,
       t.toasts.savedSuccess,
@@ -1599,6 +1902,7 @@ export function App() {
       const target = tabs.find((tb) => tb.id === id);
       if (!target) return;
       if (target.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
+      if (sideTabId === id) setSideTabId(null);
       const remaining = tabs.filter((tb) => tb.id !== id);
       if (remaining.length === 0) {
         const fresh = makeTab(t.dialogs.untitledName, '', undefined, undefined, {
@@ -1617,11 +1921,140 @@ export function App() {
     [
       tabs,
       activeTabId,
+      sideTabId,
       settings.defaultNewFileEncoding,
       settings.defaultNewFileEol,
       t.dialogs.unsavedCloseConfirm,
       t.dialogs.untitledName,
     ]
+  );
+
+  const handleReorderTabs = useCallback((draggedId: string, targetId: string) => {
+    setTabs((prev) => {
+      const fromIdx = prev.findIndex((tb) => tb.id === draggedId);
+      const toIdx = prev.findIndex((tb) => tb.id === targetId);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      const pinnedTabs = next.filter((tb) => tb.pinned);
+      const unpinnedTabs = next.filter((tb) => !tb.pinned);
+      return [...pinnedTabs, ...unpinnedTabs];
+    });
+  }, []);
+
+  const handleTogglePinTab = useCallback((id: string) => {
+    setTabs((prev) => {
+      const updated = prev.map((tb) =>
+        tb.id === id ? { ...tb, pinned: !tb.pinned, updatedAt: Date.now() } : tb
+      );
+      const pinnedTabs = updated.filter((tb) => tb.pinned);
+      const unpinnedTabs = updated.filter((tb) => !tb.pinned);
+      return [...pinnedTabs, ...unpinnedTabs];
+    });
+  }, []);
+
+  const handleOpenTabToSide = useCallback(
+    (id: string) => {
+      if (mode !== 'advanced') handleModeChange('advanced');
+      if (layout === 'editor') setLayout('split');
+      setRightPaneMode('markdown');
+      setSideTabId(id);
+      setSidePaneMode('edit');
+    },
+    [mode, layout, handleModeChange]
+  );
+
+  const handleCompareTabWithActive = useCallback(
+    (id: string) => {
+      const currentTabs = tabsRef.current;
+      if (currentTabs.length < 2) {
+        notify(t.sideSplit.needTwoTabsToast);
+        return;
+      }
+      const targetId =
+        id === activeTab.id
+          ? currentTabs.find((tb) => tb.id !== activeTab.id)?.id || id
+          : id;
+      if (mode !== 'advanced') handleModeChange('advanced');
+      if (layout === 'editor') setLayout('split');
+      setRightPaneMode('markdown');
+      setSideTabId(targetId);
+      setSidePaneMode('diff');
+    },
+    [activeTab.id, mode, layout, handleModeChange, notify, t.sideSplit.needTwoTabsToast]
+  );
+
+  const handleSwapSideTabs = useCallback(() => {
+    if (!sideTabId || sideTabId === activeTabId) return;
+    const prevActive = activeTabId;
+    setActiveTabId(sideTabId);
+    setSideTabId(prevActive);
+  }, [sideTabId, activeTabId]);
+
+  const handleCloseOtherTabs = useCallback(
+    (keepId: string) => {
+      const closable = tabs.filter((tb) => tb.id !== keepId && !tb.pinned);
+      if (
+        closable.some((tb) => tb.dirty) &&
+        !window.confirm(t.dialogs.unsavedCloseConfirm)
+      ) {
+        return;
+      }
+      const remaining = tabs.filter((tb) => tb.id === keepId || tb.pinned);
+      setTabs(remaining);
+      if (!remaining.some((tb) => tb.id === activeTabId)) {
+        setActiveTabId(keepId);
+      }
+      if (sideTabId && !remaining.some((tb) => tb.id === sideTabId)) {
+        setSideTabId(null);
+      }
+    },
+    [tabs, activeTabId, sideTabId, t.dialogs.unsavedCloseConfirm]
+  );
+
+  const handleCloseTabsToRight = useCallback(
+    (anchorId: string) => {
+      const idx = tabs.findIndex((tb) => tb.id === anchorId);
+      if (idx < 0) return;
+      const rightSide = tabs.slice(idx + 1).filter((tb) => !tb.pinned);
+      if (rightSide.length === 0) return;
+      if (
+        rightSide.some((tb) => tb.dirty) &&
+        !window.confirm(t.dialogs.unsavedCloseConfirm)
+      ) {
+        return;
+      }
+      const closeIds = new Set(rightSide.map((tb) => tb.id));
+      const remaining = tabs.filter((tb) => !closeIds.has(tb.id));
+      setTabs(remaining);
+      if (closeIds.has(activeTabId)) {
+        setActiveTabId(anchorId);
+      }
+      if (sideTabId && closeIds.has(sideTabId)) {
+        setSideTabId(null);
+      }
+    },
+    [tabs, activeTabId, sideTabId, t.dialogs.unsavedCloseConfirm]
+  );
+
+  const handleCopyPath = useCallback(
+    async (path: string) => {
+      await writeClipboardText(path);
+      notify(t.toasts.copiedPath);
+    },
+    [notify, t.toasts.copiedPath]
+  );
+
+  const handleRevealPath = useCallback(
+    async (path: string) => {
+      try {
+        await revealInFileManager(path);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [notify, t.toasts.errorPrefix]
   );
 
   // Workspace folder actions
@@ -1634,6 +2067,49 @@ export function App() {
     }
   }, [notify, t.toasts.errorPrefix]);
 
+  const pendingFolderActionRef = useRef<
+    { type: 'open-picker' } | { type: 'open-path'; path: string } | { type: 'close-folder' }
+  >({ type: 'open-picker' });
+
+  const proceedCloseWorkspaceFolder = useCallback(() => {
+    setWorkspaceRoot(null);
+    setWorkspaceEntries([]);
+    setSearchMatches([]);
+    setProjectSetupLogs([]);
+    setProjectSetupFeedback(null);
+    setProjectSetupActionId(null);
+  }, []);
+
+  const openWorkspaceFolderPath = useCallback(
+    async (dir: string) => {
+      if (!dir) return;
+      if (projectSetupBusy) {
+        setFolderSwitchGuardMode('setup-busy');
+        return;
+      }
+      if (projectServer?.running || projectServer?.starting) {
+        pendingFolderActionRef.current = { type: 'open-path', path: dir };
+        setFolderSwitchGuardMode('server-running');
+        return;
+      }
+      setWorkspaceRoot(dir);
+      setSidebarTab('files');
+      setShowSidebar(true);
+      if (mode !== 'advanced') handleModeChange('advanced');
+      pushRecentFolder(dir);
+      await refreshWorkspace(dir);
+    },
+    [
+      projectSetupBusy,
+      projectServer?.running,
+      projectServer?.starting,
+      mode,
+      handleModeChange,
+      pushRecentFolder,
+      refreshWorkspace,
+    ]
+  );
+
   const proceedOpenFolderPicker = useCallback(async () => {
     try {
       const dir = await runWithHiddenNativeBrowser(() => openFolderDialog());
@@ -1642,11 +2118,20 @@ export function App() {
       setSidebarTab('files');
       setShowSidebar(true);
       if (mode !== 'advanced') handleModeChange('advanced');
+      pushRecentFolder(dir);
       await refreshWorkspace(dir);
     } catch (err) {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     }
-  }, [runWithHiddenNativeBrowser, mode, handleModeChange, refreshWorkspace, notify, t.toasts.errorPrefix]);
+  }, [
+    runWithHiddenNativeBrowser,
+    mode,
+    handleModeChange,
+    pushRecentFolder,
+    refreshWorkspace,
+    notify,
+    t.toasts.errorPrefix,
+  ]);
 
   const handleOpenFolder = useCallback(() => {
     if (projectSetupBusy) {
@@ -1654,6 +2139,7 @@ export function App() {
       return;
     }
     if (projectServer?.running || projectServer?.starting) {
+      pendingFolderActionRef.current = { type: 'open-picker' };
       setFolderSwitchGuardMode('server-running');
       return;
     }
@@ -1663,6 +2149,26 @@ export function App() {
     projectServer?.running,
     projectServer?.starting,
     proceedOpenFolderPicker,
+  ]);
+
+  const handleCloseFolder = useCallback(() => {
+    if (!workspaceRoot) return;
+    if (projectSetupBusy) {
+      setFolderSwitchGuardMode('setup-busy');
+      return;
+    }
+    if (projectServer?.running || projectServer?.starting) {
+      pendingFolderActionRef.current = { type: 'close-folder' };
+      setFolderSwitchGuardMode('server-running');
+      return;
+    }
+    proceedCloseWorkspaceFolder();
+  }, [
+    workspaceRoot,
+    projectSetupBusy,
+    projectServer?.running,
+    projectServer?.starting,
+    proceedCloseWorkspaceFolder,
   ]);
 
   const handleConfirmStopAndSwitchFolder = useCallback(async () => {
@@ -1683,7 +2189,20 @@ export function App() {
       }
 
       setFolderSwitchGuardMode(null);
-      await proceedOpenFolderPicker();
+      const pending = pendingFolderActionRef.current;
+      pendingFolderActionRef.current = { type: 'open-picker' };
+      if (pending.type === 'close-folder') {
+        proceedCloseWorkspaceFolder();
+      } else if (pending.type === 'open-path') {
+        setWorkspaceRoot(pending.path);
+        setSidebarTab('files');
+        setShowSidebar(true);
+        if (mode !== 'advanced') handleModeChange('advanced');
+        pushRecentFolder(pending.path);
+        await refreshWorkspace(pending.path);
+      } else {
+        await proceedOpenFolderPicker();
+      }
     } catch (err) {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     } finally {
@@ -1696,6 +2215,11 @@ export function App() {
     notify,
     t.toasts.devServerStopped,
     t.toasts.errorPrefix,
+    mode,
+    handleModeChange,
+    pushRecentFolder,
+    refreshWorkspace,
+    proceedCloseWorkspaceFolder,
     proceedOpenFolderPicker,
   ]);
 
@@ -1716,6 +2240,7 @@ export function App() {
         });
         setTabs((prev) => [...prev, created]);
         setActiveTabId(created.id);
+        pushRecentFile(fullPath);
       } catch (err) {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
       }
@@ -1725,9 +2250,167 @@ export function App() {
       settings.defaultNewFileEncoding,
       settings.defaultNewFileEol,
       refreshWorkspace,
+      pushRecentFile,
       notify,
       t.toasts.errorPrefix,
     ]
+  );
+
+  const handleOpenFileToSide = useCallback(
+    async (filePath: string) => {
+      const existing = tabsRef.current.find((tb) => tb.filePath === filePath);
+      if (existing) {
+        handleOpenTabToSide(existing.id);
+        pushRecentFile(filePath);
+        return;
+      }
+      try {
+        const res = await readFileByPath(filePath);
+        const syncInfo = await checkFilesSync([res.path]).catch(() => []);
+        const modifiedMs = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : undefined;
+        const created = makeTab(res.name, res.content, res.path, modifiedMs, {
+          encoding: res.encoding,
+          eol: res.eol,
+        });
+        setTabs((prev) => [...prev, created]);
+        pushRecentFile(res.path);
+        if (layout === 'editor') setLayout('split');
+        setRightPaneMode('markdown');
+        setSideTabId(created.id);
+        setSidePaneMode('edit');
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [handleOpenTabToSide, pushRecentFile, layout, notify, t.toasts.errorPrefix]
+  );
+
+  const handleCreateFileInDir = useCallback(
+    async (targetDir: string, fileName: string) => {
+      if (!workspaceRoot) return;
+      try {
+        const starter = '';
+        const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
+        const eol = settings.defaultNewFileEol ?? '\n';
+        const fullPath = await createFileInDir(targetDir, fileName, starter, encoding);
+        await refreshWorkspace(workspaceRoot);
+        const syncRes = await checkFilesSync([fullPath]).catch(() => []);
+        const modifiedMs = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
+        const baseName = fileName.split(/[/\\]/).pop() || fileName;
+        const created = makeTab(baseName, starter, fullPath, modifiedMs, {
+          encoding,
+          eol,
+        });
+        setTabs((prev) => [...prev, created]);
+        setActiveTabId(created.id);
+        pushRecentFile(fullPath);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [
+      workspaceRoot,
+      settings.defaultNewFileEncoding,
+      settings.defaultNewFileEol,
+      refreshWorkspace,
+      pushRecentFile,
+      notify,
+      t.toasts.errorPrefix,
+    ]
+  );
+
+  const handleCreateFolderInDir = useCallback(
+    async (targetDir: string, folderName: string) => {
+      if (!workspaceRoot) return;
+      try {
+        const normRoot = workspaceRoot.replace(/\\/g, '/').replace(/\/+$/, '');
+        const normTarget = targetDir.replace(/\\/g, '/').replace(/\/+$/, '');
+        const relPrefix =
+          normTarget.toLowerCase().startsWith(`${normRoot.toLowerCase()}/`)
+            ? normTarget.slice(normRoot.length + 1)
+            : '';
+        const relPath = relPrefix
+          ? `${relPrefix}/${folderName.replace(/^\/+/, '')}`
+          : folderName.replace(/^\/+/, '');
+        await createWorkspaceFolder(workspaceRoot, relPath);
+        await refreshWorkspace(workspaceRoot);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [workspaceRoot, refreshWorkspace, notify, t.toasts.errorPrefix]
+  );
+
+  const handleRenameEntry = useCallback(
+    async (oldPath: string, newName: string) => {
+      if (!workspaceRoot) return;
+      try {
+        const newPath = await renameWorkspaceEntry(workspaceRoot, oldPath, newName);
+        const oldPrefixForward = `${oldPath.replace(/\\/g, '/')}/`;
+        const newPrefixForward = `${newPath.replace(/\\/g, '/')}/`;
+        setTabs((prev) =>
+          prev.map((tb) => {
+            if (!tb.filePath) return tb;
+            if (tb.filePath === oldPath) {
+              const title = newPath.split(/[/\\]/).pop() || newName;
+              return { ...tb, title, filePath: newPath, updatedAt: Date.now() };
+            }
+            const norm = tb.filePath.replace(/\\/g, '/');
+            if (norm.startsWith(oldPrefixForward)) {
+              const suffix = norm.slice(oldPrefixForward.length);
+              return { ...tb, filePath: `${newPrefixForward}${suffix}`, updatedAt: Date.now() };
+            }
+            return tb;
+          })
+        );
+        await refreshWorkspace(workspaceRoot);
+        notify(t.toasts.renamedSuccess);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [workspaceRoot, refreshWorkspace, notify, t.toasts.renamedSuccess, t.toasts.errorPrefix]
+  );
+
+  const handleDuplicateEntry = useCallback(
+    async (filePath: string) => {
+      if (!workspaceRoot) return;
+      try {
+        const dupPath = await duplicateWorkspaceFile(workspaceRoot, filePath);
+        await refreshWorkspace(workspaceRoot);
+        await openPathInTab(dupPath);
+        notify(t.toasts.duplicatedSuccess);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [workspaceRoot, refreshWorkspace, openPathInTab, notify, t.toasts.duplicatedSuccess, t.toasts.errorPrefix]
+  );
+
+  const handleDeleteEntry = useCallback(
+    async (targetPath: string, _isDir: boolean, name: string) => {
+      if (!workspaceRoot) return;
+      if (!window.confirm(t.sidebar.deleteConfirm.replace('{name}', name))) return;
+      try {
+        await deleteWorkspaceEntry(workspaceRoot, targetPath);
+        const normTarget = targetPath.replace(/\\/g, '/');
+        setTabs((prev) =>
+          prev.map((tb) => {
+            if (!tb.filePath) return tb;
+            const normFile = tb.filePath.replace(/\\/g, '/');
+            if (normFile === normTarget || normFile.startsWith(`${normTarget}/`)) {
+              return { ...tb, externalStatus: 'deleted' };
+            }
+            return tb;
+          })
+        );
+        await refreshWorkspace(workspaceRoot);
+        notify(t.toasts.deletedSuccess);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [workspaceRoot, refreshWorkspace, notify, t.sidebar.deleteConfirm, t.toasts.deletedSuccess, t.toasts.errorPrefix]
   );
 
   const handleSearchWorkspace = useCallback(
@@ -1744,6 +2427,79 @@ export function App() {
       }
     },
     [workspaceRoot]
+  );
+
+  const handleReplaceInWorkspace = useCallback(
+    async (query: string, replacement: string, caseSensitive: boolean, useRegex: boolean) => {
+      if (!workspaceRoot || !query) return;
+      const confirmed = window.confirm(
+        t.sidebar.replaceConfirm
+          .replace('{query}', query)
+          .replace('{replacement}', replacement)
+      );
+      if (!confirmed) return;
+      try {
+        const res = await replaceInWorkspace({
+          rootPath: workspaceRoot,
+          query,
+          replacement,
+          caseSensitive,
+          useRegex,
+        });
+        await refreshWorkspace(workspaceRoot);
+        if (res.modifiedPaths.length > 0) {
+          const modifiedSet = new Set(res.modifiedPaths);
+          const cleanTargets = tabsRef.current.filter(
+            (tb) => tb.filePath && modifiedSet.has(tb.filePath) && !tb.dirty
+          );
+          for (const tb of cleanTargets) {
+            try {
+              const reloaded = await readFileByPath(tb.filePath!, tb.encoding);
+              const norm = reloaded.content.includes('\r\n')
+                ? reloaded.content.replace(/\r\n/g, '\n')
+                : reloaded.content;
+              const syncInfo = await checkFilesSync([tb.filePath!]).catch(() => []);
+              const mtime = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : tb.diskModifiedMs;
+              setTabs((prev) =>
+                prev.map((item) =>
+                  item.id === tb.id
+                    ? {
+                        ...item,
+                        content: norm,
+                        savedContent: norm,
+                        dirty: false,
+                        diskModifiedMs: mtime,
+                        externalStatus: null,
+                      }
+                    : item
+                )
+              );
+            } catch {
+              // ignore individual reload failure
+            }
+          }
+          void syncOpenTabsWithDisk();
+        }
+        await handleSearchWorkspace(query);
+        notify(
+          t.sidebar.replaceDoneToast
+            .replace('{files}', String(res.filesModified))
+            .replace('{count}', String(res.replacements))
+        );
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [
+      workspaceRoot,
+      refreshWorkspace,
+      syncOpenTabsWithDisk,
+      handleSearchWorkspace,
+      notify,
+      t.sidebar.replaceConfirm,
+      t.sidebar.replaceDoneToast,
+      t.toasts.errorPrefix,
+    ]
   );
 
   // AI & Clipboard Actions
@@ -1822,8 +2578,93 @@ export function App() {
   ]);
 
   const handleExportPdf = useCallback(() => {
-    window.print();
+    setPrintMode('preview');
+    requestAnimationFrame(() => {
+      window.print();
+    });
   }, []);
+
+  const handlePrintSource = useCallback(() => {
+    setPrintMode('source');
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.print();
+      });
+    });
+  }, []);
+
+  const handleOpenInlineAiEdit = useCallback(() => {
+    const ed = editorRef.current;
+    const range = ed?.getSelectionRange() ?? null;
+    const selectedText = ed?.getSelectedText() ?? '';
+    if (!range || range.from >= range.to || !selectedText.trim()) {
+      notify(t.inlineAiModal.noSelectionToast);
+      return;
+    }
+    setInlineAiState({
+      selectedText,
+      from: range.from,
+      to: range.to,
+    });
+  }, [notify, t.inlineAiModal.noSelectionToast]);
+
+  const handleInlineAiResultReady = useCallback(
+    (proposedText: string, _instruction: string) => {
+      const captured = inlineAiState;
+      setInlineAiState(null);
+      if (!captured) return;
+      const targetTabId = activeTab.id;
+      const targetTitle = activeTab.title;
+      setDiffPreview({
+        title: t.inlineAiModal.previewTitle,
+        targetPath: targetTitle,
+        originalText: captured.selectedText,
+        proposedText,
+        showSnapshotOption: true,
+        defaultCreateSnapshot: true,
+        confirmLabel: t.inlineAiModal.confirmApplyBtn,
+        onConfirm: (createSnapshot) => {
+          if (createSnapshot) {
+            setTabs((prev) =>
+              prev.map((tab) => {
+                if (tab.id !== targetTabId) return tab;
+                const snap: Snapshot = {
+                  id: `snap-${Date.now()}`,
+                  label: `AI Selection Pre-Apply (${new Date().toLocaleTimeString()})`,
+                  content: tab.content,
+                  timestamp: Date.now(),
+                };
+                return { ...tab, snapshots: [snap, ...tab.snapshots] };
+              })
+            );
+          }
+          if (editorRef.current && activeTabIdRef.current === targetTabId) {
+            editorRef.current.replaceRange(captured.from, captured.to, proposedText);
+          } else {
+            const target = tabsRef.current.find((tb) => tb.id === targetTabId);
+            if (target) {
+              const nextContent =
+                target.content.slice(0, captured.from) +
+                proposedText +
+                target.content.slice(captured.to);
+              updateTabContentById(targetTabId, nextContent);
+            }
+          }
+          notify(t.toasts.aiCleaned);
+        },
+      });
+    },
+    [
+      inlineAiState,
+      activeTab.id,
+      activeTab.title,
+      t.inlineAiModal.previewTitle,
+      t.inlineAiModal.confirmApplyBtn,
+      t.toasts.aiCleaned,
+      updateTabContentById,
+      notify,
+    ]
+  );
 
   // Toolbar Actions (routed to active pane: left CodeMirror OR right TipTap visual editor)
   const openFindBar = useCallback(
@@ -1872,18 +2713,144 @@ export function App() {
     }));
   }, [clampZoom]);
 
-  const handleToolbarAction = useCallback(
-    (action: string) => {
+  const handleRecordMacroStep = useCallback(
+    (step: MacroStep) => {
+      if (!isRecordingMacroRef.current || isPlayingMacroRef.current) return;
+      const { steps: next, truncated } = appendMacroStep(
+        recordingMacroStepsRef.current,
+        step,
+        MAX_MACRO_STEPS
+      );
+      recordingMacroStepsRef.current = next;
+      setRecordingMacroSteps(next);
+      if (truncated) {
+        isRecordingMacroRef.current = false;
+        setIsRecordingMacro(false);
+        setMacroSteps(next);
+        macroStepsRef.current = next;
+        saveMacroSteps(next);
+        notify(t.toasts.macroStepLimit.replace('{n}', String(MAX_MACRO_STEPS)));
+      }
+    },
+    [notify, t.toasts.macroStepLimit]
+  );
+
+  const handleToggleMacroRecording = useCallback(() => {
+    if (isPlayingMacroRef.current) return;
+    if (!isRecordingMacroRef.current) {
+      recordingMacroStepsRef.current = [];
+      setRecordingMacroSteps([]);
+      isRecordingMacroRef.current = true;
+      setIsRecordingMacro(true);
+      if (layout === 'preview') {
+        setLayout('split');
+      }
+      activePaneRef.current = 'code';
+      setActivePane('code');
+      requestAnimationFrame(() => editorRef.current?.focus());
+      notify(t.toasts.macroRecordStarted);
+      return;
+    }
+
+    isRecordingMacroRef.current = false;
+    setIsRecordingMacro(false);
+    const recorded = recordingMacroStepsRef.current;
+    if (recorded.length > 0) {
+      setMacroSteps(recorded);
+      macroStepsRef.current = recorded;
+      saveMacroSteps(recorded);
+      notify(t.toasts.macroRecordStopped.replace('{n}', String(recorded.length)));
+    } else {
+      notify(t.toasts.macroRecordEmpty);
+    }
+  }, [layout, notify, t.toasts.macroRecordStarted, t.toasts.macroRecordStopped, t.toasts.macroRecordEmpty]);
+
+  const handleClearMacro = useCallback(() => {
+    if (isRecordingMacroRef.current) {
+      isRecordingMacroRef.current = false;
+      setIsRecordingMacro(false);
+    }
+    recordingMacroStepsRef.current = [];
+    setRecordingMacroSteps([]);
+    setMacroSteps([]);
+    macroStepsRef.current = [];
+    saveMacroSteps([]);
+    notify(t.toasts.macroCleared);
+  }, [notify, t.toasts.macroCleared]);
+
+  const handlePlayMacro = useCallback(async () => {
+    if (isRecordingMacroRef.current || isPlayingMacroRef.current) return;
+    const steps = macroStepsRef.current;
+    if (steps.length === 0) {
+      notify(t.toasts.macroNoRecorded);
+      return;
+    }
+
+    isPlayingMacroRef.current = true;
+    setIsPlayingMacro(true);
+    try {
+      if (layout === 'preview') {
+        setLayout('split');
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => window.setTimeout(resolve, 0));
+        });
+      }
+      activePaneRef.current = 'code';
+      setActivePane('code');
+      editorRef.current?.focus();
+
+      for (const step of steps) {
+        if (step.type === 'toolbarAction') {
+          await executeToolbarActionRef.current(step.action, true);
+        } else {
+          await editorRef.current?.runMacroStep(step);
+        }
+      }
+      notify(t.toasts.macroPlayed.replace('{n}', String(steps.length)));
+    } finally {
+      isPlayingMacroRef.current = false;
+      setIsPlayingMacro(false);
+    }
+  }, [layout, notify, t.toasts.macroNoRecorded, t.toasts.macroPlayed]);
+
+  const executeToolbarAction = useCallback(
+    async (action: string, fromMacro = false) => {
+      if (action === 'newFile') {
+        await handleNewFile();
+        return;
+      }
+      if (action === 'openFile') {
+        await handleOpenFile();
+        return;
+      }
+      if (action === 'save') {
+        await handleSave(false);
+        return;
+      }
+      if (action === 'macroToggleRecord') {
+        handleToggleMacroRecording();
+        return;
+      }
+      if (action === 'macroPlay') {
+        await handlePlayMacro();
+        return;
+      }
       if (action === 'image') {
         setShowImageModal(true);
         return;
       }
       if (action === 'aiClean') {
+        if (!fromMacro && isRecordingMacroRef.current && isRecordableToolbarAction(action)) {
+          handleRecordMacroStep({ type: 'toolbarAction', action });
+        }
         handleAiClean();
         return;
       }
       if (action === 'copyRich') {
-        handleCopyRichText();
+        if (!fromMacro && isRecordingMacroRef.current && isRecordableToolbarAction(action)) {
+          handleRecordMacroStep({ type: 'toolbarAction', action });
+        }
+        await handleCopyRichText();
         return;
       }
       if (action === 'find') {
@@ -1898,14 +2865,23 @@ export function App() {
         handleZoomIn();
         return;
       }
+      if (action === 'toggleEditorSplit') {
+        handleToggleEditorSplit();
+        return;
+      }
 
       const useVisual =
-        layout === 'preview' ||
-        (layout === 'split' && (activePaneRef.current === 'visual' || previewRef.current?.isFocused()));
+        !fromMacro &&
+        (layout === 'preview' ||
+          (layout === 'split' && (activePaneRef.current === 'visual' || previewRef.current?.isFocused())));
 
       if (useVisual && previewRef.current) {
         previewRef.current.applyFormat(action);
         return;
+      }
+
+      if (!fromMacro && isRecordingMacroRef.current && isRecordableToolbarAction(action)) {
+        handleRecordMacroStep({ type: 'toolbarAction', action });
       }
 
       const ed = editorRef.current;
@@ -1923,7 +2899,7 @@ export function App() {
           ed?.copyAction();
           break;
         case 'paste':
-          ed?.pasteAction();
+          await ed?.pasteAction();
           break;
         case 'h1':
           ed?.toggleLinePrefix('# ');
@@ -1985,7 +2961,30 @@ export function App() {
           break;
       }
     },
-    [layout, handleAiClean, handleCopyRichText, openFindBar, handleZoomOut, handleZoomIn]
+    [
+      layout,
+      handleNewFile,
+      handleOpenFile,
+      handleSave,
+      handleToggleMacroRecording,
+      handlePlayMacro,
+      handleRecordMacroStep,
+      handleAiClean,
+      handleCopyRichText,
+      openFindBar,
+      handleZoomOut,
+      handleZoomIn,
+      handleToggleEditorSplit,
+    ]
+  );
+
+  executeToolbarActionRef.current = executeToolbarAction;
+
+  const handleToolbarAction = useCallback(
+    (action: string) => {
+      void executeToolbarAction(action, false);
+    },
+    [executeToolbarAction]
   );
 
   // Snapshots
@@ -2083,8 +3082,18 @@ export function App() {
   };
 
   const previewKind = useMemo(
-    () => getDocumentPreviewKind(activeTab.title, activeTab.filePath),
-    [activeTab.title, activeTab.filePath]
+    () => getDocumentPreviewKind(activeTab.title, activeTab.filePath, activeTab.languageOverride),
+    [activeTab.title, activeTab.filePath, activeTab.languageOverride]
+  );
+
+  const languageLabel = useMemo(
+    () =>
+      resolveEditorLanguageLabel(
+        activeTab.title || activeTab.filePath,
+        locale,
+        activeTab.languageOverride
+      ),
+    [activeTab.title, activeTab.filePath, locale, activeTab.languageOverride]
   );
 
   const buildExternalPreviewPayload = useCallback(async () => {
@@ -2669,6 +3678,15 @@ export function App() {
       } else if (meta && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleZenMode();
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'e') {
+        e.preventDefault();
+        handleOpenInlineAiEdit();
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault();
+        handleToggleMacroRecording();
+      } else if (e.key === 'F8' && !meta && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        void handlePlayMacro();
       } else if (meta && e.key === '\\') {
         e.preventDefault();
         const nextMode: AppMode =
@@ -2690,7 +3708,7 @@ export function App() {
         e.preventDefault();
         handleSetZoom(100);
       } else if (e.key === 'Escape') {
-        if (diffPreview) return;
+        if (diffPreview || inlineAiState) return;
         if (folderSwitchGuardMode) {
           if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
         } else if (showGoToLine) setShowGoToLine(false);
@@ -2717,7 +3735,11 @@ export function App() {
     showSettings,
     showFind,
     diffPreview,
+    inlineAiState,
+    handleOpenInlineAiEdit,
     handleToolbarAction,
+    handleToggleMacroRecording,
+    handlePlayMacro,
     openFindBar,
     handleZoomIn,
     handleZoomOut,
@@ -2741,25 +3763,47 @@ export function App() {
     },
     'open-file': handleOpenFile,
     'open-folder': handleOpenFolder,
+    'clear-recent': handleClearRecent,
     save: () => handleSave(false),
     'save-as': () => handleSave(true),
     'export-html': handleExportHtml,
     'export-pdf': handleExportPdf,
+    'print-source': handlePrintSource,
     'close-tab': () => handleCloseTab(activeTab.id),
     find: () => openFindBar({ target: 'find' }),
     'go-to-line': () => setShowGoToLine(true),
+    'macro-toggle-record': handleToggleMacroRecording,
+    'macro-play': () => {
+      void handlePlayMacro();
+    },
     'mode-simple': () => handleModeChange('simple'),
     'mode-basic': () => handleModeChange('basic'),
     'mode-advanced': () => handleModeChange('advanced'),
     palette: () => setShowPalette((v) => !v),
     'toggle-top-bar': handleToggleTopBar,
     'toggle-format-toolbar': handleToggleFormatToolbar,
+    'toggle-editor-split': handleToggleEditorSplit,
     'toggle-inspector': () => {
       if (mode === 'simple') handleModeChange('basic');
       setShowInspector((v) => !v);
     },
     'external-preview': handleToggleExternalPreview,
     'toggle-zen': toggleZenMode,
+  };
+
+  const recentMenuDispatchRef = useRef<(payload: string) => void>(() => {});
+  recentMenuDispatchRef.current = (payload: string) => {
+    if (payload.startsWith('recent-file::')) {
+      const idx = Number(payload.slice('recent-file::'.length));
+      const target = Number.isInteger(idx) ? recentFilesRef.current[idx] : undefined;
+      if (target) void openPathInTab(target);
+      return;
+    }
+    if (payload.startsWith('recent-folder::')) {
+      const idx = Number(payload.slice('recent-folder::'.length));
+      const target = Number.isInteger(idx) ? recentFoldersRef.current[idx] : undefined;
+      if (target) void openWorkspaceFolderPath(target);
+    }
   };
 
   useEffect(() => {
@@ -2769,6 +3813,13 @@ export function App() {
       try {
         const { listen } = await import('@tauri-apps/api/event');
         unlisten = await listen<string>('menu-action', (event) => {
+          if (
+            event.payload.startsWith('recent-file::') ||
+            event.payload.startsWith('recent-folder::')
+          ) {
+            recentMenuDispatchRef.current(event.payload);
+            return;
+          }
           const fn = menuActionsRef.current[event.payload];
           fn?.();
         });
@@ -2821,6 +3872,22 @@ export function App() {
         label: t.actions.toggleFormatToolbar,
         action: handleToggleFormatToolbar,
       },
+      {
+        id: 'toggle-editor-split',
+        category: 'View',
+        label: t.actions.toggleEditorSplit,
+        action: handleToggleEditorSplit,
+      },
+      ...(editorSplitVertical
+        ? [
+            {
+              id: 'focus-other-split-pane',
+              category: 'View',
+              label: t.actions.focusOtherSplitPane,
+              action: handleFocusOtherSplitPane,
+            },
+          ]
+        : []),
       {
         id: 'toggle-simple-topbar',
         category: 'View',
@@ -3007,6 +4074,16 @@ export function App() {
         label: t.actions.openFolder,
         action: handleOpenFolder,
       },
+      ...(workspaceRoot
+        ? [
+            {
+              id: 'close-folder',
+              category: 'File',
+              label: t.sidebar.closeFolder,
+              action: handleCloseFolder,
+            },
+          ]
+        : []),
       {
         id: 'save-file',
         category: 'File',
@@ -3052,6 +4129,51 @@ export function App() {
         action: handleExportPdf,
       },
       {
+        id: 'print-source',
+        category: 'Export',
+        label: t.actions.printSource,
+        action: handlePrintSource,
+      },
+      {
+        id: 'ai-edit-selection',
+        category: 'AI',
+        label: t.contextMenu.aiEditSelection,
+        shortcut: formatShortcut('⌘⇧E'),
+        action: handleOpenInlineAiEdit,
+      },
+      ...(tabs.length > 1
+        ? [
+            {
+              id: 'compare-tabs',
+              category: 'View',
+              label: t.sideSplit.compareTitle,
+              action: () => {
+                const other = tabs.find((tb) => tb.id !== activeTab.id);
+                if (other) handleCompareTabWithActive(other.id);
+              },
+            },
+          ]
+        : []),
+      {
+        id: 'fold-all',
+        category: 'Edit',
+        label: t.actions.foldAll,
+        action: () => editorRef.current?.foldAllLines(),
+      },
+      {
+        id: 'unfold-all',
+        category: 'Edit',
+        label: t.actions.unfoldAll,
+        action: () => editorRef.current?.unfoldAllLines(),
+      },
+      {
+        id: 'select-next-occurrence',
+        category: 'Edit',
+        label: t.actions.selectNextOccurrence,
+        shortcut: formatShortcut('⌘D'),
+        action: () => editorRef.current?.selectNextOccurrenceAction(),
+      },
+      {
         id: 'zen',
         category: 'View',
         label: zenMode ? t.actions.exitZen : t.actions.zenMode,
@@ -3073,6 +4195,32 @@ export function App() {
         action: () => setShowGoToLine(true),
       },
       {
+        id: 'macro-toggle-record',
+        category: 'Macro',
+        label: isRecordingMacro ? t.actions.macroStop : t.actions.macroRecord,
+        shortcut: formatShortcut('⌘⇧M'),
+        action: handleToggleMacroRecording,
+      },
+      {
+        id: 'macro-play',
+        category: 'Macro',
+        label: t.actions.macroPlay,
+        shortcut: 'F8',
+        action: () => {
+          void handlePlayMacro();
+        },
+      },
+      ...(macroSteps.length > 0
+        ? [
+            {
+              id: 'macro-clear',
+              category: 'Macro',
+              label: t.actions.macroClear,
+              action: handleClearMacro,
+            },
+          ]
+        : []),
+      {
         id: 'open-online-manual',
         category: 'Help',
         label: t.actions.onlineManual,
@@ -3091,6 +4239,26 @@ export function App() {
         action: () => setTheme(th),
       })),
     ];
+
+    recentFiles.forEach((fp) => {
+      const name = fp.split(/[/\\]/).pop() || fp;
+      list.push({
+        id: `recent-file-${fp}`,
+        category: 'Recent',
+        label: `${name} — ${fp}`,
+        action: () => void openPathInTab(fp),
+      });
+    });
+
+    recentFolders.forEach((dir) => {
+      const name = dir.split(/[/\\]/).pop() || dir;
+      list.push({
+        id: `recent-folder-${dir}`,
+        category: 'Recent Folder',
+        label: `${name} — ${dir}`,
+        action: () => void openWorkspaceFolderPath(dir),
+      });
+    });
 
     workspaceEntries
       .filter((e) => !e.isDir)
@@ -3113,29 +4281,47 @@ export function App() {
     t,
     locale,
     zenMode,
-    workspaceEntries,
+    tabs,
+    activeTab.id,
     activeTab.filePath,
+    recentFiles,
+    recentFolders,
+    workspaceEntries,
+    isRecordingMacro,
+    macroSteps.length,
     notify,
     handleModeChange,
     handleToggleTopBar,
     handleToggleFormatToolbar,
+    editorSplitVertical,
+    handleToggleEditorSplit,
+    handleFocusOtherSplitPane,
     handleOpenOnlineManual,
     handleToggleExternalPreview,
     handleNewFile,
     handleOpenFile,
     handleOpenFolder,
+    handleCloseFolder,
+    workspaceRoot,
     handleSave,
     handleAiClean,
     handleCopyRichText,
     handlePasteHtmlAsMd,
     handleExportHtml,
     handleExportPdf,
+    handlePrintSource,
+    handleOpenInlineAiEdit,
+    handleCompareTabWithActive,
     toggleZenMode,
     openPathInTab,
+    openWorkspaceFolderPath,
     openFindBar,
     handleZoomIn,
     handleZoomOut,
     handleSetZoom,
+    handleToggleMacroRecording,
+    handlePlayMacro,
+    handleClearMacro,
   ]);
 
   const handleJumpToHeading = (h: HeadingItem) => {
@@ -3171,6 +4357,7 @@ export function App() {
     showImageModal ||
     showPalette ||
     showGoToLine ||
+    Boolean(inlineAiState) ||
     Boolean(encodingModalMode) ||
     Boolean(diffPreview) ||
     Boolean(folderSwitchGuardMode) ||
@@ -3178,6 +4365,7 @@ export function App() {
     nativeDialogOpen ||
     isDraggingFile;
   const showRightBrowser = settings.builtinBrowserEnabled && rightPaneMode === 'browser';
+  const showSideComparePane = Boolean(sideTab) && !showRightBrowser;
   const nativeBrowserVisible =
     layout !== 'editor' &&
     mode !== 'simple' &&
@@ -3185,11 +4373,13 @@ export function App() {
     showRightBrowser &&
     !anyModalOpen;
   const showRightPaneHeader =
-    settings.builtinBrowserEnabled || settings.externalBrowserPreviewEnabled;
+    !showSideComparePane &&
+    (settings.builtinBrowserEnabled || settings.externalBrowserPreviewEnabled);
 
   return (
     <div
       className={`app-shell mode-${mode} ${zenMode ? 'is-zen' : ''}`}
+      data-print-mode={printMode}
       style={syntaxCssVars}
       onDragOver={(e) => {
         if (!isTauri()) {
@@ -3234,7 +4424,17 @@ export function App() {
             />
           )}
           {isFormatToolbarVisible && (
-            <FormatToolbar t={t} mode={mode} onAction={handleToolbarAction} />
+            <FormatToolbar
+              t={t}
+              mode={mode}
+              onAction={handleToolbarAction}
+              isDirty={activeTab.dirty}
+              isEditorSplit={editorSplitVertical}
+              isRecordingMacro={isRecordingMacro}
+              isPlayingMacro={isPlayingMacro}
+              hasMacro={macroSteps.length > 0}
+              macroStepCount={macroSteps.length}
+            />
           )}
         </>
       )}
@@ -3247,11 +4447,21 @@ export function App() {
 
       {mode === 'advanced' && !zenMode && (
         <TabBar
+          t={t}
           tabs={tabs}
           activeTabId={activeTab.id}
+          sideTabId={sideTab?.id ?? null}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onNewTab={() => handleNewFile()}
+          onReorderTabs={handleReorderTabs}
+          onTogglePinTab={handleTogglePinTab}
+          onOpenTabToSide={handleOpenTabToSide}
+          onCompareTabWithActive={handleCompareTabWithActive}
+          onCloseOtherTabs={handleCloseOtherTabs}
+          onCloseTabsToRight={handleCloseTabsToRight}
+          onCopyTabPath={(p) => void handleCopyPath(p)}
+          onRevealTabPath={(p) => void handleRevealPath(p)}
         />
       )}
 
@@ -3267,12 +4477,26 @@ export function App() {
             searchMatches={searchMatches}
             activeFilePath={activeTab.filePath}
             activeImagePath={previewWorkspaceImagePath}
+            recentFiles={recentFiles}
+            recentFolders={recentFolders}
+            onOpenRecentFolder={(dir) => void openWorkspaceFolderPath(dir)}
+            onClearRecent={handleClearRecent}
             onChooseFolder={handleOpenFolder}
+            onCloseFolder={handleCloseFolder}
             onRefreshFolder={() => workspaceRoot && refreshWorkspace(workspaceRoot)}
             onOpenWorkspaceFile={openPathInTab}
+            onOpenFileToSide={(p) => void handleOpenFileToSide(p)}
             onOpenWorkspaceImage={(p) => setPreviewWorkspaceImagePath(p)}
             onCreateFileInFolder={handleCreateFileInFolder}
+            onCreateFileInDir={handleCreateFileInDir}
+            onCreateFolderInDir={handleCreateFolderInDir}
+            onRenameEntry={handleRenameEntry}
+            onDuplicateEntry={handleDuplicateEntry}
+            onDeleteEntry={handleDeleteEntry}
+            onRevealEntry={(p) => void handleRevealPath(p)}
+            onCopyEntryPath={(p) => void handleCopyPath(p)}
             onSearchWorkspace={handleSearchWorkspace}
+            onReplaceInWorkspace={handleReplaceInWorkspace}
             headings={headings}
             currentLine={activeTab.cursorLine}
             onJumpToHeading={handleJumpToHeading}
@@ -3331,7 +4555,12 @@ export function App() {
               notify(t.find.replacedCount.replace('{n}', String(count)));
             }}
             onSyncScope={(scope) => editorRef.current?.setFindScope(scope)}
-            onSyncHighlights={(payload) => editorRef.current?.setFindHighlights(payload)}
+            onSyncHighlights={(payload) => {
+              topEditorRef.current?.setFindHighlights(payload);
+              if (editorSplitVerticalRef.current) {
+                bottomEditorRef.current?.setFindHighlights(payload);
+              }
+            }}
           />
 
           {activeTab.externalStatus && (
@@ -3404,40 +4633,157 @@ export function App() {
           <div className={`panes-container layout-${layout}`}>
             {layout !== 'preview' && (
               <div
-                className="pane editor-pane"
+                ref={editorPaneRef}
+                className={`pane editor-pane ${editorSplitVertical ? 'is-split-vertical' : ''}`}
                 style={layout === 'split' ? { width: `${splitRatio * 100}%` } : undefined}
               >
-                <EditorPane
-                  ref={editorRef}
-                  t={t}
-                  docId={activeTab.id}
-                  fileName={activeTab.title}
-                  value={activeTab.content}
-                  onChange={updateActiveContent}
-                  onFocusPane={() => {
-                    activePaneRef.current = 'code';
-                    setActivePane('code');
-                  }}
-                  onCursorChange={(line, col) =>
-                    setTabs((prev) =>
-                      prev.map((tb) =>
-                        tb.id === activeTab.id
-                          ? { ...tb, cursorLine: line, cursorCol: col }
-                          : tb
+                {editorSplitVertical ? (
+                  <>
+                    <div
+                      className={`editor-split-slot is-top ${activeEditorSlot === 'top' ? 'is-active' : ''}`}
+                      style={{ flex: `${editorSplitRatio} 1 0%` }}
+                    >
+                      <EditorPane
+                        ref={topEditorRef}
+                        t={t}
+                        docId={activeTab.id}
+                        fileName={activeTab.title}
+                        languageOverride={activeTab.languageOverride}
+                        value={activeTab.content}
+                        onChange={updateActiveContent}
+                        onFocusPane={() => handleFocusSplitPane('top')}
+                        onCursorChange={(line, col) => {
+                          if (activeEditorSlotRef.current !== 'top') return;
+                          setTabs((prev) =>
+                            prev.map((tb) =>
+                              tb.id === activeTab.id
+                                ? { ...tb, cursorLine: line, cursorCol: col }
+                                : tb
+                            )
+                          );
+                        }}
+                        onScrollRatio={(ratio) => {
+                          if (activeEditorSlotRef.current === 'top') {
+                            handleEditorScroll(ratio);
+                          }
+                        }}
+                        onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
+                        onLineCopyNotify={() => notify(t.toasts.copiedLine)}
+                        onStatusNotify={notify}
+                        onAiEditSelection={handleOpenInlineAiEdit}
+                        onImagePasteOrDrop={handleImageFileInput}
+                        onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
+                        onEditorSelectionChange={(range) =>
+                          findBarRef.current?.onEditorSelection(range)
+                        }
+                        syncHighlightRange={
+                          activePane === 'visual' && activeEditorSlot === 'top'
+                            ? previewSyncLineRange
+                            : null
+                        }
+                        theme={theme}
+                        settings={settings}
+                        isRecordingMacro={isRecordingMacro && activeEditorSlot === 'top'}
+                        onRecordMacroStep={handleRecordMacroStep}
+                      />
+                    </div>
+                    <div
+                      className="editor-split-resizer"
+                      onMouseDown={startEditorSplitDrag}
+                      onDoubleClick={() => setEditorSplitRatio(0.5)}
+                      role="separator"
+                      aria-orientation="horizontal"
+                    />
+                    <div
+                      className={`editor-split-slot is-bottom ${activeEditorSlot === 'bottom' ? 'is-active' : ''}`}
+                      style={{ flex: `${1 - editorSplitRatio} 1 0%` }}
+                    >
+                      <EditorPane
+                        ref={bottomEditorRef}
+                        t={t}
+                        docId={activeTab.id}
+                        fileName={activeTab.title}
+                        languageOverride={activeTab.languageOverride}
+                        value={activeTab.content}
+                        onChange={updateActiveContent}
+                        onFocusPane={() => handleFocusSplitPane('bottom')}
+                        onCursorChange={(line, col) => {
+                          if (activeEditorSlotRef.current !== 'bottom') return;
+                          setTabs((prev) =>
+                            prev.map((tb) =>
+                              tb.id === activeTab.id
+                                ? { ...tb, cursorLine: line, cursorCol: col }
+                                : tb
+                            )
+                          );
+                        }}
+                        onScrollRatio={(ratio) => {
+                          if (activeEditorSlotRef.current === 'bottom') {
+                            handleEditorScroll(ratio);
+                          }
+                        }}
+                        onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
+                        onLineCopyNotify={() => notify(t.toasts.copiedLine)}
+                        onStatusNotify={notify}
+                        onAiEditSelection={handleOpenInlineAiEdit}
+                        onImagePasteOrDrop={handleImageFileInput}
+                        onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
+                        onEditorSelectionChange={(range) =>
+                          findBarRef.current?.onEditorSelection(range)
+                        }
+                        syncHighlightRange={
+                          activePane === 'visual' && activeEditorSlot === 'bottom'
+                            ? previewSyncLineRange
+                            : null
+                        }
+                        theme={theme}
+                        settings={settings}
+                        isRecordingMacro={isRecordingMacro && activeEditorSlot === 'bottom'}
+                        onRecordMacroStep={handleRecordMacroStep}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <EditorPane
+                    ref={topEditorRef}
+                    t={t}
+                    docId={activeTab.id}
+                    fileName={activeTab.title}
+                    languageOverride={activeTab.languageOverride}
+                    value={activeTab.content}
+                    onChange={updateActiveContent}
+                    onFocusPane={() => {
+                      activePaneRef.current = 'code';
+                      setActivePane('code');
+                      activeEditorSlotRef.current = 'top';
+                      setActiveEditorSlot('top');
+                    }}
+                    onCursorChange={(line, col) =>
+                      setTabs((prev) =>
+                        prev.map((tb) =>
+                          tb.id === activeTab.id
+                            ? { ...tb, cursorLine: line, cursorCol: col }
+                            : tb
+                        )
                       )
-                    )
-                  }
-                  onScrollRatio={handleEditorScroll}
-                  onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
-                  onLineCopyNotify={() => notify(t.toasts.copiedLine)}
-                  onStatusNotify={notify}
-                  onImagePasteOrDrop={handleImageFileInput}
-                  onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
-                  onEditorSelectionChange={(range) => findBarRef.current?.onEditorSelection(range)}
-                  syncHighlightRange={activePane === 'visual' ? previewSyncLineRange : null}
-                  theme={theme}
-                  settings={settings}
-                />
+                    }
+                    onScrollRatio={handleEditorScroll}
+                    onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
+                    onLineCopyNotify={() => notify(t.toasts.copiedLine)}
+                    onStatusNotify={notify}
+                    onAiEditSelection={handleOpenInlineAiEdit}
+                    onImagePasteOrDrop={handleImageFileInput}
+                    onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
+                    onEditorSelectionChange={(range) =>
+                      findBarRef.current?.onEditorSelection(range)
+                    }
+                    syncHighlightRange={activePane === 'visual' ? previewSyncLineRange : null}
+                    theme={theme}
+                    settings={settings}
+                    isRecordingMacro={isRecordingMacro}
+                    onRecordMacroStep={handleRecordMacroStep}
+                  />
+                )}
               </div>
             )}
 
@@ -3523,7 +4869,23 @@ export function App() {
                   className="right-pane-body"
                   style={{ display: showRightBrowser ? 'none' : 'flex' }}
                 >
-                  {previewKind === 'webpage' ? (
+                  {showSideComparePane && sideTab ? (
+                    <SideComparePane
+                      t={t}
+                      mode={sidePaneMode}
+                      onChangeMode={setSidePaneMode}
+                      tabs={tabs}
+                      activeTab={activeTab}
+                      sideTab={sideTab}
+                      onSelectSideTab={setSideTabId}
+                      onSwapTabs={handleSwapSideTabs}
+                      onClose={() => setSideTabId(null)}
+                      onChangeTabContent={updateTabContentById}
+                      onStatusNotify={notify}
+                      theme={theme}
+                      settings={settings}
+                    />
+                  ) : previewKind === 'webpage' ? (
                     <WebPagePreviewPane
                       t={t}
                       locale={locale}
@@ -3709,6 +5071,9 @@ export function App() {
           stats={stats}
           cursorLine={activeTab.cursorLine}
           cursorCol={activeTab.cursorCol}
+          languageLabel={languageLabel}
+          languageOverride={activeTab.languageOverride ?? null}
+          onChangeLanguageOverride={handleChangeLanguageOverride}
           encoding={activeTab.encoding ?? 'utf-8'}
           eol={activeTab.eol ?? '\n'}
           onToggleEol={handleToggleActiveEol}
@@ -3726,6 +5091,9 @@ export function App() {
           onSwitchToBasic={() => handleModeChange('basic')}
           onOpenSettings={() => setShowSettings(true)}
           onOpenGoToLine={() => setShowGoToLine(true)}
+          isRecordingMacro={isRecordingMacro}
+          macroStepCount={recordingMacroSteps.length}
+          onToggleMacroRecording={handleToggleMacroRecording}
         />
       )}
 
@@ -3789,6 +5157,18 @@ export function App() {
         onJump={handleGoToLine}
       />
 
+      <InlineAiEditModal
+        t={t}
+        open={Boolean(inlineAiState)}
+        selectedText={inlineAiState?.selectedText ?? ''}
+        fileName={activeTab.title}
+        languageLabel={languageLabel}
+        aiConfig={aiConfig}
+        workspaceRoot={workspaceRoot}
+        onClose={() => setInlineAiState(null)}
+        onResultReady={handleInlineAiResultReady}
+      />
+
       <FolderSwitchGuardModal
         t={t}
         mode={folderSwitchGuardMode}
@@ -3821,6 +5201,27 @@ export function App() {
       )}
 
       {toast && <div className="toast-banner">{toast}</div>}
+
+      {printMode === 'source' && (
+        <div id="print-source-sheet" className="print-source-sheet" aria-hidden="true">
+          <div className="print-source-header">
+            <div className="print-source-title">{activeTab.title}</div>
+            <div className="print-source-meta">
+              {activeTab.filePath && <span>{activeTab.filePath} · </span>}
+              <span>{languageLabel}</span>
+              <span> · {stats.lines.toLocaleString()} lines</span>
+            </div>
+          </div>
+          <div className="print-source-code">
+            {activeTab.content.split(/\r?\n/).map((lineText, idx) => (
+              <div key={idx} className="print-source-line">
+                <span className="print-source-ln">{idx + 1}</span>
+                <span className="print-source-text">{lineText || ' '}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

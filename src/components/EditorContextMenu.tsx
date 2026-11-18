@@ -41,7 +41,8 @@ export type EditorContextAction =
   | 'toggleBookmark'
   | 'nextBookmark'
   | 'prevBookmark'
-  | 'clearBookmarks';
+  | 'clearBookmarks'
+  | 'aiEditSelection';
 
 export interface EditorContextMenuState {
   x: number;
@@ -254,6 +255,13 @@ export const EditorContextMenu: React.FC<EditorContextMenuProps> = ({
         {renderItem(cm.rectangularSelection, 'rectangularSelection', {
           shortcut: isMac ? '⌥+Drag' : 'Alt+Drag',
           checked: menu.isRectMode,
+        })}
+
+        <div className="editor-ctx-sep" />
+
+        {renderItem(cm.aiEditSelection, 'aiEditSelection', {
+          shortcut: formatShortcut('⌘+⇧+E'),
+          disabled: !menu.hasSelection,
         })}
 
         <div className="editor-ctx-sep" />

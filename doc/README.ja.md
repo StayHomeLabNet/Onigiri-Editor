@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor ユーザーマニュアル 🍙</h1>
-  <p><strong>AI時代のクロスプラットフォーム対応 Markdown・コード・Web開発プレビュー統合エディタ（v1.0.5）</strong></p>
+  <p><strong>AI時代のクロスプラットフォーム対応 Markdown・コード・Web開発プレビュー統合エディタ（v1.0.6）</strong></p>
   <p>
     <a href="README.md">English</a> | <strong>日本語</strong> ・
     <a href="../README.ja.md">リポジトリトップ (README)</a>

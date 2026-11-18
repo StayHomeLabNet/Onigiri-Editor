@@ -575,7 +575,13 @@ export async function getOsLocale(): Promise<'ja' | 'en'> {
 
 export async function rebuildAppMenu(
   locale: 'ja' | 'en',
-  state?: { showTopBar?: boolean; showFormatToolbar?: boolean }
+  state?: {
+    showTopBar?: boolean;
+    showFormatToolbar?: boolean;
+    editorSplit?: boolean;
+    recentFiles?: string[];
+    recentFolders?: string[];
+  }
 ): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -584,6 +590,9 @@ export async function rebuildAppMenu(
       locale,
       showTopBar: state?.showTopBar ?? true,
       showFormatToolbar: state?.showFormatToolbar ?? true,
+      editorSplit: state?.editorSplit ?? false,
+      recentFiles: state?.recentFiles ?? [],
+      recentFolders: state?.recentFolders ?? [],
     });
   } catch {
     // ignore
@@ -848,4 +857,77 @@ export async function readClipboardText(): Promise<string | null> {
     // ignore
   }
   return null;
+}
+
+export async function revealInFileManager(path: string): Promise<void> {
+  if (!isTauri()) {
+    throw new Error('Reveal in file manager requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('reveal_in_file_manager', { path });
+}
+
+export async function createWorkspaceFolder(
+  rootPath: string,
+  relativePath: string
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Folder creation requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('create_workspace_folder', { rootPath, relativePath });
+}
+
+export async function renameWorkspaceEntry(
+  rootPath: string,
+  targetPath: string,
+  newName: string
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Renaming requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('rename_workspace_entry', { rootPath, targetPath, newName });
+}
+
+export async function duplicateWorkspaceFile(
+  rootPath: string,
+  targetPath: string
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Duplicating requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('duplicate_workspace_file', { rootPath, targetPath });
+}
+
+export async function deleteWorkspaceEntry(
+  rootPath: string,
+  targetPath: string
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error('Deleting requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('delete_workspace_entry', { rootPath, targetPath });
+}
+
+export interface WorkspaceReplaceResult {
+  filesModified: number;
+  replacements: number;
+  modifiedPaths: string[];
+}
+
+export async function replaceInWorkspace(params: {
+  rootPath: string;
+  query: string;
+  replacement: string;
+  caseSensitive: boolean;
+  useRegex: boolean;
+}): Promise<WorkspaceReplaceResult> {
+  if (!isTauri()) {
+    throw new Error('Workspace replace requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<WorkspaceReplaceResult>('replace_in_workspace', params);
 }

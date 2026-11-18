@@ -5,6 +5,9 @@ import {
   Strikethrough,
   Code,
   FileCode,
+  FilePlus2,
+  FolderOpen,
+  Save,
   Link,
   ImagePlus,
   List,
@@ -29,6 +32,10 @@ import {
   ClipboardPaste,
   ZoomOut,
   ZoomIn,
+  Circle,
+  Square,
+  Play,
+  Rows2,
 } from 'lucide-react';
 import type { AppMode } from '../types';
 import type { Translations } from '../i18n/types';
@@ -38,15 +45,63 @@ interface FormatToolbarProps {
   t: Translations;
   mode: AppMode;
   onAction: (action: string) => void;
+  isDirty?: boolean;
+  isEditorSplit?: boolean;
+  isRecordingMacro?: boolean;
+  isPlayingMacro?: boolean;
+  hasMacro?: boolean;
+  macroStepCount?: number;
 }
 
-export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction }) => {
+export const FormatToolbar: React.FC<FormatToolbarProps> = ({
+  t,
+  mode,
+  onAction,
+  isDirty,
+  isEditorSplit,
+  isRecordingMacro,
+  isPlayingMacro,
+  hasMacro,
+  macroStepCount,
+}) => {
   const keepFocusMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
   };
 
   return (
     <div className="format-toolbar">
+      <div className="tb-group">
+        <button
+          type="button"
+          className="tb-btn"
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('newFile')}
+          title={`${t.actions.newFile} (${formatShortcut('⌘N')})`}
+        >
+          <FilePlus2 size={15} />
+        </button>
+        <button
+          type="button"
+          className="tb-btn"
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('openFile')}
+          title={`${t.actions.openFile} (${formatShortcut('⌘O')})`}
+        >
+          <FolderOpen size={15} />
+        </button>
+        <button
+          type="button"
+          className={`tb-btn ${isDirty ? 'is-accent' : ''}`}
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('save')}
+          title={`${t.actions.save} (${formatShortcut('⌘S')})`}
+        >
+          <Save size={15} />
+        </button>
+      </div>
+
+      <span className="tb-sep" />
+
       <div className="tb-group">
         <button type="button" className="tb-btn" onClick={() => onAction('undo')} title={t.actions.undo}>
           <Undo2 size={15} />
@@ -219,6 +274,53 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({ t, mode, onAction 
           title={`${t.actions.zoomIn} (${formatShortcut('⌘+')})`}
         >
           <ZoomIn size={15} />
+        </button>
+        <span className="tb-sep" />
+        <button
+          type="button"
+          className={`tb-btn ${isEditorSplit ? 'is-accent is-active-tool' : ''}`}
+          aria-pressed={Boolean(isEditorSplit)}
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('toggleEditorSplit')}
+          title={t.actions.toggleEditorSplit}
+        >
+          <Rows2 size={15} />
+        </button>
+        <span className="tb-sep" />
+        <button
+          type="button"
+          className={`tb-btn ${isRecordingMacro ? 'is-recording' : ''}`}
+          aria-pressed={Boolean(isRecordingMacro)}
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('macroToggleRecord')}
+          title={
+            isRecordingMacro
+              ? `${t.actions.macroStop} (${formatShortcut('⌘⇧M')})`
+              : `${t.actions.macroRecord} (${formatShortcut('⌘⇧M')})`
+          }
+        >
+          {isRecordingMacro ? (
+            <Square size={12} className="macro-stop-icon" />
+          ) : (
+            <Circle size={13} className="macro-record-icon" />
+          )}
+        </button>
+        <button
+          type="button"
+          className="tb-btn"
+          disabled={!hasMacro || Boolean(isRecordingMacro) || Boolean(isPlayingMacro)}
+          onMouseDown={keepFocusMouseDown}
+          onClick={() => onAction('macroPlay')}
+          title={
+            hasMacro
+              ? `${t.actions.macroPlay} (F8 · ${macroStepCount ?? 0})`
+              : `${t.actions.macroPlay} (F8)`
+          }
+        >
+          <Play
+            size={14}
+            className={hasMacro && !isRecordingMacro ? 'macro-play-icon is-ready' : 'macro-play-icon'}
+          />
         </button>
         <span className="tb-sep" />
         <button

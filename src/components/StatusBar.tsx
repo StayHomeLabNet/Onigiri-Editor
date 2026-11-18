@@ -4,6 +4,7 @@ import type { AppMode, DocumentStats, Locale, TextEncodingId } from '../types';
 import type { Translations } from '../i18n/types';
 import { formatShortcut } from '../utils/platform';
 import { getEncodingShortLabel, TEXT_ENCODINGS } from '../utils/encodings';
+import { LANGUAGE_OPTIONS } from '../utils/language';
 
 const ZOOM_PRESETS = [50, 75, 100, 125, 150, 200] as const;
 
@@ -31,12 +32,18 @@ interface StatusBarProps {
   syncScroll: boolean;
   onToggleSyncScroll: () => void;
   wordGoal: number;
+  languageLabel: string;
+  languageOverride?: string | null;
+  onChangeLanguageOverride?: (langId: string | null) => void;
   zoomPercent: number;
   onChangeZoom: (nextZoom: number) => void;
   topBarHidden?: boolean;
   onSwitchToBasic?: () => void;
   onOpenSettings?: () => void;
   onOpenGoToLine?: () => void;
+  isRecordingMacro?: boolean;
+  macroStepCount?: number;
+  onToggleMacroRecording?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -59,12 +66,18 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   syncScroll,
   onToggleSyncScroll,
   wordGoal,
+  languageLabel,
+  languageOverride,
+  onChangeLanguageOverride,
   zoomPercent,
   onChangeZoom,
   topBarHidden,
   onSwitchToBasic,
   onOpenSettings,
   onOpenGoToLine,
+  isRecordingMacro,
+  macroStepCount,
+  onToggleMacroRecording,
 }) => {
   const goalPct = wordGoal > 0 ? Math.min(100, Math.round((stats.words / wordGoal) * 100)) : 0;
   const [encMenuOpen, setEncMenuOpen] = useState(false);
@@ -72,6 +85,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
     filePath ? 'reopen' : 'save'
   );
   const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const langPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false);
   const [zoomDraft, setZoomDraft] = useState(String(zoomPercent));
@@ -103,6 +119,26 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [encMenuOpen]);
+
+  useEffect(() => {
+    if (!langMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (langPopoverRef.current && !langPopoverRef.current.contains(e.target as Node)) {
+        setLangMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setLangMenuOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [langMenuOpen]);
 
   useEffect(() => {
     setZoomDraft(String(zoomPercent));
@@ -156,6 +192,21 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           {isDirty ? t.status.unsaved : filePath ? t.status.saved : t.status.draft}
         </span>
 
+        {isRecordingMacro && (
+          <button
+            type="button"
+            className="status-macro-rec"
+            onClick={onToggleMacroRecording}
+            title={`${t.actions.macroStop} (${formatShortcut('⌘⇧M')})`}
+          >
+            <span className="status-macro-dot" />
+            <span>
+              {t.status.macroRecording}
+              {typeof macroStepCount === 'number' ? ` (${macroStepCount})` : ''}
+            </span>
+          </button>
+        )}
+
         {autoSaveEnabled && filePath && (
           <span className="status-autosave-pill">{t.status.autoSaveOn}</span>
         )}
@@ -202,6 +253,63 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           </>
         )}
 
+        <div className="status-lang-wrap" ref={langPopoverRef}>
+          <button
+            type="button"
+            className={`status-btn status-lang ${languageOverride ? 'is-overridden' : ''} ${langMenuOpen ? 'is-open' : ''}`}
+            onClick={() => {
+              setEncMenuOpen(false);
+              setZoomMenuOpen(false);
+              setLangMenuOpen((v) => !v);
+            }}
+            title={`${t.status.languageSelectTitle}: ${languageLabel}`}
+            aria-label={t.status.languageSelectTitle}
+          >
+            {languageLabel}
+          </button>
+
+          {langMenuOpen && (
+            <div className="status-lang-popover" role="dialog" aria-label={t.status.languageSelectTitle}>
+              <div className="status-encoding-subtitle">{t.status.languageSelectTitle}</div>
+              <div className="status-lang-list">
+                <button
+                  type="button"
+                  className={`status-encoding-item ${!languageOverride ? 'is-current' : ''}`}
+                  onClick={() => {
+                    onChangeLanguageOverride?.(null);
+                    setLangMenuOpen(false);
+                  }}
+                >
+                  <span className="status-encoding-check">
+                    {!languageOverride ? <Check size={12} /> : null}
+                  </span>
+                  <span className="status-encoding-item-label">{t.status.languageAuto}</span>
+                </button>
+                {LANGUAGE_OPTIONS.map((opt) => {
+                  const isCurrent = languageOverride === opt.id;
+                  const display = locale === 'ja' && opt.labelJa ? opt.labelJa : opt.label;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={`status-encoding-item ${isCurrent ? 'is-current' : ''}`}
+                      onClick={() => {
+                        onChangeLanguageOverride?.(opt.id);
+                        setLangMenuOpen(false);
+                      }}
+                    >
+                      <span className="status-encoding-check">
+                        {isCurrent ? <Check size={12} /> : null}
+                      </span>
+                      <span className="status-encoding-item-label">{display}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         <button
           type="button"
           className="status-btn status-eol-btn"
@@ -216,6 +324,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             type="button"
             className={`status-btn status-encoding-btn ${encMenuOpen ? 'is-open' : ''}`}
             onClick={() => {
+              setLangMenuOpen(false);
+              setZoomMenuOpen(false);
               setEncMenuAction(filePath ? 'reopen' : 'save');
               setEncMenuOpen((v) => !v);
             }}
@@ -318,6 +428,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             className={`status-btn status-zoom-btn ${zoomMenuOpen ? 'is-open' : ''}`}
             onClick={() => {
               setEncMenuOpen(false);
+              setLangMenuOpen(false);
               setZoomMenuOpen((v) => !v);
             }}
             title={t.status.zoomTitle}

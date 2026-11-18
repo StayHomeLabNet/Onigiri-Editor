@@ -31,29 +31,92 @@ import {
   rectangularSelection,
 } from '@codemirror/view';
 import {
+  copyLineDown,
+  copyLineUp,
+  cursorCharLeft,
+  cursorCharRight,
+  cursorDocEnd,
+  cursorDocStart,
+  cursorGroupLeft,
+  cursorGroupRight,
+  cursorLineBoundaryBackward,
+  cursorLineBoundaryForward,
+  cursorLineDown,
+  cursorLineEnd,
+  cursorLineStart,
+  cursorLineUp,
+  cursorMatchingBracket,
+  cursorPageDown,
+  cursorPageUp,
   defaultKeymap,
+  deleteCharBackward,
+  deleteCharForward,
+  deleteGroupBackward,
+  deleteGroupForward,
+  deleteLine,
+  deleteLineBoundaryBackward,
+  deleteLineBoundaryForward,
+  deleteToLineEnd,
+  deleteToLineStart,
   history,
   historyKeymap,
+  indentLess,
+  indentMore,
   indentWithTab,
+  insertNewline,
+  insertNewlineAndIndent,
+  insertTab,
+  moveLineDown,
+  moveLineUp,
   redo,
   redoDepth,
   selectAll,
+  selectCharLeft,
+  selectCharRight,
+  selectDocEnd,
+  selectDocStart,
+  selectGroupLeft,
+  selectGroupRight,
+  selectLine,
+  selectLineBoundaryBackward,
+  selectLineBoundaryForward,
+  selectLineDown,
+  selectLineEnd,
+  selectLineStart,
+  selectLineUp,
+  selectMatchingBracket,
+  selectPageDown,
+  selectPageUp,
+  splitLine,
+  toggleComment,
+  transposeChars,
   undo,
   undoDepth,
 } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
 import {
-  LanguageDescription,
   syntaxHighlighting,
   HighlightStyle,
   indentOnInput,
   bracketMatching,
+  foldGutter,
+  foldKeymap,
+  foldAll,
+  unfoldAll,
 } from '@codemirror/language';
+import { highlightSelectionMatches, selectNextOccurrence } from '@codemirror/search';
+import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { tags } from '@lezer/highlight';
 import type { EditorSettings, ThemeId } from '../types';
 import type { Translations } from '../i18n/types';
 import type { FindMatch, TextRange } from '../utils/findReplace';
+import type { CmMacroCommandId, MacroStep } from '../utils/macro';
+import {
+  isMarkdownFilename,
+  resolveEditorLanguageDescription,
+  resolveEffectiveFilename,
+} from '../utils/language';
 import { htmlToMarkdown } from '../utils/markdown';
 import { readClipboardText, writeClipboardText } from '../utils/platform';
 import {
@@ -83,6 +146,64 @@ import {
 } from './EditorContextMenu';
 import { EditorRuler } from './EditorRuler';
 
+const CM_MACRO_COMMANDS: Record<CmMacroCommandId, (view: EditorView) => boolean> = {
+  cursorCharLeft,
+  cursorCharRight,
+  cursorGroupLeft,
+  cursorGroupRight,
+  cursorLineUp,
+  cursorLineDown,
+  cursorPageUp,
+  cursorPageDown,
+  cursorLineBoundaryBackward,
+  cursorLineBoundaryForward,
+  cursorLineStart,
+  cursorLineEnd,
+  cursorDocStart,
+  cursorDocEnd,
+  cursorMatchingBracket,
+  selectCharLeft,
+  selectCharRight,
+  selectGroupLeft,
+  selectGroupRight,
+  selectLineUp,
+  selectLineDown,
+  selectPageUp,
+  selectPageDown,
+  selectLineBoundaryBackward,
+  selectLineBoundaryForward,
+  selectLineStart,
+  selectLineEnd,
+  selectDocStart,
+  selectDocEnd,
+  selectAll,
+  selectLine,
+  selectMatchingBracket,
+  deleteCharBackward,
+  deleteCharForward,
+  deleteGroupBackward,
+  deleteGroupForward,
+  deleteLineBoundaryBackward,
+  deleteLineBoundaryForward,
+  deleteToLineEnd,
+  deleteToLineStart,
+  deleteLine,
+  insertNewlineAndIndent,
+  insertNewline,
+  indentMore,
+  indentLess,
+  insertTab,
+  splitLine,
+  transposeChars,
+  moveLineUp,
+  moveLineDown,
+  copyLineUp,
+  copyLineDown,
+  toggleComment,
+  undo,
+  redo,
+};
+
 export interface EditorHandle {
   focus: () => void;
   insertText: (text: string) => void;
@@ -95,14 +216,19 @@ export interface EditorHandle {
   redoAction: () => void;
   selectAllAction: () => void;
   copyAction: () => void;
-  pasteAction: () => void;
+  pasteAction: () => Promise<void>;
+  runMacroStep: (step: MacroStep) => Promise<void>;
   selectRange: (from: number, to: number, options?: { focus?: boolean }) => void;
   replaceRange: (from: number, to: number, text: string, options?: { selectResult?: boolean }) => void;
   getSelectionRange: () => TextRange | null;
   getCursorOffset: () => number;
+  getCursorPosition: () => { line: number; col: number };
   getSelectedText: () => string;
   setFindScope: (scope: TextRange | null) => void;
   setFindHighlights: (payload: { matches: FindMatch[]; activeIndex: number } | null) => void;
+  foldAllLines: () => void;
+  unfoldAllLines: () => void;
+  selectNextOccurrenceAction: () => void;
 }
 
 export interface LineRange {
@@ -114,6 +240,7 @@ interface EditorPaneProps {
   t: Translations;
   docId: string;
   fileName?: string;
+  languageOverride?: string | null;
   value: string;
   onChange: (nextValue: string) => void;
   onCursorChange: (line: number, col: number) => void;
@@ -125,7 +252,10 @@ interface EditorPaneProps {
   onImagePasteOrDrop?: (file: File) => Promise<void>;
   onFindScopeChange?: (scope: TextRange | null) => void;
   onEditorSelectionChange?: (range: TextRange) => void;
+  onAiEditSelection?: () => void;
   syncHighlightRange?: LineRange | null;
+  isRecordingMacro?: boolean;
+  onRecordMacroStep?: (step: MacroStep) => void;
   theme: ThemeId;
   settings: EditorSettings;
 }
@@ -534,11 +664,6 @@ function createHighlightStyle(theme: ThemeId) {
   ]);
 }
 
-function isMarkdownFilename(name?: string): boolean {
-  if (!name) return true;
-  return /\.(md|markdown|mdown|mdx)$/i.test(name.trim());
-}
-
 function copyTextToClipboard(text: string) {
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(text).catch(() => {
@@ -771,6 +896,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       t,
       docId,
       fileName,
+      languageOverride,
       value,
       onChange,
       onCursorChange,
@@ -782,7 +908,10 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
+      onAiEditSelection,
       syncHighlightRange,
+      isRecordingMacro = false,
+      onRecordMacroStep,
       theme,
       settings,
     },
@@ -798,6 +927,9 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     const bracketMatchComp = useRef(new Compartment());
     const whitespaceComp = useRef(new Compartment());
     const eolSymbolComp = useRef(new Compartment());
+    const foldComp = useRef(new Compartment());
+    const selectionMatchComp = useRef(new Compartment());
+    const closeBracketsComp = useRef(new Compartment());
 
     const [rulerVersion, setRulerVersion] = useState(0);
     const [rectMode, setRectMode] = useState(false);
@@ -809,6 +941,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     const callbacksRef = useRef({
       t,
       fileName,
+      languageOverride,
       onChange,
       onCursorChange,
       onFocusPane,
@@ -819,11 +952,15 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
+      onAiEditSelection,
+      isRecordingMacro,
+      onRecordMacroStep,
       settings,
     });
     callbacksRef.current = {
       t,
       fileName,
+      languageOverride,
       onChange,
       onCursorChange,
       onFocusPane,
@@ -834,12 +971,48 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
+      onAiEditSelection,
+      isRecordingMacro,
+      onRecordMacroStep,
       settings,
     };
 
     const suppressingExternalRef = useRef(false);
     const suppressingSelectionNotifyRef = useRef(false);
+    const suppressingMacroRecordRef = useRef(false);
+    const runningCmCommandRef = useRef(false);
+    const composingBaseRef = useRef<{ prefix: string; suffix: string } | null>(null);
     const lastDocIdRef = useRef(docId);
+
+    const recordMacroStep = useCallback((step: MacroStep) => {
+      if (
+        !callbacksRef.current.isRecordingMacro ||
+        suppressingMacroRecordRef.current ||
+        suppressingExternalRef.current
+      ) {
+        return;
+      }
+      callbacksRef.current.onRecordMacroStep?.(step);
+    }, []);
+
+    const runRecordableCmCommand = (
+      commandId: CmMacroCommandId,
+      editorView: EditorView
+    ): boolean => {
+      if (!callbacksRef.current.isRecordingMacro || suppressingMacroRecordRef.current) {
+        return false;
+      }
+      runningCmCommandRef.current = true;
+      try {
+        const handled = CM_MACRO_COMMANDS[commandId](editorView);
+        if (handled) {
+          recordMacroStep({ type: 'cmCommand', command: commandId });
+        }
+        return handled;
+      } finally {
+        runningCmCommandRef.current = false;
+      }
+    };
 
     const tryOeditLineCopy = (editorView: EditorView): boolean => {
       const { settings: curSettings, onLineCopyNotify } = callbacksRef.current;
@@ -870,37 +1043,52 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       }
     };
 
-    const performPaste = () => {
-      void readClipboardText().then((clip) => {
-        const currentView = viewRef.current;
-        if (!currentView || clip === null) return;
-        const normalized = clip.replace(/\r\n?/g, '\n');
-        const ranges = currentView.state.selection.ranges;
-        if (ranges.length > 1) {
-          const clipLines = normalized.split('\n');
-          if (clipLines.length === ranges.length) {
-            let idx = 0;
-            const tr = currentView.state.changeByRange((range) => {
-              const insert = clipLines[idx++] ?? '';
-              return {
-                changes: { from: range.from, to: range.to, insert },
-                range: EditorSelection.cursor(range.from + insert.length),
-              };
-            });
-            currentView.dispatch(tr);
-            currentView.focus();
-            return;
-          }
+    const performCut = (editorView: EditorView) => {
+      const { selection } = editorView.state;
+      if (selection.ranges.some((r) => !r.empty)) {
+        const text = selection.ranges
+          .map((r) => editorView.state.sliceDoc(r.from, r.to))
+          .join('\n');
+        void writeClipboardText(text);
+        editorView.dispatch(editorView.state.replaceSelection(''));
+      }
+    };
+
+    const performPaste = async (): Promise<void> => {
+      const clip = await readClipboardText();
+      const currentView = viewRef.current;
+      if (!currentView || clip === null) return;
+      const normalized = clip.replace(/\r\n?/g, '\n');
+      const ranges = currentView.state.selection.ranges;
+      if (ranges.length > 1) {
+        const clipLines = normalized.split('\n');
+        if (clipLines.length === ranges.length) {
+          let idx = 0;
+          const tr = currentView.state.changeByRange((range) => {
+            const insert = clipLines[idx++] ?? '';
+            return {
+              changes: { from: range.from, to: range.to, insert },
+              range: EditorSelection.cursor(range.from + insert.length),
+            };
+          });
+          currentView.dispatch(tr);
+          currentView.focus();
+          return;
         }
-        currentView.dispatch(currentView.state.replaceSelection(normalized));
-        currentView.focus();
-      });
+      }
+      currentView.dispatch(currentView.state.replaceSelection(normalized));
+      currentView.focus();
     };
 
     useEffect(() => {
       if (!hostRef.current) return;
 
       const initialWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
+
+      const recordCmd =
+        (commandId: CmMacroCommandId) =>
+        (editorView: EditorView): boolean =>
+          runRecordableCmCommand(commandId, editorView);
 
       const view = new EditorView({
         state: EditorState.create({
@@ -918,6 +1106,15 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             bracketMatchComp.current.of(
               (settings.bracketMatchingEnabled ?? true) ? bracketMatching(BRACKET_MATCH_CONFIG) : []
             ),
+            foldComp.current.of(
+              (settings.codeFoldingEnabled ?? true) ? [foldGutter(), keymap.of(foldKeymap)] : []
+            ),
+            selectionMatchComp.current.of(
+              (settings.highlightSelectionMatches ?? true) ? highlightSelectionMatches() : []
+            ),
+            closeBracketsComp.current.of(
+              (settings.autoCloseBrackets ?? true) ? [closeBrackets(), keymap.of(closeBracketsKeymap)] : []
+            ),
             whitespaceComp.current.of(
               settings.showWhitespaceSymbols ? [highlightWhitespace(), ideographicSpacePlugin] : []
             ),
@@ -933,13 +1130,24 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             Prec.high(
               keymap.of([
                 {
+                  key: 'Mod-d',
+                  run: selectNextOccurrence,
+                },
+                {
                   key: 'Mod-c',
-                  run: (editorView) => tryOeditLineCopy(editorView),
+                  run: (editorView) => {
+                    const copied = tryOeditLineCopy(editorView);
+                    if (copied) {
+                      recordMacroStep({ type: 'clipboard', action: 'copy' });
+                    }
+                    return copied;
+                  },
                 },
                 {
                   key: 'Mod-u',
                   run: (editorView) => {
                     applySelectionOrLineTransform(editorView, (s) => s.toLowerCase());
+                    recordMacroStep({ type: 'contextAction', action: 'toLowerCase' });
                     return true;
                   },
                 },
@@ -947,6 +1155,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                   key: 'Mod-Shift-u',
                   run: (editorView) => {
                     applySelectionOrLineTransform(editorView, (s) => s.toUpperCase());
+                    recordMacroStep({ type: 'contextAction', action: 'toUpperCase' });
                     return true;
                   },
                 },
@@ -954,6 +1163,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                   key: 'Mod-Shift-Space',
                   run: (editorView) => {
                     applyPerLineTransform(editorView, trimLeadingLine);
+                    recordMacroStep({ type: 'contextAction', action: 'trimLeading' });
                     return true;
                   },
                 },
@@ -961,20 +1171,33 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                   key: 'Mod-Shift-r',
                   run: (editorView) => {
                     applyPerLineTransform(editorView, insertQuoteLine);
+                    recordMacroStep({ type: 'contextAction', action: 'insertQuote' });
                     return true;
                   },
                 },
                 {
                   key: 'Mod-F2',
-                  run: (editorView) => toggleBookmarkAtCursor(editorView),
+                  run: (editorView) => {
+                    const ok = toggleBookmarkAtCursor(editorView);
+                    if (ok) recordMacroStep({ type: 'contextAction', action: 'toggleBookmark' });
+                    return ok;
+                  },
                 },
                 {
                   key: 'F2',
-                  run: (editorView) => jumpToBookmark(editorView, 'next'),
+                  run: (editorView) => {
+                    const ok = jumpToBookmark(editorView, 'next');
+                    if (ok) recordMacroStep({ type: 'contextAction', action: 'nextBookmark' });
+                    return ok;
+                  },
                 },
                 {
                   key: 'Shift-F2',
-                  run: (editorView) => jumpToBookmark(editorView, 'prev'),
+                  run: (editorView) => {
+                    const ok = jumpToBookmark(editorView, 'prev');
+                    if (ok) recordMacroStep({ type: 'contextAction', action: 'prevBookmark' });
+                    return ok;
+                  },
                 },
                 {
                   key: 'Escape',
@@ -989,6 +1212,65 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                     return false;
                   },
                 },
+                // Macro recording interceptors (only active while recording; return false otherwise)
+                { key: 'ArrowLeft', run: recordCmd('cursorCharLeft'), shift: recordCmd('selectCharLeft') },
+                { key: 'ArrowRight', run: recordCmd('cursorCharRight'), shift: recordCmd('selectCharRight') },
+                {
+                  mac: 'Alt-ArrowLeft',
+                  win: 'Ctrl-ArrowLeft',
+                  linux: 'Ctrl-ArrowLeft',
+                  run: recordCmd('cursorGroupLeft'),
+                  shift: recordCmd('selectGroupLeft'),
+                },
+                {
+                  mac: 'Alt-ArrowRight',
+                  win: 'Ctrl-ArrowRight',
+                  linux: 'Ctrl-ArrowRight',
+                  run: recordCmd('cursorGroupRight'),
+                  shift: recordCmd('selectGroupRight'),
+                },
+                { mac: 'Mod-ArrowLeft', run: recordCmd('cursorLineStart'), shift: recordCmd('selectLineStart') },
+                { mac: 'Mod-ArrowRight', run: recordCmd('cursorLineEnd'), shift: recordCmd('selectLineEnd') },
+                { key: 'ArrowUp', run: recordCmd('cursorLineUp'), shift: recordCmd('selectLineUp') },
+                { key: 'ArrowDown', run: recordCmd('cursorLineDown'), shift: recordCmd('selectLineDown') },
+                { mac: 'Mod-ArrowUp', run: recordCmd('cursorDocStart'), shift: recordCmd('selectDocStart') },
+                { mac: 'Mod-ArrowDown', run: recordCmd('cursorDocEnd'), shift: recordCmd('selectDocEnd') },
+                { key: 'PageUp', run: recordCmd('cursorPageUp'), shift: recordCmd('selectPageUp') },
+                { key: 'PageDown', run: recordCmd('cursorPageDown'), shift: recordCmd('selectPageDown') },
+                { key: 'Home', run: recordCmd('cursorLineBoundaryBackward'), shift: recordCmd('selectLineBoundaryBackward') },
+                { key: 'End', run: recordCmd('cursorLineBoundaryForward'), shift: recordCmd('selectLineBoundaryForward') },
+                { key: 'Mod-Home', run: recordCmd('cursorDocStart'), shift: recordCmd('selectDocStart') },
+                { key: 'Mod-End', run: recordCmd('cursorDocEnd'), shift: recordCmd('selectDocEnd') },
+                { key: 'Enter', run: recordCmd('insertNewlineAndIndent'), shift: recordCmd('insertNewlineAndIndent') },
+                { key: 'Tab', run: recordCmd('indentMore'), shift: recordCmd('indentLess') },
+                { key: 'Backspace', run: recordCmd('deleteCharBackward') },
+                { key: 'Delete', run: recordCmd('deleteCharForward') },
+                { mac: 'Alt-Backspace', win: 'Ctrl-Backspace', linux: 'Ctrl-Backspace', run: recordCmd('deleteGroupBackward') },
+                { mac: 'Alt-Delete', win: 'Ctrl-Delete', linux: 'Ctrl-Delete', run: recordCmd('deleteGroupForward') },
+                { mac: 'Mod-Backspace', run: recordCmd('deleteLineBoundaryBackward') },
+                { mac: 'Mod-Delete', run: recordCmd('deleteLineBoundaryForward') },
+                { key: 'Mod-a', run: recordCmd('selectAll') },
+                { key: 'Mod-z', run: recordCmd('undo'), shift: recordCmd('redo') },
+                { win: 'Ctrl-y', linux: 'Ctrl-y', run: recordCmd('redo') },
+                { key: 'Mod-[', run: recordCmd('indentLess') },
+                { key: 'Mod-]', run: recordCmd('indentMore') },
+                { key: 'Mod-/', run: recordCmd('toggleComment') },
+                { key: 'Mod-Shift-k', run: recordCmd('deleteLine') },
+                { key: 'Mod-Shift-\\', run: recordCmd('cursorMatchingBracket') },
+                { key: 'Alt-ArrowUp', run: recordCmd('moveLineUp'), shift: recordCmd('copyLineUp') },
+                { key: 'Alt-ArrowDown', run: recordCmd('moveLineDown'), shift: recordCmd('copyLineDown') },
+                // macOS Emacs-style cursor & edit shortcuts
+                { mac: 'Ctrl-b', run: recordCmd('cursorCharLeft'), shift: recordCmd('selectCharLeft') },
+                { mac: 'Ctrl-f', run: recordCmd('cursorCharRight'), shift: recordCmd('selectCharRight') },
+                { mac: 'Ctrl-p', run: recordCmd('cursorLineUp'), shift: recordCmd('selectLineUp') },
+                { mac: 'Ctrl-n', run: recordCmd('cursorLineDown'), shift: recordCmd('selectLineDown') },
+                { mac: 'Ctrl-a', run: recordCmd('cursorLineStart'), shift: recordCmd('selectLineStart') },
+                { mac: 'Ctrl-e', run: recordCmd('cursorLineEnd'), shift: recordCmd('selectLineEnd') },
+                { mac: 'Ctrl-d', run: recordCmd('deleteCharForward') },
+                { mac: 'Ctrl-h', run: recordCmd('deleteCharBackward') },
+                { mac: 'Ctrl-k', run: recordCmd('deleteToLineEnd') },
+                { mac: 'Ctrl-o', run: recordCmd('splitLine') },
+                { mac: 'Ctrl-t', run: recordCmd('transposeChars') },
               ])
             ),
             keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
@@ -999,6 +1281,41 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             EditorView.domEventHandlers({
               focus() {
                 callbacksRef.current.onFocusPane?.();
+                return false;
+              },
+              compositionstart(_event, editorView) {
+                if (callbacksRef.current.isRecordingMacro && !suppressingMacroRecordRef.current) {
+                  const sel = editorView.state.selection.main;
+                  composingBaseRef.current = {
+                    prefix: editorView.state.sliceDoc(0, sel.from),
+                    suffix: editorView.state.sliceDoc(sel.to),
+                  };
+                }
+                return false;
+              },
+              compositionend() {
+                const base = composingBaseRef.current;
+                composingBaseRef.current = null;
+                if (base && callbacksRef.current.isRecordingMacro && !suppressingMacroRecordRef.current) {
+                  window.setTimeout(() => {
+                    const currentView = viewRef.current;
+                    if (!currentView) return;
+                    const docStr = currentView.state.doc.toString();
+                    if (
+                      docStr.startsWith(base.prefix) &&
+                      docStr.endsWith(base.suffix) &&
+                      docStr.length >= base.prefix.length + base.suffix.length
+                    ) {
+                      const committed = docStr.slice(
+                        base.prefix.length,
+                        docStr.length - base.suffix.length
+                      );
+                      if (committed) {
+                        recordMacroStep({ type: 'insertText', text: committed });
+                      }
+                    }
+                  }, 0);
+                }
                 return false;
               },
               contextmenu(event, editorView) {
@@ -1027,11 +1344,20 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 });
                 return true;
               },
+              cut(_event, editorView) {
+                if (editorView.state.selection.ranges.some((r) => !r.empty)) {
+                  recordMacroStep({ type: 'clipboard', action: 'cut' });
+                }
+                return false;
+              },
               copy(event, editorView) {
                 const { settings: curSettings, onLineCopyNotify } = callbacksRef.current;
-                if (!curSettings.oeditLineCopyEnabled) return false;
                 const sel = editorView.state.selection.main;
-                if (!sel.empty) return false;
+                if (!sel.empty || editorView.state.selection.ranges.some((r) => !r.empty)) {
+                  recordMacroStep({ type: 'clipboard', action: 'copy' });
+                  return false;
+                }
+                if (!curSettings.oeditLineCopyEnabled) return false;
                 const line = editorView.state.doc.lineAt(sel.head);
                 if (curSettings.oeditLineCopyTrigger === 'eol-only' && sel.head !== line.to) {
                   return false;
@@ -1041,6 +1367,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 event.clipboardData?.setData('text/plain', payload);
                 copyTextToClipboard(payload);
                 onLineCopyNotify?.();
+                recordMacroStep({ type: 'clipboard', action: 'copy' });
                 return true;
               },
               drop(event) {
@@ -1064,6 +1391,8 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                     return true;
                   }
                 }
+
+                recordMacroStep({ type: 'clipboard', action: 'paste' });
 
                 const { settings: curSettings, onSmartPasteNotify: notify } = callbacksRef.current;
                 if (!curSettings.smartPasteHtml) return false;
@@ -1094,6 +1423,30 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 const next = update.state.doc.toString();
                 callbacksRef.current.onChange(next);
               }
+              if (
+                update.docChanged &&
+                !suppressingExternalRef.current &&
+                !suppressingMacroRecordRef.current &&
+                !runningCmCommandRef.current &&
+                callbacksRef.current.isRecordingMacro &&
+                !update.view.composing &&
+                !composingBaseRef.current
+              ) {
+                for (const tr of update.transactions) {
+                  if (!tr.docChanged) continue;
+                  const isTypedInput =
+                    (tr.isUserEvent('input.type') || tr.isUserEvent('input.complete')) &&
+                    !tr.isUserEvent('input.type.compose') &&
+                    !tr.isUserEvent('input.paste');
+                  if (!isTypedInput) continue;
+                  tr.changes.iterChanges((_fromA, _toA, _fromB, _toB, inserted) => {
+                    const text = inserted.toString();
+                    if (text) {
+                      recordMacroStep({ type: 'insertText', text });
+                    }
+                  });
+                }
+              }
               if (update.docChanged) {
                 const prevScope = update.startState.field(findScopeField);
                 const nextScope = update.state.field(findScopeField);
@@ -1108,7 +1461,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 const sel = update.state.selection.main;
                 callbacksRef.current.onEditorSelectionChange?.({ from: sel.from, to: sel.to });
               }
-              if (update.selectionSet || update.docChanged) {
+              if ((update.selectionSet || update.docChanged) && !suppressingExternalRef.current) {
                 const head = update.state.selection.main.head;
                 const lineObj = update.state.doc.lineAt(head);
                 callbacksRef.current.onCursorChange(lineObj.number, head - lineObj.from + 1);
@@ -1143,6 +1496,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
 
       const scroller = view.scrollDOM;
       const handleScroll = () => {
+        if (suppressingExternalRef.current) return;
         const max = scroller.scrollHeight - scroller.clientHeight;
         const ratio = max > 0 ? scroller.scrollTop / max : 0;
         callbacksRef.current.onScrollRatio?.(ratio);
@@ -1173,6 +1527,15 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           bracketMatchComp.current.reconfigure(
             (settings.bracketMatchingEnabled ?? true) ? bracketMatching(BRACKET_MATCH_CONFIG) : []
           ),
+          foldComp.current.reconfigure(
+            (settings.codeFoldingEnabled ?? true) ? [foldGutter(), keymap.of(foldKeymap)] : []
+          ),
+          selectionMatchComp.current.reconfigure(
+            (settings.highlightSelectionMatches ?? true) ? highlightSelectionMatches() : []
+          ),
+          closeBracketsComp.current.reconfigure(
+            (settings.autoCloseBrackets ?? true) ? [closeBrackets(), keymap.of(closeBracketsKeymap)] : []
+          ),
           whitespaceComp.current.reconfigure(
             settings.showWhitespaceSymbols ? [highlightWhitespace(), ideographicSpacePlugin] : []
           ),
@@ -1194,13 +1557,13 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       });
     }, [syncHighlightRange, settings.activeLineSyncHighlight]);
 
-    // Dynamic language mode based on active filename extension (e.g., .php, .ts, .py, .rs, etc.)
+    // Dynamic language mode based on active filename extension or manual languageOverride
     useEffect(() => {
       const view = viewRef.current;
       if (!view) return;
       let cancelled = false;
 
-      if (isMarkdownFilename(fileName)) {
+      if (isMarkdownFilename(fileName, languageOverride)) {
         view.dispatch({
           effects: langComp.current.reconfigure(
             markdown({ base: markdownLanguage, codeLanguages: languages })
@@ -1209,7 +1572,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         return;
       }
 
-      const desc = fileName ? LanguageDescription.matchFilename(languages, fileName) : null;
+      const desc = resolveEditorLanguageDescription(fileName, languageOverride);
       if (!desc) {
         view.dispatch({
           effects: langComp.current.reconfigure([]),
@@ -1227,9 +1590,9 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       return () => {
         cancelled = true;
       };
-    }, [fileName]);
+    }, [fileName, languageOverride]);
 
-    // Sync external value changes (tab switches, AI cleanup, checkbox toggle, snapshot restore)
+    // Sync external value changes (tab switches, split sibling edits, AI cleanup, checkbox toggle, snapshot restore)
     useEffect(() => {
       const view = viewRef.current;
       if (!view) return;
@@ -1259,11 +1622,39 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         view.scrollDOM.scrollTop = 0;
         callbacksRef.current.onFindScopeChange?.(null);
       } else {
+        const prevScrollTop = view.scrollDOM.scrollTop;
+        const prevScrollLeft = view.scrollDOM.scrollLeft;
+        let start = 0;
+        const minLen = Math.min(current.length, value.length);
+        while (start < minLen && current.charCodeAt(start) === value.charCodeAt(start)) {
+          start++;
+        }
+        let curEnd = current.length;
+        let valEnd = value.length;
+        while (
+          curEnd > start &&
+          valEnd > start &&
+          current.charCodeAt(curEnd - 1) === value.charCodeAt(valEnd - 1)
+        ) {
+          curEnd--;
+          valEnd--;
+        }
+        const changeSpec = { from: start, to: curEnd, insert: value.slice(start, valEnd) };
+        const changeDesc = view.state.changes(changeSpec);
         const sel = view.state.selection.main;
-        const nextAnchor = Math.min(sel.anchor, value.length);
+        const nextAnchor = changeDesc.mapPos(sel.anchor, 1);
+        const nextHead = changeDesc.mapPos(sel.head, 1);
         view.dispatch({
-          changes: { from: 0, to: current.length, insert: value },
-          selection: { anchor: nextAnchor },
+          changes: changeSpec,
+          selection: { anchor: nextAnchor, head: nextHead },
+        });
+        view.scrollDOM.scrollTop = prevScrollTop;
+        view.scrollDOM.scrollLeft = prevScrollLeft;
+        requestAnimationFrame(() => {
+          if (viewRef.current === view) {
+            view.scrollDOM.scrollTop = prevScrollTop;
+            view.scrollDOM.scrollLeft = prevScrollLeft;
+          }
         });
       }
       suppressingExternalRef.current = false;
@@ -1361,8 +1752,51 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         performCopy(view);
         view.focus();
       },
-      pasteAction: () => {
-        performPaste();
+      pasteAction: async () => {
+        await performPaste();
+      },
+      runMacroStep: async (step: MacroStep) => {
+        const view = viewRef.current;
+        if (!view) return;
+        suppressingMacroRecordRef.current = true;
+        try {
+          switch (step.type) {
+            case 'insertText': {
+              view.dispatch(view.state.replaceSelection(step.text));
+              view.focus();
+              break;
+            }
+            case 'cmCommand': {
+              const fn = CM_MACRO_COMMANDS[step.command];
+              if (fn) {
+                fn(view);
+              }
+              view.focus();
+              break;
+            }
+            case 'clipboard': {
+              if (step.action === 'copy') {
+                performCopy(view);
+                view.focus();
+              } else if (step.action === 'cut') {
+                performCut(view);
+                view.focus();
+              } else if (step.action === 'paste') {
+                await performPaste();
+              }
+              break;
+            }
+            case 'contextAction': {
+              await executeContextAction(step.action, false);
+              break;
+            }
+            case 'toolbarAction':
+              // Handled at App level
+              break;
+          }
+        } finally {
+          suppressingMacroRecordRef.current = false;
+        }
       },
       selectRange: (from: number, to: number, options?: { focus?: boolean }) => {
         const view = viewRef.current;
@@ -1408,6 +1842,13 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         if (!view) return 0;
         return view.state.selection.main.head;
       },
+      getCursorPosition: () => {
+        const view = viewRef.current;
+        if (!view) return { line: 1, col: 1 };
+        const head = view.state.selection.main.head;
+        const lineObj = view.state.doc.lineAt(head);
+        return { line: lineObj.number, col: head - lineObj.from + 1 };
+      },
       getSelectedText: () => {
         const view = viewRef.current;
         if (!view) return '';
@@ -1428,140 +1869,217 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           effects: setFindHighlightsEffect.of(payload),
         });
       },
+      foldAllLines: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        foldAll(view);
+        view.focus();
+      },
+      unfoldAllLines: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        unfoldAll(view);
+        view.focus();
+      },
+      selectNextOccurrenceAction: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        selectNextOccurrence(view);
+        view.focus();
+      },
     }));
 
-    const handleContextAction = useCallback((action: EditorContextAction) => {
-      const view = viewRef.current;
-      if (!view) return;
+    const executeContextAction = useCallback(
+      async (action: EditorContextAction, shouldRecord: boolean) => {
+        const view = viewRef.current;
+        if (!view) return;
 
-      switch (action) {
-        case 'undo':
-          undo(view);
-          break;
-        case 'redo':
-          redo(view);
-          break;
-        case 'cut': {
-          const { selection } = view.state;
-          if (selection.ranges.some((r) => !r.empty)) {
-            const text = selection.ranges
-              .map((r) => view.state.sliceDoc(r.from, r.to))
-              .join('\n');
-            void writeClipboardText(text);
-            view.dispatch(view.state.replaceSelection(''));
+        switch (action) {
+          case 'undo':
+            if (undo(view) && shouldRecord) {
+              recordMacroStep({ type: 'cmCommand', command: 'undo' });
+            }
+            break;
+          case 'redo':
+            if (redo(view) && shouldRecord) {
+              recordMacroStep({ type: 'cmCommand', command: 'redo' });
+            }
+            break;
+          case 'cut':
+            performCut(view);
+            if (shouldRecord) {
+              recordMacroStep({ type: 'clipboard', action: 'cut' });
+            }
+            break;
+          case 'copy':
+            performCopy(view);
+            if (shouldRecord) {
+              recordMacroStep({ type: 'clipboard', action: 'copy' });
+            }
+            break;
+          case 'paste':
+            if (shouldRecord) {
+              recordMacroStep({ type: 'clipboard', action: 'paste' });
+            }
+            await performPaste();
+            return;
+          case 'delete':
+            if (view.state.selection.ranges.some((r) => !r.empty)) {
+              view.dispatch(view.state.replaceSelection(''));
+            }
+            if (shouldRecord) {
+              recordMacroStep({ type: 'contextAction', action: 'delete' });
+            }
+            break;
+          case 'selectAll':
+            selectAll(view);
+            if (shouldRecord) {
+              recordMacroStep({ type: 'cmCommand', command: 'selectAll' });
+            }
+            break;
+          case 'aiEditSelection':
+            callbacksRef.current.onAiEditSelection?.();
+            return;
+          case 'rectangularSelection': {
+            const next = !rectModeRef.current;
+            if (next && view.state.selection.ranges.length === 1 && !view.state.selection.main.empty) {
+              convertSelectionToRectangle(view);
+            }
+            setRectMode(next);
+            callbacksRef.current.onStatusNotify?.(
+              next
+                ? callbacksRef.current.t.contextMenu.rectModeOnToast
+                : callbacksRef.current.t.contextMenu.rectModeOffToast
+            );
+            break;
           }
-          break;
+          case 'indentTab':
+            applyPerLineTransform(view, indentLineTab);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'unindentTab':
+            applyPerLineTransform(view, unindentLineTab);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'indentSpace':
+            applyPerLineTransform(view, indentLineSpaces);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'unindentSpace':
+            applyPerLineTransform(view, unindentLineSpaces);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'insertComment': {
+            const effName = resolveEffectiveFilename(
+              callbacksRef.current.fileName,
+              callbacksRef.current.languageOverride
+            );
+            applyPerLineTransform(view, (line) => insertCommentLine(line, effName));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          }
+          case 'removeComment': {
+            const effName = resolveEffectiveFilename(
+              callbacksRef.current.fileName,
+              callbacksRef.current.languageOverride
+            );
+            applyPerLineTransform(view, (line) => removeCommentLine(line, effName));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          }
+          case 'spacesToTabs':
+            applySelectionOrLineTransform(view, (s) => spacesToTabsText(s, 4));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'tabsToSpaces':
+            applySelectionOrLineTransform(view, (s) => tabsToSpacesText(s, 4));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'toLowerCase':
+            applySelectionOrLineTransform(view, (s) => s.toLowerCase());
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'toUpperCase':
+            applySelectionOrLineTransform(view, (s) => s.toUpperCase());
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'reverseLines':
+            applyLineBlockTransform(view, reverseLines);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'sortLinesAsc':
+            applyLineBlockTransform(view, sortLinesAsc);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'sortLinesDesc':
+            applyLineBlockTransform(view, sortLinesDesc);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'dedupeLines':
+            applyLineBlockTransform(view, dedupeLines);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'trimLeading':
+            applyPerLineTransform(view, trimLeadingLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'trimTrailing':
+            applyPerLineTransform(view, trimTrailingLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'insertQuote':
+            applyPerLineTransform(view, insertQuoteLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'removeQuote':
+            applyPerLineTransform(view, removeQuoteLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'insertWrapLineBreaks':
+            insertWrapLineBreaks(view);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'removeLineBreaks':
+            removeLineBreaks(view);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'to-full':
+          case 'to-full-kana':
+          case 'to-full-alnum':
+          case 'to-half':
+          case 'to-half-kana':
+          case 'to-half-alnum':
+            applySelectionOrLineTransform(view, (s) => convertHalfFullWidth(s, action));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'toggleBookmark':
+            toggleBookmarkAtCursor(view);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'nextBookmark':
+            jumpToBookmark(view, 'next');
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'prevBookmark':
+            jumpToBookmark(view, 'prev');
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'clearBookmarks':
+            view.dispatch({ effects: clearBookmarksEffect.of(undefined) });
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
         }
-        case 'copy':
-          performCopy(view);
-          break;
-        case 'paste':
-          performPaste();
-          return;
-        case 'delete':
-          if (view.state.selection.ranges.some((r) => !r.empty)) {
-            view.dispatch(view.state.replaceSelection(''));
-          }
-          break;
-        case 'selectAll':
-          selectAll(view);
-          break;
-        case 'rectangularSelection': {
-          const next = !rectModeRef.current;
-          if (next && view.state.selection.ranges.length === 1 && !view.state.selection.main.empty) {
-            convertSelectionToRectangle(view);
-          }
-          setRectMode(next);
-          callbacksRef.current.onStatusNotify?.(
-            next
-              ? callbacksRef.current.t.contextMenu.rectModeOnToast
-              : callbacksRef.current.t.contextMenu.rectModeOffToast
-          );
-          break;
-        }
-        case 'indentTab':
-          applyPerLineTransform(view, indentLineTab);
-          break;
-        case 'unindentTab':
-          applyPerLineTransform(view, unindentLineTab);
-          break;
-        case 'indentSpace':
-          applyPerLineTransform(view, indentLineSpaces);
-          break;
-        case 'unindentSpace':
-          applyPerLineTransform(view, unindentLineSpaces);
-          break;
-        case 'insertComment':
-          applyPerLineTransform(view, (line) => insertCommentLine(line, callbacksRef.current.fileName));
-          break;
-        case 'removeComment':
-          applyPerLineTransform(view, (line) => removeCommentLine(line, callbacksRef.current.fileName));
-          break;
-        case 'spacesToTabs':
-          applySelectionOrLineTransform(view, (s) => spacesToTabsText(s, 4));
-          break;
-        case 'tabsToSpaces':
-          applySelectionOrLineTransform(view, (s) => tabsToSpacesText(s, 4));
-          break;
-        case 'toLowerCase':
-          applySelectionOrLineTransform(view, (s) => s.toLowerCase());
-          break;
-        case 'toUpperCase':
-          applySelectionOrLineTransform(view, (s) => s.toUpperCase());
-          break;
-        case 'reverseLines':
-          applyLineBlockTransform(view, reverseLines);
-          break;
-        case 'sortLinesAsc':
-          applyLineBlockTransform(view, sortLinesAsc);
-          break;
-        case 'sortLinesDesc':
-          applyLineBlockTransform(view, sortLinesDesc);
-          break;
-        case 'dedupeLines':
-          applyLineBlockTransform(view, dedupeLines);
-          break;
-        case 'trimLeading':
-          applyPerLineTransform(view, trimLeadingLine);
-          break;
-        case 'trimTrailing':
-          applyPerLineTransform(view, trimTrailingLine);
-          break;
-        case 'insertQuote':
-          applyPerLineTransform(view, insertQuoteLine);
-          break;
-        case 'removeQuote':
-          applyPerLineTransform(view, removeQuoteLine);
-          break;
-        case 'insertWrapLineBreaks':
-          insertWrapLineBreaks(view);
-          break;
-        case 'removeLineBreaks':
-          removeLineBreaks(view);
-          break;
-        case 'to-full':
-        case 'to-full-kana':
-        case 'to-full-alnum':
-        case 'to-half':
-        case 'to-half-kana':
-        case 'to-half-alnum':
-          applySelectionOrLineTransform(view, (s) => convertHalfFullWidth(s, action));
-          break;
-        case 'toggleBookmark':
-          toggleBookmarkAtCursor(view);
-          break;
-        case 'nextBookmark':
-          jumpToBookmark(view, 'next');
-          break;
-        case 'prevBookmark':
-          jumpToBookmark(view, 'prev');
-          break;
-        case 'clearBookmarks':
-          view.dispatch({ effects: clearBookmarksEffect.of(undefined) });
-          break;
-      }
-      view.focus();
-    }, []);
+        view.focus();
+      },
+      [recordMacroStep]
+    );
+
+    const handleContextAction = useCallback(
+      (action: EditorContextAction) => {
+        void executeContextAction(action, true);
+      },
+      [executeContextAction]
+    );
 
     const effectiveWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
 

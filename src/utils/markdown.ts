@@ -834,7 +834,16 @@ export function exportStandaloneHtml(
 
 export type DocumentPreviewKind = 'markdown' | 'webpage' | 'code';
 
-export function getDocumentPreviewKind(fileName?: string, filePath?: string): DocumentPreviewKind {
+export function getDocumentPreviewKind(
+  fileName?: string,
+  filePath?: string,
+  languageOverride?: string | null
+): DocumentPreviewKind {
+  if (languageOverride) {
+    if (languageOverride === 'markdown') return 'markdown';
+    if (languageOverride === 'html') return 'webpage';
+    return 'code';
+  }
   const target = (filePath || fileName || '').trim().toLowerCase();
   const base = target.split(/[/\\]/).pop() || '';
   const dotIdx = base.lastIndexOf('.');

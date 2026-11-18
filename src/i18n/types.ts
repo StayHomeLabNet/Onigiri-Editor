@@ -78,6 +78,20 @@ export interface Translations {
     newFileWithEncoding: string;
     reopenWithEncoding: string;
     changeEncoding: string;
+    macroRecord: string;
+    macroStop: string;
+    macroPlay: string;
+    macroClear: string;
+    toggleEditorSplit: string;
+    focusOtherSplitPane: string;
+    printSource: string;
+    openSideBySide: string;
+    closeSideBySide: string;
+    compareTabs: string;
+    aiEditSelection: string;
+    selectNextOccurrence: string;
+    foldAll: string;
+    unfoldAll: string;
   };
   toolbar: {
     heading1: string;
@@ -108,17 +122,42 @@ export interface Translations {
     noFolder: string;
     openFolderPrompt: string;
     chooseFolder: string;
+    closeFolder: string;
     filterFiles: string;
     searchContent: string;
     searchPlaceholder: string;
     noFilesFound: string;
     noHeadings: string;
     newNoteInFolder: string;
+    newFolderInFolder: string;
     refreshFolder: string;
     collapseAll: string;
     clearFilter: string;
     newFilePrompt: string;
+    newFolderPrompt: string;
     insertSnippet: string;
+    replaceInFolderToggle: string;
+    replacePlaceholder: string;
+    replaceAllInFolderBtn: string;
+    replaceCaseShort: string;
+    replaceRegexShort: string;
+    replaceConfirm: string;
+    replaceDoneToast: string;
+    recentFilesTitle: string;
+    recentFoldersTitle: string;
+    clearRecent: string;
+    ctxOpen: string;
+    ctxOpenSide: string;
+    ctxRename: string;
+    ctxDuplicate: string;
+    ctxDelete: string;
+    ctxNewFile: string;
+    ctxNewFolder: string;
+    ctxCopyPath: string;
+    ctxCopyRelPath: string;
+    ctxReveal: string;
+    renamePrompt: string;
+    deleteConfirm: string;
   };
   inspector: {
     chat: string;
@@ -247,6 +286,9 @@ export interface Translations {
       showNewlineSymbols: string;
       showWhitespaceSymbols: string;
       bracketMatchingEnabled: string;
+      codeFoldingEnabled: string;
+      highlightSelectionMatches: string;
+      autoCloseBrackets: string;
       showStatusBar: string;
       defaultNewFileEncoding: string;
       defaultNewFileEol: string;
@@ -476,6 +518,10 @@ export interface Translations {
     zoomInputLabel: string;
     zoomRangeHint: string;
     zoomResetBtn: string;
+    macroRecording: string;
+    languageLabel: string;
+    languageSelectTitle: string;
+    languageAuto: string;
   };
   externalChange: {
     modifiedTitle: string;
@@ -522,6 +568,17 @@ export interface Translations {
     copiedLanUrl: string;
     devServerStarted: string;
     devServerStopped: string;
+    macroRecordStarted: string;
+    macroRecordStopped: string;
+    macroRecordEmpty: string;
+    macroNoRecorded: string;
+    macroPlayed: string;
+    macroStepLimit: string;
+    macroCleared: string;
+    copiedPath: string;
+    renamedSuccess: string;
+    duplicatedSuccess: string;
+    deletedSuccess: string;
     errorPrefix: string;
   };
   goToLineModal: {
@@ -570,6 +627,7 @@ export interface Translations {
     paste: string;
     del: string;
     selectAll: string;
+    aiEditSelection: string;
     rectangularSelection: string;
     advanced: string;
     widthConvert: string;
@@ -606,6 +664,53 @@ export interface Translations {
     clearBookmarks: string;
     rectModeOnToast: string;
     rectModeOffToast: string;
+  };
+  tabMenu: {
+    pin: string;
+    unpin: string;
+    openSide: string;
+    compareWithActive: string;
+    close: string;
+    closeOthers: string;
+    closeRight: string;
+    copyPath: string;
+    reveal: string;
+  };
+  sideSplit: {
+    title: string;
+    compareTitle: string;
+    modeEdit: string;
+    modeDiff: string;
+    swapBtn: string;
+    closeBtn: string;
+    selectTabPlaceholder: string;
+    needTwoTabsToast: string;
+  };
+  inlineAiModal: {
+    title: string;
+    selectionSummary: string;
+    instructionPlaceholder: string;
+    runBtn: string;
+    runningBtn: string;
+    noSelectionToast: string;
+    previewTitle: string;
+    confirmApplyBtn: string;
+    presets: {
+      refactorLabel: string;
+      refactorPrompt: string;
+      commentsLabel: string;
+      commentsPrompt: string;
+      fixLabel: string;
+      fixPrompt: string;
+      conciseLabel: string;
+      concisePrompt: string;
+      politeLabel: string;
+      politePrompt: string;
+      toJaLabel: string;
+      toJaPrompt: string;
+      toEnLabel: string;
+      toEnPrompt: string;
+    };
   };
   encoding: {
     modalNewTitle: string;

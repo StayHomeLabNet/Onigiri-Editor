@@ -9,7 +9,7 @@ pub fn build_app_menu<R: Runtime>(
     app: &AppHandle<R>,
     locale: &str,
 ) -> tauri::Result<Menu<R>> {
-    build_app_menu_with_state(app, locale, true, true)
+    build_app_menu_with_state(app, locale, true, true, false, &[], &[])
 }
 
 pub fn build_app_menu_with_state<R: Runtime>(
@@ -17,6 +17,9 @@ pub fn build_app_menu_with_state<R: Runtime>(
     locale: &str,
     show_top_bar: bool,
     show_format_toolbar: bool,
+    editor_split: bool,
+    recent_files: &[String],
+    recent_folders: &[String],
 ) -> tauri::Result<Menu<R>> {
     let is_ja = locale == "ja";
 
@@ -86,6 +89,28 @@ pub fn build_app_menu_with_state<R: Runtime>(
     } else {
         "Print / Export PDF..."
     };
+    let print_source_label = if is_ja {
+        "ソースコードとして印刷…"
+    } else {
+        "Print Source Code..."
+    };
+    let open_recent_title = if is_ja {
+        "最近開いた項目"
+    } else {
+        "Open Recent"
+    };
+    let recent_files_header = if is_ja { "— ファイル —" } else { "— Files —" };
+    let recent_folders_header = if is_ja { "— フォルダ —" } else { "— Folders —" };
+    let recent_empty_label = if is_ja {
+        "履歴はありません"
+    } else {
+        "No Recent Items"
+    };
+    let clear_recent_label = if is_ja {
+        "履歴をクリア"
+    } else {
+        "Clear History"
+    };
     let close_tab_label = if is_ja { "タブを閉じる" } else { "Close Tab" };
 
     let edit_title = if is_ja { "編集" } else { "Edit" };
@@ -101,6 +126,16 @@ pub fn build_app_menu_with_state<R: Runtime>(
     } else {
         "Go to Line..."
     };
+    let macro_toggle_label = if is_ja {
+        "マクロの記録開始 / 停止"
+    } else {
+        "Record / Stop Macro"
+    };
+    let macro_play_label = if is_ja {
+        "マクロを再生"
+    } else {
+        "Play Macro"
+    };
 
     let view_title = if is_ja { "表示" } else { "View" };
     let mode_simple_label = if is_ja { "シンプルモード" } else { "Simple Mode" };
@@ -115,6 +150,11 @@ pub fn build_app_menu_with_state<R: Runtime>(
         "書式ツールバーを表示"
     } else {
         "Show Format Toolbar"
+    };
+    let editor_split_label = if is_ja {
+        "エディタを上下に分割表示"
+    } else {
+        "Split Editor Top / Bottom"
     };
     let palette_label = if is_ja {
         "コマンドパレット"
@@ -170,9 +210,68 @@ pub fn build_app_menu_with_state<R: Runtime>(
         .build(app)?;
     let file_export_html = MenuItemBuilder::with_id("export-html", export_html_label).build(app)?;
     let file_export_pdf = MenuItemBuilder::with_id("export-pdf", export_pdf_label).build(app)?;
+    let file_print_source = MenuItemBuilder::with_id("print-source", print_source_label).build(app)?;
     let file_close_tab = MenuItemBuilder::with_id("close-tab", close_tab_label)
         .accelerator("CmdOrCtrl+W")
         .build(app)?;
+
+    let mut recent_builder = SubmenuBuilder::new(app, open_recent_title);
+    if recent_files.is_empty() && recent_folders.is_empty() {
+        let empty_item = MenuItemBuilder::with_id("recent-empty", recent_empty_label)
+            .enabled(false)
+            .build(app)?;
+        recent_builder = recent_builder.item(&empty_item);
+    } else {
+        if !recent_files.is_empty() {
+            let files_hdr = MenuItemBuilder::with_id("recent-files-hdr", recent_files_header)
+                .enabled(false)
+                .build(app)?;
+            recent_builder = recent_builder.item(&files_hdr);
+            for (idx, p) in recent_files.iter().take(10).enumerate() {
+                let name = std::path::Path::new(p)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(p.as_str());
+                let label = if name == p.as_str() {
+                    name.to_string()
+                } else {
+                    format!("{}  —  {}", name, p)
+                };
+                let item = MenuItemBuilder::with_id(format!("recent-file::{}", idx), label)
+                    .build(app)?;
+                recent_builder = recent_builder.item(&item);
+            }
+        }
+        if !recent_folders.is_empty() {
+            if !recent_files.is_empty() {
+                recent_builder = recent_builder.separator();
+            }
+            let folders_hdr =
+                MenuItemBuilder::with_id("recent-folders-hdr", recent_folders_header)
+                    .enabled(false)
+                    .build(app)?;
+            recent_builder = recent_builder.item(&folders_hdr);
+            for (idx, p) in recent_folders.iter().take(8).enumerate() {
+                let name = std::path::Path::new(p)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(p.as_str());
+                let label = if name == p.as_str() {
+                    name.to_string()
+                } else {
+                    format!("{}  —  {}", name, p)
+                };
+                let item = MenuItemBuilder::with_id(format!("recent-folder::{}", idx), label)
+                    .build(app)?;
+                recent_builder = recent_builder.item(&item);
+            }
+        }
+        recent_builder = recent_builder.separator();
+        let clear_item =
+            MenuItemBuilder::with_id("clear-recent", clear_recent_label).build(app)?;
+        recent_builder = recent_builder.item(&clear_item);
+    }
+    let recent_submenu = recent_builder.build()?;
 
     let edit_find = MenuItemBuilder::with_id("find", find_label)
         .accelerator("CmdOrCtrl+F")
@@ -180,6 +279,9 @@ pub fn build_app_menu_with_state<R: Runtime>(
     let edit_goto_line = MenuItemBuilder::with_id("go-to-line", goto_line_label)
         .accelerator("CmdOrCtrl+L")
         .build(app)?;
+    let edit_macro_toggle =
+        MenuItemBuilder::with_id("macro-toggle-record", macro_toggle_label).build(app)?;
+    let edit_macro_play = MenuItemBuilder::with_id("macro-play", macro_play_label).build(app)?;
 
     let view_simple = MenuItemBuilder::with_id("mode-simple", mode_simple_label).build(app)?;
     let view_basic = MenuItemBuilder::with_id("mode-basic", mode_basic_label).build(app)?;
@@ -190,6 +292,10 @@ pub fn build_app_menu_with_state<R: Runtime>(
     let view_format_toolbar =
         CheckMenuItemBuilder::with_id("toggle-format-toolbar", format_toolbar_label)
             .checked(show_format_toolbar)
+            .build(app)?;
+    let view_editor_split =
+        CheckMenuItemBuilder::with_id("toggle-editor-split", editor_split_label)
+            .checked(editor_split)
             .build(app)?;
     let view_palette = MenuItemBuilder::with_id("palette", palette_label)
         .accelerator("CmdOrCtrl+K")
@@ -226,12 +332,14 @@ pub fn build_app_menu_with_state<R: Runtime>(
         .item(&file_open)
         .item(&file_reopen_encoding)
         .item(&file_open_folder)
+        .item(&recent_submenu)
         .separator()
         .item(&file_save)
         .item(&file_save_as)
         .separator()
         .item(&file_export_html)
         .item(&file_export_pdf)
+        .item(&file_print_source)
         .separator()
         .item(&file_close_tab);
 
@@ -257,6 +365,9 @@ pub fn build_app_menu_with_state<R: Runtime>(
         .separator()
         .item(&edit_find)
         .item(&edit_goto_line)
+        .separator()
+        .item(&edit_macro_toggle)
+        .item(&edit_macro_play)
         .build()?;
 
     let view_submenu = SubmenuBuilder::new(app, view_title)
@@ -266,6 +377,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
         .separator()
         .item(&view_top_bar)
         .item(&view_format_toolbar)
+        .item(&view_editor_split)
         .separator()
         .item(&view_palette)
         .item(&view_options)
@@ -322,12 +434,20 @@ pub fn rebuild_app_menu(
     locale: String,
     show_top_bar: Option<bool>,
     show_format_toolbar: Option<bool>,
+    editor_split: Option<bool>,
+    recent_files: Option<Vec<String>>,
+    recent_folders: Option<Vec<String>>,
 ) -> Result<(), String> {
+    let rf = recent_files.unwrap_or_default();
+    let rd = recent_folders.unwrap_or_default();
     let menu = build_app_menu_with_state(
         &app,
         &locale,
         show_top_bar.unwrap_or(true),
         show_format_toolbar.unwrap_or(true),
+        editor_split.unwrap_or(false),
+        &rf,
+        &rd,
     )
     .map_err(|e| e.to_string())?;
     app.set_menu(menu).map_err(|e| e.to_string())?;

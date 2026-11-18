@@ -964,6 +964,311 @@ fn write_workspace_file(
     Ok(dest.to_string_lossy().to_string())
 }
 
+fn resolve_existing_workspace_entry(root_path: &str, target_path: &str) -> Result<(PathBuf, PathBuf), String> {
+    let root = PathBuf::from(root_path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {}", e))?;
+    let target = PathBuf::from(target_path)
+        .canonicalize()
+        .map_err(|e| format!("Target does not exist: {}", e))?;
+    if !target.starts_with(&root) {
+        return Err("Target path escapes workspace folder".to_string());
+    }
+    Ok((root, target))
+}
+
+fn validate_single_entry_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty()
+        || trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+    {
+        return Err("Invalid file or folder name".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+#[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in Explorer: {}", e))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let dir = if p.is_dir() {
+            p
+        } else {
+            p.parent().map(|d| d.to_path_buf()).unwrap_or(p)
+        };
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {}", e))?;
+        return Ok(());
+    }
+}
+
+#[tauri::command]
+fn create_workspace_folder(root_path: String, relative_path: String) -> Result<String, String> {
+    let root = PathBuf::from(&root_path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {}", e))?;
+    let trimmed = relative_path.trim();
+    if trimmed.is_empty() {
+        return Err("Folder name must not be empty".to_string());
+    }
+    let rel = Path::new(trimmed);
+    if rel.is_absolute()
+        || rel
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
+    {
+        return Err("Relative path must stay inside the workspace folder".to_string());
+    }
+    let dest = root.join(rel);
+    if dest.exists() {
+        return Err("Target folder already exists".to_string());
+    }
+    fs::create_dir_all(&dest).map_err(|e| format!("Failed to create folder: {}", e))?;
+    let canon = dest
+        .canonicalize()
+        .map_err(|e| format!("Invalid folder: {}", e))?;
+    if !canon.starts_with(&root) {
+        return Err("Destination escapes workspace folder".to_string());
+    }
+    Ok(canon.to_string_lossy().to_string())
+}
+
+fn rename_workspace_entry_impl(
+    root_path: &str,
+    target_path: &str,
+    new_name: &str,
+) -> Result<String, String> {
+    let (root, src) = resolve_existing_workspace_entry(root_path, target_path)?;
+    if src == root {
+        return Err("Cannot rename the workspace root folder".to_string());
+    }
+    let clean_name = validate_single_entry_name(new_name)?;
+    let parent = src
+        .parent()
+        .ok_or_else(|| "Target has no parent directory".to_string())?;
+    let dest = parent.join(&clean_name);
+    let same_case_insensitive = src
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&dest.to_string_lossy());
+    if dest.exists() && !same_case_insensitive {
+        return Err("A file or folder with that name already exists".to_string());
+    }
+    fs::rename(&src, &dest).map_err(|e| format!("Failed to rename: {}", e))?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn rename_workspace_entry(
+    root_path: String,
+    target_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    rename_workspace_entry_impl(&root_path, &target_path, &new_name)
+}
+
+fn duplicate_workspace_file_impl(root_path: &str, target_path: &str) -> Result<String, String> {
+    let (_root, src) = resolve_existing_workspace_entry(root_path, target_path)?;
+    if !src.is_file() {
+        return Err("Only files can be duplicated".to_string());
+    }
+    let parent = src
+        .parent()
+        .ok_or_else(|| "Target has no parent directory".to_string())?;
+    let stem = src
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file");
+    let ext = src.extension().and_then(|e| e.to_str());
+    let mut index = 1usize;
+    let dest = loop {
+        let suffix = if index == 1 {
+            " copy".to_string()
+        } else {
+            format!(" copy {}", index)
+        };
+        let candidate_name = match ext {
+            Some(e) if !e.is_empty() => format!("{}{}.{}", stem, suffix, e),
+            _ => format!("{}{}", stem, suffix),
+        };
+        let candidate = parent.join(candidate_name);
+        if !candidate.exists() {
+            break candidate;
+        }
+        index += 1;
+    };
+    fs::copy(&src, &dest).map_err(|e| format!("Failed to duplicate file: {}", e))?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn duplicate_workspace_file(root_path: String, target_path: String) -> Result<String, String> {
+    duplicate_workspace_file_impl(&root_path, &target_path)
+}
+
+fn delete_workspace_entry_impl(root_path: &str, target_path: &str) -> Result<(), String> {
+    let (root, target) = resolve_existing_workspace_entry(root_path, target_path)?;
+    if target == root {
+        return Err("Cannot delete the workspace root folder".to_string());
+    }
+    if target.is_dir() {
+        fs::remove_dir_all(&target).map_err(|e| format!("Failed to delete folder: {}", e))?;
+    } else {
+        fs::remove_file(&target).map_err(|e| format!("Failed to delete file: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_workspace_entry(root_path: String, target_path: String) -> Result<(), String> {
+    delete_workspace_entry_impl(&root_path, &target_path)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceReplaceResult {
+    files_modified: usize,
+    replacements: usize,
+    modified_paths: Vec<String>,
+}
+
+fn replace_in_workspace_impl(
+    root_path: &str,
+    query: &str,
+    replacement: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+) -> Result<WorkspaceReplaceResult, String> {
+    if query.is_empty() {
+        return Err("Search query must not be empty".to_string());
+    }
+    let pattern = if use_regex {
+        query.to_string()
+    } else {
+        regex::escape(query)
+    };
+    let re = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .multi_line(true)
+        .build()
+        .map_err(|e| format!("Invalid regular expression: {}", e))?;
+
+    let root = PathBuf::from(root_path);
+    if !root.exists() || !root.is_dir() {
+        return Ok(WorkspaceReplaceResult {
+            files_modified: 0,
+            replacements: 0,
+            modified_paths: Vec::new(),
+        });
+    }
+
+    let mut files_modified = 0usize;
+    let mut replacements = 0usize;
+    let mut modified_paths = Vec::new();
+
+    let walker = WalkDir::new(&root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() {
+                !should_skip_dir(&name)
+            } else {
+                is_supported_text_file(e.path())
+            }
+        });
+
+    for entry in walker.flatten() {
+        if entry.depth() == 0 || entry.file_type().is_dir() {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            if meta.len() > 2 * 1024 * 1024 {
+                continue;
+            }
+        }
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(decoded) = decode_bytes_with_encoding(&bytes, None) else {
+            continue;
+        };
+        let normalized_content = decoded.content.replace("\r\n", "\n");
+        let count = re.find_iter(&normalized_content).count();
+        if count == 0 {
+            continue;
+        }
+        let next_normalized = if use_regex {
+            re.replace_all(&normalized_content, replacement).into_owned()
+        } else {
+            re.replace_all(&normalized_content, regex::NoExpand(replacement))
+                .into_owned()
+        };
+        if next_normalized == normalized_content {
+            continue;
+        }
+        let next_with_eol = if decoded.eol == "\r\n" {
+            next_normalized.replace('\n', "\r\n")
+        } else {
+            next_normalized
+        };
+        let encoded = encode_text_with_encoding(&next_with_eol, Some(&decoded.encoding))?;
+        fs::write(entry.path(), encoded)
+            .map_err(|e| format!("Failed to write {}: {}", entry.path().display(), e))?;
+        files_modified += 1;
+        replacements += count;
+        modified_paths.push(entry.path().to_string_lossy().to_string());
+    }
+
+    Ok(WorkspaceReplaceResult {
+        files_modified,
+        replacements,
+        modified_paths,
+    })
+}
+
+#[tauri::command]
+async fn replace_in_workspace(
+    root_path: String,
+    query: String,
+    replacement: String,
+    case_sensitive: bool,
+    use_regex: bool,
+) -> Result<WorkspaceReplaceResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        replace_in_workspace_impl(&root_path, &query, &replacement, case_sensitive, use_regex)
+    })
+    .await
+    .map_err(|e| format!("Workspace replace task failed: {}", e))?
+}
+
 fn parse_locale_tag_is_ja(tag: &str) -> bool {
     let lower = tag.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
     let first = lower.split(':').next().unwrap_or("").trim();
@@ -1123,6 +1428,12 @@ pub fn run() {
             check_files_sync,
             read_workspace_file_if_exists,
             write_workspace_file,
+            reveal_in_file_manager,
+            create_workspace_folder,
+            rename_workspace_entry,
+            duplicate_workspace_file,
+            delete_workspace_entry,
+            replace_in_workspace,
             take_initial_files,
             read_image_data_url,
             save_image_asset,
@@ -1307,5 +1618,39 @@ mod tests {
         let with_emoji = "おにぎり🍙";
         let err = encode_text_with_encoding(with_emoji, Some("shift_jis")).unwrap_err();
         assert!(err.contains("Shift_JIS"));
+    }
+
+    #[test]
+    fn workspace_entry_ops_and_replace_work_safely() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_ws_ops_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        let file_a = base.join("draft.md");
+        fs::write(&file_a, "Hello world\nhello again\n").unwrap();
+
+        let root = base.to_string_lossy().to_string();
+        let dup = duplicate_workspace_file_impl(&root, &file_a.to_string_lossy()).unwrap();
+        assert!(dup.ends_with("draft copy.md"));
+
+        let renamed = rename_workspace_entry_impl(&root, &dup, "renamed.md").unwrap();
+        assert!(renamed.ends_with("renamed.md"));
+
+        let rep = replace_in_workspace_impl(&root, "hello", "Hi", false, false).unwrap();
+        assert_eq!(rep.files_modified, 2);
+        assert_eq!(rep.replacements, 4);
+
+        let updated = fs::read_to_string(&file_a).unwrap();
+        assert_eq!(updated, "Hi world\nHi again\n");
+
+        assert!(rename_workspace_entry_impl(&root, &renamed, "../escape.md").is_err());
+        delete_workspace_entry_impl(&root, &renamed).unwrap();
+        assert!(!Path::new(&renamed).exists());
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

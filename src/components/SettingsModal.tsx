@@ -480,6 +480,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <label className="check-row">
                       <input
                         type="checkbox"
+                        checked={settings.codeFoldingEnabled ?? true}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            codeFoldingEnabled: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>{t.inspector.settingsLabels.codeFoldingEnabled}</span>
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.highlightSelectionMatches ?? true}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            highlightSelectionMatches: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>{t.inspector.settingsLabels.highlightSelectionMatches}</span>
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.autoCloseBrackets ?? true}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            autoCloseBrackets: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>{t.inspector.settingsLabels.autoCloseBrackets}</span>
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
                         checked={settings.showStatusBar ?? true}
                         onChange={(e) =>
                           onSettingsChange({ ...settings, showStatusBar: e.target.checked })

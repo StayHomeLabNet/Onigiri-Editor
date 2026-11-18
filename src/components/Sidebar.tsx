@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Folder,
   FileText,
@@ -8,10 +8,13 @@ import {
   ListTree,
   Puzzle,
   FolderOpen,
+  FolderPlus,
+  FolderX,
   RefreshCw,
   FilePlus,
   Search,
   ChevronRight,
+  ChevronDown,
   ChevronsDownUp,
   X,
   Play,
@@ -19,6 +22,8 @@ import {
   Globe,
   Loader2,
   AlertCircle,
+  Clock,
+  Replace,
 } from 'lucide-react';
 import type {
   HeadingItem,
@@ -203,12 +208,31 @@ interface SidebarProps {
   searchMatches: SearchMatch[];
   activeFilePath?: string;
   activeImagePath?: string | null;
+  recentFiles?: string[];
+  recentFolders?: string[];
+  onOpenRecentFolder?: (path: string) => void;
+  onClearRecent?: () => void;
   onChooseFolder: () => void;
+  onCloseFolder?: () => void;
   onRefreshFolder: () => void;
   onOpenWorkspaceFile: (path: string) => void;
+  onOpenFileToSide?: (path: string) => void;
   onOpenWorkspaceImage?: (path: string) => void;
   onCreateFileInFolder: (fileName: string) => void;
+  onCreateFileInDir?: (targetDir: string, fileName: string) => void;
+  onCreateFolderInDir?: (targetDir: string, folderName: string) => void;
+  onRenameEntry?: (oldPath: string, newName: string) => void;
+  onDuplicateEntry?: (path: string) => void;
+  onDeleteEntry?: (path: string, isDir: boolean, name: string) => void;
+  onRevealEntry?: (path: string) => void;
+  onCopyEntryPath?: (text: string) => void;
   onSearchWorkspace: (query: string) => void;
+  onReplaceInWorkspace?: (
+    query: string,
+    replaceWith: string,
+    caseSensitive: boolean,
+    useRegex: boolean
+  ) => Promise<void> | void;
   headings: HeadingItem[];
   currentLine: number;
   onJumpToHeading: (heading: HeadingItem) => void;
@@ -237,12 +261,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   searchMatches,
   activeFilePath,
   activeImagePath,
+  recentFiles = [],
+  recentFolders = [],
+  onOpenRecentFolder,
+  onClearRecent,
   onChooseFolder,
+  onCloseFolder,
   onRefreshFolder,
   onOpenWorkspaceFile,
+  onOpenFileToSide,
   onOpenWorkspaceImage,
   onCreateFileInFolder,
+  onCreateFileInDir,
+  onCreateFolderInDir,
+  onRenameEntry,
+  onDuplicateEntry,
+  onDeleteEntry,
+  onRevealEntry,
+  onCopyEntryPath,
   onSearchWorkspace,
+  onReplaceInWorkspace,
   headings,
   currentLine,
   onJumpToHeading,
@@ -262,8 +300,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showReplace, setShowReplace] = useState(false);
+  const [replaceQuery, setReplaceQuery] = useState('');
+  const [replaceCaseSensitive, setReplaceCaseSensitive] = useState(false);
+  const [replaceRegex, setReplaceRegex] = useState(false);
+  const [replaceBusy, setReplaceBusy] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
   const prevRootRef = useRef<string | null>(workspaceRoot);
+  const [treeCtx, setTreeCtx] = useState<{
+    x: number;
+    y: number;
+    node: FolderTreeNode;
+  } | null>(null);
+  const [treeCtxPos, setTreeCtxPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const treeCtxRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!treeCtx || !treeCtxRef.current) return;
+    const rect = treeCtxRef.current.getBoundingClientRect();
+    const pad = 8;
+    let left = treeCtx.x;
+    let top = treeCtx.y;
+    if (left + rect.width > window.innerWidth - pad) {
+      left = Math.max(pad, window.innerWidth - rect.width - pad);
+    }
+    if (top + rect.height > window.innerHeight - pad) {
+      top = Math.max(pad, window.innerHeight - rect.height - pad);
+    }
+    setTreeCtxPos({ left, top });
+  }, [treeCtx]);
+
+  useEffect(() => {
+    if (!treeCtx) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (treeCtxRef.current && !treeCtxRef.current.contains(e.target as Node)) {
+        setTreeCtx(null);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTreeCtx(null);
+    };
+    const onBlur = () => setTreeCtx(null);
+    window.addEventListener('mousedown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [treeCtx]);
 
   // Reset tree expansion on root change and auto-expand ancestors of the active file/image
   useEffect(() => {
@@ -363,6 +449,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className={`tree-row is-dir ${isExpanded ? 'is-expanded' : ''}`}
               style={{ paddingLeft: `${6 + depth * 14}px` }}
               onClick={() => toggleDir(node.relativePath)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTreeCtx({ x: e.clientX, y: e.clientY, node });
+              }}
               title={node.relativePath}
             >
               {depth > 0 && (
@@ -403,6 +494,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`tree-row is-file ${isActive ? 'is-active' : ''}`}
           style={{ paddingLeft: `${6 + depth * 14}px` }}
           onClick={() => handleFileClick(node)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setTreeCtx({ x: e.clientX, y: e.clientY, node });
+          }}
           title={node.path}
         >
           {depth > 0 && (
@@ -438,6 +534,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const trimmed = name.trim();
       const normalized = trimmed.includes('.') ? trimmed : `${trimmed}.md`;
       onCreateFileInFolder(normalized);
+    }
+  };
+
+  const handleNewFolderAtRoot = () => {
+    if (!workspaceRoot || !onCreateFolderInDir) return;
+    const name = window.prompt(t.sidebar.newFolderPrompt, 'new-folder');
+    if (name && name.trim()) {
+      onCreateFolderInDir(workspaceRoot, name.trim());
+    }
+  };
+
+  const handleRunReplaceInFolder = async () => {
+    if (!onReplaceInWorkspace || !searchQuery.trim() || replaceBusy) return;
+    setReplaceBusy(true);
+    try {
+      await onReplaceInWorkspace(
+        searchQuery,
+        replaceQuery,
+        replaceCaseSensitive,
+        replaceRegex
+      );
+    } finally {
+      setReplaceBusy(false);
     }
   };
 
@@ -480,13 +599,87 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {activeTab === 'files' && (
           <div className="sidebar-section">
             {!workspaceRoot ? (
-              <div className="sidebar-empty">
-                <FolderOpen size={28} className="empty-icon" />
-                <p className="empty-title">{t.sidebar.noFolder}</p>
-                <p className="empty-desc">{t.sidebar.openFolderPrompt}</p>
-                <button type="button" className="primary-btn" onClick={onChooseFolder}>
-                  {t.sidebar.chooseFolder}
-                </button>
+              <div className="sidebar-empty-wrap">
+                <div className="sidebar-empty">
+                  <FolderOpen size={28} className="empty-icon" />
+                  <p className="empty-title">{t.sidebar.noFolder}</p>
+                  <p className="empty-desc">{t.sidebar.openFolderPrompt}</p>
+                  <button type="button" className="primary-btn" onClick={onChooseFolder}>
+                    {t.sidebar.chooseFolder}
+                  </button>
+                </div>
+
+                {(recentFolders.length > 0 || recentFiles.length > 0) && (
+                  <div className="sidebar-recent-section">
+                    {recentFolders.length > 0 && (
+                      <div className="sidebar-recent-group">
+                        <div className="sidebar-recent-header">
+                          <span className="sub-label">{t.sidebar.recentFoldersTitle}</span>
+                          {onClearRecent && (
+                            <button
+                              type="button"
+                              className="sidebar-recent-clear"
+                              onClick={onClearRecent}
+                            >
+                              {t.sidebar.clearRecent}
+                            </button>
+                          )}
+                        </div>
+                        <div className="sidebar-recent-list">
+                          {recentFolders.slice(0, 6).map((fp) => {
+                            const name = fp.split(/[/\\]/).filter(Boolean).pop() || fp;
+                            return (
+                              <button
+                                key={`rf:${fp}`}
+                                type="button"
+                                className="sidebar-recent-item"
+                                onClick={() => onOpenRecentFolder?.(fp)}
+                                title={fp}
+                              >
+                                <Folder size={13} className="tree-folder-icon" />
+                                <span className="sidebar-recent-name">{name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {recentFiles.length > 0 && (
+                      <div className="sidebar-recent-group">
+                        <div className="sidebar-recent-header">
+                          <span className="sub-label">{t.sidebar.recentFilesTitle}</span>
+                          {recentFolders.length === 0 && onClearRecent && (
+                            <button
+                              type="button"
+                              className="sidebar-recent-clear"
+                              onClick={onClearRecent}
+                            >
+                              {t.sidebar.clearRecent}
+                            </button>
+                          )}
+                        </div>
+                        <div className="sidebar-recent-list">
+                          {recentFiles.slice(0, 8).map((fp) => {
+                            const name = fp.split(/[/\\]/).filter(Boolean).pop() || fp;
+                            return (
+                              <button
+                                key={`rfile:${fp}`}
+                                type="button"
+                                className="sidebar-recent-item"
+                                onClick={() => onOpenWorkspaceFile(fp)}
+                                title={fp}
+                              >
+                                <Clock size={12} />
+                                <span className="sidebar-recent-name">{name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -503,6 +696,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <FilePlus size={14} />
                     </button>
+                    {onCreateFolderInDir && (
+                      <button
+                        type="button"
+                        className="icon-btn-sm"
+                        onClick={handleNewFolderAtRoot}
+                        title={t.sidebar.newFolderInFolder}
+                      >
+                        <FolderPlus size={14} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="icon-btn-sm"
@@ -528,6 +731,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <FolderOpen size={14} />
                     </button>
+                    {onCloseFolder && (
+                      <button
+                        type="button"
+                        className="icon-btn-sm is-close-folder"
+                        onClick={onCloseFolder}
+                        title={t.sidebar.closeFolder}
+                        aria-label={t.sidebar.closeFolder}
+                      >
+                        <FolderX size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -638,29 +852,84 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </div>
 
-                <div className="sidebar-input-wrap">
-                  <Search size={13} />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      onSearchWorkspace(e.target.value);
-                    }}
-                    placeholder={t.sidebar.searchPlaceholder}
-                  />
-                  {searchQuery && (
-                    <button
-                      type="button"
-                      className="sidebar-input-clear"
-                      onClick={() => {
-                        setSearchQuery('');
-                        onSearchWorkspace('');
+                <div className="sidebar-search-group">
+                  <div className="sidebar-input-wrap">
+                    <Search size={13} />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        onSearchWorkspace(e.target.value);
                       }}
-                      title={t.sidebar.clearFilter}
-                    >
-                      <X size={12} />
-                    </button>
+                      placeholder={t.sidebar.searchPlaceholder}
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        className="sidebar-input-clear"
+                        onClick={() => {
+                          setSearchQuery('');
+                          onSearchWorkspace('');
+                        }}
+                        title={t.sidebar.clearFilter}
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                    {onReplaceInWorkspace && (
+                      <button
+                        type="button"
+                        className={`sidebar-input-toggle ${showReplace ? 'is-active' : ''}`}
+                        onClick={() => setShowReplace((v) => !v)}
+                        title={t.sidebar.replaceInFolderToggle}
+                      >
+                        {showReplace ? <ChevronDown size={13} /> : <Replace size={13} />}
+                      </button>
+                    )}
+                  </div>
+
+                  {showReplace && onReplaceInWorkspace && (
+                    <div className="sidebar-replace-box">
+                      <div className="sidebar-input-wrap">
+                        <Replace size={13} />
+                        <input
+                          type="text"
+                          value={replaceQuery}
+                          onChange={(e) => setReplaceQuery(e.target.value)}
+                          placeholder={t.sidebar.replacePlaceholder}
+                        />
+                      </div>
+                      <div className="sidebar-replace-actions">
+                        <div className="sidebar-replace-flags">
+                          <button
+                            type="button"
+                            className={`sidebar-flag-btn ${replaceCaseSensitive ? 'is-active' : ''}`}
+                            onClick={() => setReplaceCaseSensitive((v) => !v)}
+                            title={t.find.caseSensitive}
+                          >
+                            {t.sidebar.replaceCaseShort}
+                          </button>
+                          <button
+                            type="button"
+                            className={`sidebar-flag-btn ${replaceRegex ? 'is-active' : ''}`}
+                            onClick={() => setReplaceRegex((v) => !v)}
+                            title={t.find.regex}
+                          >
+                            {t.sidebar.replaceRegexShort}
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="sidebar-replace-btn"
+                          disabled={!searchQuery.trim() || replaceBusy}
+                          onClick={handleRunReplaceInFolder}
+                        >
+                          {replaceBusy ? <Loader2 size={11} className="spin" /> : null}
+                          <span>{t.sidebar.replaceAllInFolderBtn}</span>
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -747,6 +1016,193 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
       </div>
+
+      {treeCtx && (
+        <div
+          ref={treeCtxRef}
+          className="editor-ctx-menu tree-ctx-menu"
+          style={{ left: treeCtxPos.left, top: treeCtxPos.top }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {!treeCtx.node.isDir ? (
+            <>
+              <button
+                type="button"
+                className="editor-ctx-item"
+                onClick={() => {
+                  handleFileClick(treeCtx.node);
+                  setTreeCtx(null);
+                }}
+              >
+                <span className="editor-ctx-label">{t.sidebar.ctxOpen}</span>
+              </button>
+              {onOpenFileToSide && !RASTER_IMAGE_EXT_RE.test(treeCtx.node.name) && (
+                <button
+                  type="button"
+                  className="editor-ctx-item"
+                  onClick={() => {
+                    onOpenFileToSide(treeCtx.node.path);
+                    setTreeCtx(null);
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxOpenSide}</span>
+                </button>
+              )}
+              <div className="editor-ctx-sep" />
+              {onRenameEntry && (
+                <button
+                  type="button"
+                  className="editor-ctx-item"
+                  onClick={() => {
+                    const node = treeCtx.node;
+                    setTreeCtx(null);
+                    const nextName = window.prompt(t.sidebar.renamePrompt, node.name);
+                    if (nextName && nextName.trim() && nextName.trim() !== node.name) {
+                      onRenameEntry(node.path, nextName.trim());
+                    }
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxRename}</span>
+                </button>
+              )}
+              {onDuplicateEntry && (
+                <button
+                  type="button"
+                  className="editor-ctx-item"
+                  onClick={() => {
+                    const node = treeCtx.node;
+                    setTreeCtx(null);
+                    onDuplicateEntry(node.path);
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxDuplicate}</span>
+                </button>
+              )}
+              {onDeleteEntry && (
+                <button
+                  type="button"
+                  className="editor-ctx-item is-danger"
+                  onClick={() => {
+                    const node = treeCtx.node;
+                    setTreeCtx(null);
+                    onDeleteEntry(node.path, false, node.name);
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxDelete}</span>
+                </button>
+              )}
+            </>
+          ) : (
+            <>
+              {onCreateFileInDir && (
+                <button
+                  type="button"
+                  className="editor-ctx-item"
+                  onClick={() => {
+                    const node = treeCtx.node;
+                    setTreeCtx(null);
+                    const name = window.prompt(t.sidebar.newFilePrompt, 'note.md');
+                    if (name && name.trim()) {
+                      const trimmed = name.trim();
+                      const normalized = trimmed.includes('.') ? trimmed : `${trimmed}.md`;
+                      setExpandedDirs((prev) => ({ ...prev, [node.relativePath]: true }));
+                      onCreateFileInDir(node.path, normalized);
+                    }
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxNewFile}</span>
+                </button>
+              )}
+              {onCreateFolderInDir && (
+                <button
+                  type="button"
+                  className="editor-ctx-item"
+                  onClick={() => {
+                    const node = treeCtx.node;
+                    setTreeCtx(null);
+                    const name = window.prompt(t.sidebar.newFolderPrompt, 'subfolder');
+                    if (name && name.trim()) {
+                      setExpandedDirs((prev) => ({ ...prev, [node.relativePath]: true }));
+                      onCreateFolderInDir(node.path, name.trim());
+                    }
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxNewFolder}</span>
+                </button>
+              )}
+              <div className="editor-ctx-sep" />
+              {onRenameEntry && (
+                <button
+                  type="button"
+                  className="editor-ctx-item"
+                  onClick={() => {
+                    const node = treeCtx.node;
+                    setTreeCtx(null);
+                    const nextName = window.prompt(t.sidebar.renamePrompt, node.name);
+                    if (nextName && nextName.trim() && nextName.trim() !== node.name) {
+                      onRenameEntry(node.path, nextName.trim());
+                    }
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxRename}</span>
+                </button>
+              )}
+              {onDeleteEntry && (
+                <button
+                  type="button"
+                  className="editor-ctx-item is-danger"
+                  onClick={() => {
+                    const node = treeCtx.node;
+                    setTreeCtx(null);
+                    onDeleteEntry(node.path, true, node.name);
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxDelete}</span>
+                </button>
+              )}
+            </>
+          )}
+
+          <div className="editor-ctx-sep" />
+
+          {onCopyEntryPath && (
+            <>
+              <button
+                type="button"
+                className="editor-ctx-item"
+                onClick={() => {
+                  onCopyEntryPath(treeCtx.node.path);
+                  setTreeCtx(null);
+                }}
+              >
+                <span className="editor-ctx-label">{t.sidebar.ctxCopyPath}</span>
+              </button>
+              <button
+                type="button"
+                className="editor-ctx-item"
+                onClick={() => {
+                  onCopyEntryPath(treeCtx.node.relativePath);
+                  setTreeCtx(null);
+                }}
+              >
+                <span className="editor-ctx-label">{t.sidebar.ctxCopyRelPath}</span>
+              </button>
+            </>
+          )}
+          {onRevealEntry && (
+            <button
+              type="button"
+              className="editor-ctx-item"
+              onClick={() => {
+                onRevealEntry(treeCtx.node.path);
+                setTreeCtx(null);
+              }}
+            >
+              <span className="editor-ctx-label">{t.sidebar.ctxReveal}</span>
+            </button>
+          )}
+        </div>
+      )}
     </aside>
   );
 };

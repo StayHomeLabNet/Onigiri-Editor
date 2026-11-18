@@ -2455,11 +2455,12 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "onigiri-editor"
-version = "1.0.5"
+version = "1.0.6"
 dependencies = [
  "base64 0.22.1",
  "chardetng",
  "encoding_rs",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

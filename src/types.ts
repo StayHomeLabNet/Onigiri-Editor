@@ -118,6 +118,8 @@ export interface DocumentTab {
   savedEol?: '\n' | '\r\n';
   encoding?: TextEncodingId;
   savedEncoding?: TextEncodingId;
+  languageOverride?: string | null;
+  pinned?: boolean;
   dirty: boolean;
   cursorLine: number;
   cursorCol: number;
@@ -174,6 +176,9 @@ export interface EditorSettings {
   showNewlineSymbols: boolean;
   showWhitespaceSymbols: boolean;
   bracketMatchingEnabled: boolean;
+  codeFoldingEnabled: boolean;
+  highlightSelectionMatches: boolean;
+  autoCloseBrackets: boolean;
   showStatusBar: boolean;
   defaultNewFileEncoding: TextEncodingId;
   defaultNewFileEol: '\n' | '\r\n';
