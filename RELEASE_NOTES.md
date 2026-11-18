@@ -1,22 +1,27 @@
-Onigiri Editor `v1.0.6` introduces side-by-side tab split & 2-tab diff comparison, keyboard macro recording & playback, inline AI selection editing (`⌘⇧E` / `Ctrl+Shift+E`), a clickable Status Bar language selector, CodeMirror code folding & `⌘D` multi-occurrence selection, pinned/draggable tabs, folder-wide Search & Replace, tree context menus with a Close Workspace Folder action, synced Recent Files & Folders history, and source/text print & PDF export.
+Onigiri Editor `v1.1.0` delivers a major productivity, PKM (Personal Knowledge Management), and multi-format workflow upgrade: **Quick Open (`⌘P` / `@headings`)**, **Slash Commands (`/`) & Custom Snippets**, **Auto Table of Contents (TOC)**, **`[[WikiLinks]]`, Backlinks & Tag Browser**, **Clipboard Image Paste Auto-Save & Sidebar D&D Relative Links**, **Cross-Folder Regex Grep & Selective Replace (`⌘⇧G`)**, **CSV/TSV Interactive Table Preview & JSON/YAML/ENV Tools**, **Document Proofread & Review**, **Markdown Slide Presentation Mode**, **Enhanced HTML/SVG Live Preview**, **Dual Editor Improvements**, **Persisted Line Bookmarks (`F2`) & Focus Mode**, **Daily Notes & Templates**, **URL Web Clipper**, **Per-Tab AI Threads & `.md` Note Export**, **Git Status & HEAD Diff**, **Project-Scoped Session Restore**, and **Language Auto-Detection fixes**.
 
-### Highlights (`v1.0.6`)
-- **Side-by-Side Tab Split & 2-Tab Diff Comparison**:
-  - Open any second tab in the right pane to **edit two tabs side-by-side** or switch to **Diff Compare** mode with left/right swap, available from the Tab Bar context menu or Command Palette.
-- **Keyboard Macro Recording & Playback (`⌘⇧M` / `⌘⇧P`)**:
-  - Record and replay typing, cursor movement, deletions, clipboard actions, toolbar buttons, and context-menu operations across CodeMirror sessions via the Format Toolbar (`REC` / `Play`), native **Edit** menu, or Command Palette.
-- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**:
-  - Invoke an AI edit directly on the selected text or code with one-click presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) and review the line-by-line Diff Preview before applying.
-- **Status Bar Language Override Selector**:
-  - Click the active language pill in the Status Bar (`Markdown`, `TypeScript`, `PHP`, `Python`, `Rust`, etc.) to override the tab's syntax highlighting and preview mode regardless of file extension.
-- **Code Folding, Match Highlighting (`⌘D`) & Auto-Close Brackets**:
-  - Added CodeMirror fold gutters with **Fold All / Unfold All** commands, selection match highlights with **`⌘D` / `Ctrl+D`** next-occurrence selection, and configurable auto-closing brackets/quotes in **Settings**.
-- **Tab Bar, Sidebar Tree, Folder Replace & Recent History**:
-  - **Tab Bar**: Pin/unpin tabs, drag-and-drop reorder tabs, middle-click to close, and use the right-click Tab context menu.
-  - **Sidebar & Workspace**: Added file/folder right-click operations (**New File**, **New Folder**, **Rename**, **Duplicate**, **Delete**, **Copy Path**, **Reveal**), root **New Folder**, a **Close Workspace Folder** icon (guarded against active dev servers), and **Folder-Wide Search & Replace**.
-  - **Recent Files & Folders**: Persists recent files and folders and syncs them to the native **File → Open Recent** menu, Sidebar (when no folder is open), and Command Palette.
-- **Source / Plain Text Print & PDF Export**:
-  - Print or export clean formatted source code and plain-text documents directly when editing non-Markdown files.
+### Highlights (`v1.1.0`)
+- **Navigation, Session & Bookmarks**:
+  - **Quick Open (`⌘P` / `Ctrl+P`)**: Fuzzy-search open tabs, workspace files, and recent files, or prefix `@` to jump to headings in the current file.
+  - **Per-Project Session Restore & Language Auto-Detection**: Saves/restores open tabs, scroll positions, code folding states, language overrides, and bookmarks per workspace folder; fixes initial welcome/unsaved-tab auto-detection carryover.
+  - **Persisted Line Bookmarks (`⌘F2` / `F2` / `⇧F2`) & Focus Mode**: Bookmark lines across sessions and optionally dim inactive paragraphs in **Focus Mode**.
+  - **Line Sorting & Blank Line Removal**: Sort ascending/descending, deduplicate, and remove blank lines from selections via the context menu or Command Palette.
+- **Markdown Writing, Knowledge Management & Notes**:
+  - **Slash Commands (`/`) & Custom Snippets UI**: Type `/` at line start to insert headings, tables, Mermaid, KaTeX, or callouts; create, edit, and save custom snippets in the Sidebar.
+  - **Auto TOC & Table Formatter**: Insert/update `<!-- toc -->` Tables of Contents and auto-align GFM Markdown tables (with TSV paste auto-conversion).
+  - **`[[WikiLinks]]`, Backlinks & Tag Browser**: Autocomplete `[[note]]` links in the editor and browse incoming **Backlinks** and `#tags` across your workspace in the Sidebar **Knowledge** tab.
+  - **Clipboard Image Auto-Save & Sidebar D&D Links**: Auto-save pasted/dropped screenshots to a configurable folder (`assets` by default, with workspace fallback for unsaved tabs), and drag files/images from the Sidebar tree into the editor to insert relative Markdown links.
+  - **Daily Notes, Templates & Web Clipper**: One-click Today's Daily Note, built-in & custom templates (`{{date}}`, `{{time}}`, `{{title}}`), and **URL → Clean Markdown** web clipping.
+- **Multi-Format Previews, Slide Mode & Dual Editor**:
+  - **Cross-Folder Regex Grep & Selective Replace (`⌘⇧G`)**: Search across the workspace with regex/case toggles, select target files via checkboxes, and apply batch replacements cleanly.
+  - **CSV/TSV Table Preview & JSON/YAML/ENV Tools**: Filterable/sortable table view for `.csv`/`.tsv` with Markdown/CSV copy, plus JSON pretty/minify/key-sort, JSON ↔ YAML conversion, and `.env` sorting.
+  - **HTML / SVG Standalone Live Preview Upgrades**: SVG zoom (`Fit` / `50%` / `100%` / `200%`), background switcher (checker/light/dark), copy SVG / copy rasterized PNG, and HTML Visual/Source toggle.
+  - **Markdown Slide Presentation Mode**: Split Markdown by `---` into fullscreen-ready slides with keyboard navigation and grid overview (`G`).
+  - **Dual Editor Simultaneous Editing**: Right-pane Side-by-Side editor tracks active focus for `⌘S` save, toolbar actions, snippets, AI inserts, and bookmarks.
+- **AI, Review & Git Integration**:
+  - **Proofread & Document Review Tab**: Local rule checks (broken links, skipped heading levels, mixed style, repeated words) + AI-assisted review with one-click fixes.
+  - **Per-Tab AI Threads & Note Export**: Keep separate AI conversation threads per tab (or shared) and export chat history directly as a `.md` note.
+  - **Git Status & HEAD Diff Compare**: Shows Git status badges in the Sidebar file tree and compares tabs/files against `Git HEAD`.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel)**: `.dmg` / `.app.tar.gz`
@@ -25,25 +30,30 @@ Onigiri Editor `v1.0.6` introduces side-by-side tab split & 2-tab diff compariso
 
 ---
 
-Onigiri Editor `v1.0.6` では、タブの左右分割＆2タブ差分比較、キーボードマクロの記録・再生、選択範囲へのインライン AI 編集（`⌘⇧E` / `Ctrl+Shift+E`）、ステータスバーからの言語切り替え、CodeMirror のコード折りたたみ＆`⌘D` 次の一致選択、ピン留め・ドラッグ並び替え対応タブ、フォルダー一括置換＆ツリー右クリック操作（作業フォルダー指定解除アイコン含む）、最近使ったファイル／フォルダー履歴同期、およびソースコード印刷・PDF 出力を追加しました。
+Onigiri Editor `v1.1.0` では、執筆・ナレッジ管理・開発ワークフローを大幅に強化する多数の新機能を追加しました：**クイックオープン（`⌘P` / `@見出し`）**、**スラッシュコマンド（`/`）＆カスタムスニペット**、**目次（TOC）自動生成**、**`[[Wikiリンク]]`・バックリンク＆タグブラウザ**、**クリップボード画像自動保存＆サイドバー D&D 相対リンク挿入**、**フォルダー横断正規表現 Grep 一括置換（`⌘⇧G`）**、**CSV/TSV テーブルプレビュー＆JSON/YAML/ENV 整形・変換**、**ドキュメント校正・レビュー**、**Markdown スライドプレゼンモード**、**HTML/SVG プレビュー拡張**、**デュアルエディタ同時編集強化**、**行ブックマーク永続化（`F2`）＆フォーカスモード**、**デイリーノート＆テンプレート**、**URL Web クリップ**、**タブ別 AI スレッド＆`.md` 書き出し**、**Git ステータス＆HEAD 差分比較**、**プロジェクト別セッション復元**、および **言語自動判定の修正** に対応しています。
 
-### 主な変更点（`v1.0.6`）
-- **タブの左右分割表示＆2タブ差分比較**:
-  - タブ右クリックメニューやコマンドパレットから別のタブを右ペインに並べて **左右分割編集** または **2タブ差分比較**（左右入替対応）を行えるようにしました。
-- **キーボードマクロの記録・再生（`⌘⇧M` / `⌘⇧P`）**:
-  - 文字入力・カーソル移動・削除・クリップボード操作・書式ツールバー・コンテキストメニュー操作を記録してワンクリック／ショートカットで再生できるマクロ機能を追加しました（セッションをまたいで保持）。
-- **選択範囲のインライン AI 編集（`⌘⇧E` / `Ctrl+Shift+E`）**:
-  - 選択中のテキストやコードに対して指示を出して書き換えられるモーダルを追加しました（リファクタ／コメント追加／バグ・誤字修正／簡潔化／丁寧な表現／日英翻訳プリセット付き、適用前に Diff プレビューで確認可能）。
-- **ステータスバーの言語切り替えセレクタ**:
-  - ステータスバーの言語表示をクリックし、拡張子に依存せずタブ単位でシンタックスハイライトやプレビュー種別を切り替えられるようにしました。
-- **コード折りたたみ・一致ハイライト（`⌘D`）・自動括弧閉じ**:
-  - CodeMirror に折りたたみガター（すべて折りたたむ／すべて展開）と選択語句の一致ハイライト＆**`⌘D` / `Ctrl+D`** で次の一致を追加選択する機能、自動括弧閉じ（設定で ON/OFF 可）を追加しました。
-- **タブバー・サイドバー操作・フォルダー一括置換・最近の履歴**:
-  - **タブバー**: ピン留め、ドラッグ＆ドロップ並び替え、中クリック閉じ、右クリックコンテキストメニューに対応しました。
-  - **サイドバー＆ワークスペース**: ツリー右クリック操作（新規ファイル／新規フォルダー／名前変更／複製／削除／パスコピー／ファイラーで表示）、ルート直下の新規フォルダー作成、**作業フォルダーの指定を解除** アイコン（開発サーバー稼働中の保護モーダル連携）、および **フォルダー一括置換** を追加しました。
-  - **最近使ったファイル／フォルダー**: 履歴を保存し、OS ネイティブメニューの **ファイル → 最近開いた項目**・未選択時のサイドバー・コマンドパレットと同期します。
-- **ソースコード／プレーンテキスト印刷＆PDF 書き出し**:
-  - Markdown 以外のソースコードやテキストファイルでも、整形されたコード印刷／PDF 出力に対応しました。
+### 主な変更点（`v1.1.0`）
+- **ナビゲーション・セッション管理・ブックマーク**:
+  - **クイックオープン（`⌘P` / `Ctrl+P`）**: 開いているタブ・作業フォルダー内ファイル・最近のファイルをファジー検索して即ジャンプでき、先頭に `@` を付けると現在ファイルの見出しアウトラインへ移動できます。
+  - **プロジェクト別セッション復元＆言語自動判定修正**: フォルダーごとに開いていたタブ・スクロール位置・コード折りたたみ・言語固定・ブックマークを保存／復元し、初回やタブ切り替え時の言語自動判定引き継ぎ不具合を修正しました。
+  - **行ブックマーク永続化（`⌘F2` / `F2` / `⇧F2`）＆フォーカスモード**: タブ単位でブックマークを永続化し、現在段落以外を薄く表示する **フォーカスモード** を追加しました。
+  - **行ソート・空白行削除**: 右クリックメニューやコマンドパレットから昇順／降順ソート・重複行削除・空白行削除を実行できます。
+- **Markdown 執筆・ナレッジ管理・ノート作成**:
+  - **スラッシュコマンド（`/`）＆カスタムスニペット UI**: 行頭で `/` を打つと見出し・テーブル・Mermaid・KaTeX・コールアウトを即挿入でき、サイドバーで独自スニペットを追加・編集・保存できます。
+  - **目次（TOC）自動生成＆テーブル整形**: `<!-- toc -->` の挿入／更新と Markdown 表の自動整形（TSV 貼り付け時の表自動変換を含む）に対応しました。
+  - **`[[Wikiリンク]]`・バックリンク＆タグブラウザ**: エディタでの `[[ノート名]]` 補完と、サイドバーの **ナレッジ** タブから逆リンク一覧・`#タグ` 別絞り込みジャンプが可能です。
+  - **クリップボード画像自動保存＆サイドバー D&D リンク挿入**: 画像ペースト／ドロップ時に指定フォルダー（既定 `assets`、未保存タブも作業フォルダーへフォールバック）へ自動保存し、サイドバーからファイルをエディタへドロップするだけで相対パスの Markdown リンク／画像を挿入します。
+  - **デイリーノート・テンプレート＆Web クリップ**: ワンクリックで今日のデイリーノートを作成し、組み込み／カスタムテンプレート（`{{date}}` / `{{time}}` / `{{title}}`）や **URL → Markdown 変換クリップ** が使えます。
+- **多形式プレビュー・スライド・並列編集**:
+  - **フォルダー横断 Grep 検索＆選択一括置換（`⌘⇧G`）**: 正規表現・大文字小文字区別検索のヒット箇所をファイルごとにチェックボックスで選んで一括置換できます。
+  - **CSV/TSV テーブルプレビュー＆JSON/YAML/ENV ツール**: `.csv` / `.tsv` の絞り込み・列ソート・Markdown 表コピー、JSON 整形／圧縮／キーソート、JSON ⇔ YAML 変換、`.env` ソート整形に対応しました。
+  - **HTML / SVG 単体ライブプレビュー強化**: SVG ズーム（`Fit / 50% / 100% / 200%`）・背景切替（チェッカー／白／黒）・SVG コード＆PNG コピー、HTML のビジュアル／ソース表示切替を追加しました。
+  - **Markdown スライドプレゼンモード**: `---` でスライド分割し、キーボード操作・一覧グリッド（`G`）・フルスクリーン表示・Mermaid / 数式描画に対応しました。
+  - **2ファイル同時編集（デュアルエディタ）強化**: 右ペイン編集側のフォーカスを追跡し、`⌘S` 保存・ツールバー・スニペット・AI 挿入・ブックマークをアクティブ側へ反映します。
+- **AI・校正レビュー・Git 連携**:
+  - **ドキュメント校正・一括チェックタブ**: ローカルルール検査（リンク切れ・見出し飛び・文体混在・重複語等）と AI レビューによるワンクリック修正に対応しました。
+  - **AI チャット タブ別スレッド＆`.md` 書き出し**: タブ専用スレッド／共通スレッドを切り替えられ、会話履歴を新規ノートとして書き出せます。
+  - **Git ステータス＆HEAD 差分比較**: サイドバーツリーに Git 変更バッジを表示し、`Git HEAD` との差分比較を実行できます。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応）**: `.dmg` / `.app.tar.gz`

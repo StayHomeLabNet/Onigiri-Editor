@@ -23,6 +23,7 @@ import type {
   ProjectInfo,
   ProjectServerStatus,
   ProjectSetupProgress,
+  ReviewFinding,
   RightPaneMode,
   SearchMatch,
   SidebarTab,
@@ -31,6 +32,7 @@ import type {
   ThemeId,
   ViewLayout,
   WorkspaceEntry,
+  WorkspaceNoteIndexEntry,
 } from './types';
 import { decodeBytesBrowser, getEncodingShortLabel } from './utils/encodings';
 import { detectInitialLocale, getTranslations, hasSavedLocalePreference } from './i18n';
@@ -43,9 +45,16 @@ import {
   getDocumentPreviewKind,
   htmlToMarkdown,
   renderMarkdownToHtml,
+  upsertTocInMarkdown,
 } from './utils/markdown';
+import { formatLocalDateYmd, generateDailyNoteContent } from './utils/templates';
 import { resolveEditorLanguageLabel, resolveEffectiveLanguageId } from './utils/language';
 import { resolveSyntaxColors, syntaxColorsToCssVars, SYNTAX_PRESETS } from './utils/syntaxThemes';
+import {
+  loadCustomSnippets,
+  saveCustomSnippets,
+  type CustomSnippetRecord,
+} from './utils/snippets';
 import {
   appendMacroStep,
   isRecordableToolbarAction,
@@ -65,8 +74,11 @@ import {
   deleteWorkspaceEntry,
   duplicateWorkspaceFile,
   formatShortcut,
+  getGitHeadFile,
+  getGitStatus,
   getOsLocale,
   getProjectDevServerStatus,
+  indexWorkspaceNotes,
   inspectProjectForPath,
   inspectWorkspaceProject,
   isTauri,
@@ -98,16 +110,23 @@ import { TopBar } from './components/TopBar';
 import { FormatToolbar } from './components/FormatToolbar';
 import { TabBar } from './components/TabBar';
 import { Sidebar } from './components/Sidebar';
-import { EditorPane, type EditorHandle, type LineRange } from './components/EditorPane';
+import {
+  EditorPane,
+  type EditorHandle,
+  type LineRange,
+  type WorkspaceNoteItem,
+} from './components/EditorPane';
 import { PreviewPane, type PreviewHandle } from './components/PreviewPane';
 import { WebPagePreviewPane } from './components/WebPagePreviewPane';
 import { CodePreviewPane } from './components/CodePreviewPane';
+import { DataPreviewPane } from './components/DataPreviewPane';
 import { RightBrowserPane } from './components/RightBrowserPane';
-import { SideComparePane } from './components/SideComparePane';
+import { SideComparePane, type GitHeadComparisonState } from './components/SideComparePane';
 import { type ProjectSetupActionParams } from './components/ProjectSetupCard';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { FindReplaceBar, type FindReplaceBarHandle } from './components/FindReplaceBar';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
+import { QuickOpenModal } from './components/QuickOpenModal';
 import { StatusBar } from './components/StatusBar';
 import { AboutModal } from './components/AboutModal';
 import { ImageModal } from './components/ImageModal';
@@ -124,12 +143,18 @@ import {
   AiDiffPreviewModal,
   type DiffPreviewRequest,
 } from './components/AiDiffPreviewModal';
+import { SlidePresentationModal } from './components/SlidePresentationModal';
+import { WorkspaceGrepModal } from './components/WorkspaceGrepModal';
+import { TemplatePickerModal } from './components/TemplatePickerModal';
+import { WebClipModal } from './components/WebClipModal';
 
 const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
+const WORKSPACE_SESSIONS_KEY = 'onigiri-markdown.workspace-sessions.v1';
 const RECENT_FILES_KEY = 'onigiri-markdown.recentFiles.v1';
 const RECENT_FOLDERS_KEY = 'onigiri-markdown.recentFolders.v1';
 const MAX_RECENT_FILES = 12;
 const MAX_RECENT_FOLDERS = 10;
+const MAX_WORKSPACE_SESSIONS = 15;
 const ONLINE_MANUAL_URL_EN =
   'https://github.com/StayHomeLabNet/Onigiri-Editor/blob/main/doc/README.md';
 const ONLINE_MANUAL_URL_JA =
@@ -164,6 +189,9 @@ interface PersistedTabRecord {
   savedContent?: string;
   cursorLine: number;
   cursorCol: number;
+  scrollTop?: number;
+  foldedLines?: number[];
+  bookmarks?: number[];
   snapshots?: Snapshot[];
   updatedAt: number;
   diskModifiedMs?: number;
@@ -172,8 +200,16 @@ interface PersistedTabRecord {
 interface PersistedSession {
   version: 1;
   activeTabId: string;
+  sideTabId?: string | null;
   workspaceRoot: string | null;
   tabs: PersistedTabRecord[];
+}
+
+interface WorkspaceSessionEntry {
+  activeTabId: string;
+  sideTabId?: string | null;
+  tabs: PersistedTabRecord[];
+  updatedAt: number;
 }
 
 const DEFAULT_SETTINGS: EditorSettings = {
@@ -199,8 +235,11 @@ const DEFAULT_SETTINGS: EditorSettings = {
   defaultNewFileEol: '\n',
   syncScroll: true,
   typewriterMode: false,
+  focusMode: false,
   smartPasteHtml: true,
   showFrontmatterCard: true,
+  imageAssetFolder: 'assets',
+  dailyNotesFolder: '',
   wordGoal: 0,
   customCss: '',
   activeLineSyncHighlight: true,
@@ -297,6 +336,127 @@ function makeTab(
   };
 }
 
+function serializeTabRecord(tb: DocumentTab): PersistedTabRecord {
+  const storeBody = tb.dirty || !tb.filePath || !isTauri();
+  const maxLen = 400_000;
+  const trimmedContent =
+    storeBody && tb.content.length <= maxLen
+      ? tb.content
+      : storeBody
+      ? tb.content.slice(0, maxLen)
+      : undefined;
+  const trimmedSaved =
+    storeBody && tb.savedContent.length <= maxLen
+      ? tb.savedContent
+      : storeBody
+      ? tb.savedContent.slice(0, maxLen)
+      : undefined;
+  return {
+    id: tb.id,
+    title: tb.title,
+    filePath: tb.filePath,
+    eol: tb.eol,
+    savedEol: tb.savedEol,
+    encoding: tb.encoding,
+    savedEncoding: tb.savedEncoding,
+    languageOverride: tb.languageOverride ?? null,
+    pinned: Boolean(tb.pinned),
+    dirty: tb.dirty,
+    content: trimmedContent,
+    savedContent: trimmedSaved,
+    cursorLine: tb.cursorLine,
+    cursorCol: tb.cursorCol,
+    scrollTop: typeof tb.scrollTop === 'number' ? tb.scrollTop : undefined,
+    foldedLines: Array.isArray(tb.foldedLines) && tb.foldedLines.length > 0 ? tb.foldedLines : undefined,
+    bookmarks: Array.isArray(tb.bookmarks) && tb.bookmarks.length > 0 ? tb.bookmarks : undefined,
+    snapshots: tb.snapshots.slice(0, 3),
+    updatedAt: tb.updatedAt,
+    diskModifiedMs: tb.diskModifiedMs,
+  };
+}
+
+function hydrateTabRecord(rec: PersistedTabRecord, fallbackTitle: string): {
+  tab: DocumentTab;
+  needsDiskLoad: boolean;
+} {
+  const desktop = isTauri();
+  const needsDiskLoad = desktop && Boolean(rec.filePath) && !rec.dirty && rec.content === undefined;
+  const content = rec.content ?? '';
+  const savedContent = rec.savedContent ?? content;
+  const eol = rec.eol || '\n';
+  const encoding = rec.encoding || 'utf-8';
+  return {
+    needsDiskLoad,
+    tab: {
+      id: rec.id || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: rec.title || fallbackTitle,
+      filePath: rec.filePath,
+      eol,
+      savedEol: rec.savedEol || eol,
+      encoding,
+      savedEncoding: rec.savedEncoding || encoding,
+      languageOverride: rec.languageOverride ?? null,
+      pinned: Boolean(rec.pinned),
+      content,
+      savedContent,
+      dirty: Boolean(rec.dirty),
+      cursorLine: rec.cursorLine || 1,
+      cursorCol: rec.cursorCol || 1,
+      scrollTop: typeof rec.scrollTop === 'number' ? rec.scrollTop : undefined,
+      foldedLines: Array.isArray(rec.foldedLines)
+        ? rec.foldedLines.filter((n): n is number => typeof n === 'number' && n >= 1)
+        : undefined,
+      bookmarks: Array.isArray(rec.bookmarks)
+        ? rec.bookmarks.filter((n): n is number => typeof n === 'number' && n >= 1)
+        : undefined,
+      snapshots: Array.isArray(rec.snapshots) ? rec.snapshots : [],
+      updatedAt: rec.updatedAt || Date.now(),
+      diskModifiedMs: rec.diskModifiedMs,
+      externalStatus: null,
+    },
+  };
+}
+
+function loadWorkspaceSessionsMap(): Record<string, WorkspaceSessionEntry> {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_SESSIONS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, WorkspaceSessionEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function normalizeWorkspaceKey(root: string): string {
+  return root.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function saveWorkspaceSessionEntry(
+  root: string | null | undefined,
+  tabs: DocumentTab[],
+  activeTabId: string,
+  sideTabId: string | null
+) {
+  if (!root || tabs.length === 0) return;
+  const key = normalizeWorkspaceKey(root);
+  if (!key) return;
+  try {
+    const map = loadWorkspaceSessionsMap();
+    map[key] = {
+      activeTabId,
+      sideTabId,
+      tabs: tabs.map(serializeTabRecord),
+      updatedAt: Date.now(),
+    };
+    const entries = Object.entries(map).sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+    const trimmed = Object.fromEntries(entries.slice(0, MAX_WORKSPACE_SESSIONS));
+    localStorage.setItem(WORKSPACE_SESSIONS_KEY, JSON.stringify(trimmed));
+  } catch {
+    // ignore quota errors
+  }
+}
+
 function buildInitialSessionState(
   restoreEnabled: boolean,
   welcomeTitle: string,
@@ -304,6 +464,7 @@ function buildInitialSessionState(
 ): {
   tabs: DocumentTab[];
   activeTabId: string;
+  sideTabId: string | null;
   workspaceRoot: string | null;
   pendingHydrationIds: string[];
   restoredSession: boolean;
@@ -321,37 +482,19 @@ function buildInitialSessionState(
         if (candidateRecords.length > 0) {
           const pendingHydrationIds: string[] = [];
           const restoredTabs: DocumentTab[] = candidateRecords.map((rec) => {
-            const needsDiskLoad = desktop && Boolean(rec.filePath) && !rec.dirty && rec.content === undefined;
-            if (needsDiskLoad) pendingHydrationIds.push(rec.id);
-            const content = rec.content ?? '';
-            const savedContent = rec.savedContent ?? content;
-            const eol = rec.eol || '\n';
-            const encoding = rec.encoding || 'utf-8';
-            return {
-              id: rec.id || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              title: rec.title || welcomeTitle,
-              filePath: rec.filePath,
-              eol,
-              savedEol: rec.savedEol || eol,
-              encoding,
-              savedEncoding: rec.savedEncoding || encoding,
-              languageOverride: rec.languageOverride ?? null,
-              pinned: Boolean(rec.pinned),
-              content,
-              savedContent,
-              dirty: Boolean(rec.dirty),
-              cursorLine: rec.cursorLine || 1,
-              cursorCol: rec.cursorCol || 1,
-              snapshots: Array.isArray(rec.snapshots) ? rec.snapshots : [],
-              updatedAt: rec.updatedAt || Date.now(),
-              diskModifiedMs: rec.diskModifiedMs,
-              externalStatus: null,
-            };
+            const { tab, needsDiskLoad } = hydrateTabRecord(rec, welcomeTitle);
+            if (needsDiskLoad) pendingHydrationIds.push(tab.id);
+            return tab;
           });
           const activeExists = restoredTabs.some((tb) => tb.id === parsed.activeTabId);
+          const sideExists =
+            parsed.sideTabId && restoredTabs.some((tb) => tb.id === parsed.sideTabId)
+              ? parsed.sideTabId
+              : null;
           return {
             tabs: restoredTabs,
             activeTabId: activeExists ? parsed.activeTabId : restoredTabs[0].id,
+            sideTabId: sideExists,
             workspaceRoot: restoreEnabled && desktop ? parsed.workspaceRoot || null : null,
             pendingHydrationIds,
             restoredSession: true,
@@ -366,6 +509,7 @@ function buildInitialSessionState(
   return {
     tabs: [fallback],
     activeTabId: fallback.id,
+    sideTabId: null,
     workspaceRoot: null,
     pendingHydrationIds: [],
     restoredSession: false,
@@ -427,8 +571,10 @@ export function App() {
 
   const [tabs, setTabs] = useState<DocumentTab[]>(() => initialSession.tabs);
   const [activeTabId, setActiveTabId] = useState<string>(() => initialSession.activeTabId);
-  const [sideTabId, setSideTabId] = useState<string | null>(null);
+  const [sideTabId, setSideTabId] = useState<string | null>(() => initialSession.sideTabId);
   const [sidePaneMode, setSidePaneMode] = useState<'edit' | 'diff'>('edit');
+  const [gitHeadComparison, setGitHeadComparison] =
+    useState<GitHeadComparisonState | null>(null);
 
   const [recentFiles, setRecentFiles] = useState<string[]>(() =>
     loadStringList(RECENT_FILES_KEY, MAX_RECENT_FILES)
@@ -440,6 +586,12 @@ export function App() {
   recentFilesRef.current = recentFiles;
   const recentFoldersRef = useRef<string[]>(recentFolders);
   recentFoldersRef.current = recentFolders;
+
+  const [customSnippets, setCustomSnippets] = useState<CustomSnippetRecord[]>(() =>
+    loadCustomSnippets()
+  );
+  const [gitStatusEntries, setGitStatusEntries] = useState<Record<string, string>>({});
+  const [gitBranch, setGitBranch] = useState<string | null>(null);
 
   const [inlineAiState, setInlineAiState] = useState<{
     selectedText: string;
@@ -454,10 +606,16 @@ export function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('chat');
   const [showFind, setShowFind] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showGoToLine, setShowGoToLine] = useState(false);
+  const [showSlideModal, setShowSlideModal] = useState(false);
+  const [showWorkspaceGrep, setShowWorkspaceGrep] = useState(false);
+  const [showTemplateModal, setShowTemplateModal] = useState(false);
+  const [showWebClipModal, setShowWebClipModal] = useState(false);
+  const [focusedSplitSide, setFocusedSplitSide] = useState<'main' | 'side'>('main');
   const [encodingModalMode, setEncodingModalMode] = useState<EncodingModalMode | null>(null);
   const [diffPreview, setDiffPreview] = useState<DiffPreviewRequest | null>(null);
   const [folderSwitchGuardMode, setFolderSwitchGuardMode] =
@@ -483,6 +641,7 @@ export function App() {
     () => initialSession.workspaceRoot
   );
   const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntry[]>([]);
+  const [workspaceNoteIndex, setWorkspaceNoteIndex] = useState<WorkspaceNoteIndexEntry[]>([]);
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [projectServer, setProjectServer] = useState<ProjectServerStatus | null>(null);
@@ -521,6 +680,7 @@ export function App() {
 
   const topEditorRef = useRef<EditorHandle | null>(null);
   const bottomEditorRef = useRef<EditorHandle | null>(null);
+  const sideEditorRef = useRef<EditorHandle | null>(null);
   const editorPaneRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useMemo(
     () => ({
@@ -559,11 +719,46 @@ export function App() {
   tabsRef.current = tabs;
   const activeTabIdRef = useRef<string>(activeTabId);
   activeTabIdRef.current = activeTabId;
+  const sideTabIdRef = useRef<string | null>(sideTabId);
+  sideTabIdRef.current = sideTabId;
+  const sidePaneModeRef = useRef<'edit' | 'diff'>(sidePaneMode);
+  sidePaneModeRef.current = sidePaneMode;
+  const rightPaneModeRef = useRef<RightPaneMode>(rightPaneMode);
+  rightPaneModeRef.current = rightPaneMode;
+  const focusedSplitSideRef = useRef<'main' | 'side'>(focusedSplitSide);
+  focusedSplitSideRef.current = focusedSplitSide;
+  const settingsRef = useRef<EditorSettings>(settings);
+  settingsRef.current = settings;
   const workspaceRootRef = useRef<string | null>(workspaceRoot);
   workspaceRootRef.current = workspaceRoot;
   const savingPathsRef = useRef<Set<string>>(new Set());
   const sessionHydratedRef = useRef<boolean>(initialSession.pendingHydrationIds.length === 0);
   const syncLockRef = useRef<boolean>(false);
+
+  const isSideEditorActive = useCallback((): boolean => {
+    const browserShowing =
+      settingsRef.current.builtinBrowserEnabled && rightPaneModeRef.current === 'browser';
+    return (
+      focusedSplitSideRef.current === 'side' &&
+      sidePaneModeRef.current === 'edit' &&
+      Boolean(sideTabIdRef.current) &&
+      !browserShowing
+    );
+  }, []);
+
+  const getActiveEditorTarget = useCallback((): EditorHandle | null => {
+    if (isSideEditorActive() && sideEditorRef.current) {
+      return sideEditorRef.current;
+    }
+    return editorRef.current;
+  }, [isSideEditorActive, editorRef]);
+
+  useEffect(() => {
+    const browserShowing = settings.builtinBrowserEnabled && rightPaneMode === 'browser';
+    if (!sideTabId || sidePaneMode !== 'edit' || browserShowing) {
+      setFocusedSplitSide('main');
+    }
+  }, [sideTabId, sidePaneMode, settings.builtinBrowserEnabled, rightPaneMode]);
 
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) || tabs[0],
@@ -730,6 +925,7 @@ export function App() {
   const handleFocusSplitPane = useCallback((slot: 'top' | 'bottom') => {
     activePaneRef.current = 'code';
     setActivePane('code');
+    setFocusedSplitSide('main');
     activeEditorSlotRef.current = slot;
     setActiveEditorSlot(slot);
     const handle = slot === 'bottom' ? bottomEditorRef.current : topEditorRef.current;
@@ -858,42 +1054,38 @@ export function App() {
     localStorage.setItem('onigiri-markdown.aiConfig', JSON.stringify(aiConfig));
   }, [aiConfig]);
 
+  useEffect(() => {
+    saveCustomSnippets(customSnippets);
+  }, [customSnippets]);
+
+  const refreshGitStatus = useCallback(async (root: string | null) => {
+    if (!root || !isTauri()) {
+      setGitStatusEntries({});
+      setGitBranch(null);
+      return;
+    }
+    try {
+      const st = await getGitStatus(root);
+      if (st.isRepo) {
+        setGitStatusEntries(st.entries || {});
+        setGitBranch(st.branch || null);
+      } else {
+        setGitStatusEntries({});
+        setGitBranch(null);
+      }
+    } catch {
+      setGitStatusEntries({});
+      setGitBranch(null);
+    }
+  }, []);
+
   const persistSessionNow = useCallback(() => {
     if (!sessionHydratedRef.current) return;
-    const records: PersistedTabRecord[] = tabsRef.current.map((tb) => {
-      const storeBody = tb.dirty || !tb.filePath || !isTauri();
-      const maxLen = 400_000;
-      const trimmedContent =
-        storeBody && tb.content.length <= maxLen ? tb.content : storeBody ? tb.content.slice(0, maxLen) : undefined;
-      const trimmedSaved =
-        storeBody && tb.savedContent.length <= maxLen
-          ? tb.savedContent
-          : storeBody
-            ? tb.savedContent.slice(0, maxLen)
-            : undefined;
-      return {
-        id: tb.id,
-        title: tb.title,
-        filePath: tb.filePath,
-        eol: tb.eol,
-        savedEol: tb.savedEol,
-        encoding: tb.encoding,
-        savedEncoding: tb.savedEncoding,
-        languageOverride: tb.languageOverride ?? null,
-        pinned: Boolean(tb.pinned),
-        dirty: tb.dirty,
-        content: trimmedContent,
-        savedContent: trimmedSaved,
-        cursorLine: tb.cursorLine,
-        cursorCol: tb.cursorCol,
-        snapshots: tb.snapshots.slice(0, 3),
-        updatedAt: tb.updatedAt,
-        diskModifiedMs: tb.diskModifiedMs,
-      };
-    });
+    const records: PersistedTabRecord[] = tabsRef.current.map(serializeTabRecord);
     const payload: PersistedSession = {
       version: 1,
       activeTabId: activeTabIdRef.current,
+      sideTabId: sideTabIdRef.current,
       workspaceRoot: workspaceRootRef.current,
       tabs: records,
     };
@@ -910,12 +1102,18 @@ export function App() {
         // ignore quota errors
       }
     }
+    saveWorkspaceSessionEntry(
+      workspaceRootRef.current,
+      tabsRef.current,
+      activeTabIdRef.current,
+      sideTabIdRef.current
+    );
   }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(persistSessionNow, 450);
     return () => window.clearTimeout(timer);
-  }, [tabs, activeTabId, workspaceRoot, persistSessionNow]);
+  }, [tabs, activeTabId, sideTabId, workspaceRoot, persistSessionNow]);
 
   useEffect(() => {
     const flush = () => persistSessionNow();
@@ -940,6 +1138,12 @@ export function App() {
             if (!cancelled) setWorkspaceEntries(list);
           })
           .catch(() => {});
+        indexWorkspaceNotes(init.workspaceRoot)
+          .then((idx) => {
+            if (!cancelled) setWorkspaceNoteIndex(idx);
+          })
+          .catch(() => {});
+        void refreshGitStatus(init.workspaceRoot);
       }
 
       if (init.pendingHydrationIds.length > 0 && isTauri()) {
@@ -1129,10 +1333,21 @@ export function App() {
     [activeTab.id]
   );
 
+  const refreshWorkspaceRef = useRef<(root: string) => Promise<void>>(async () => {});
+
   const insertImageIntoActivePane = useCallback(
     (src: string, alt = '') => {
+      if (isSideEditorActive() && sideEditorRef.current) {
+        sideEditorRef.current.insertText(`\n![${alt}](${src})\n`);
+        notify(t.toasts.imageInserted);
+        return;
+      }
+      const hasSidePane =
+        Boolean(sideTabIdRef.current) &&
+        !(settingsRef.current.builtinBrowserEnabled && rightPaneModeRef.current === 'browser');
       const targetVisual =
-        layout === 'preview' || (layout === 'split' && activePaneRef.current === 'visual');
+        !hasSidePane &&
+        (layout === 'preview' || (layout === 'split' && activePaneRef.current === 'visual'));
       if (targetVisual && previewRef.current) {
         previewRef.current.insertImage(src, alt);
       } else {
@@ -1140,7 +1355,7 @@ export function App() {
       }
       notify(t.toasts.imageInserted);
     },
-    [layout, notify, t.toasts.imageInserted]
+    [layout, notify, t.toasts.imageInserted, isSideEditorActive, editorRef]
   );
 
   const handleImageFileInput = useCallback(
@@ -1155,23 +1370,36 @@ export function App() {
         const extMatch = file.name.match(/\.([a-zA-Z0-9]+)$/);
         const mimeExt = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
         const ext = extMatch ? extMatch[1] : mimeExt;
-        const savedPath = await savePastedImage(dataUrl, ext, activeTab.filePath);
+        const targetTab =
+          isSideEditorActive() && sideTabIdRef.current
+            ? tabsRef.current.find((tb) => tb.id === sideTabIdRef.current) || activeTab
+            : activeTab;
+        const savedPath = await savePastedImage(
+          dataUrl,
+          ext,
+          targetTab.filePath,
+          workspaceRootRef.current,
+          settingsRef.current.imageAssetFolder
+        );
         const alt = file.name.replace(/\.[^.]+$/, '');
         insertImageIntoActivePane(savedPath, alt);
+        if (workspaceRootRef.current && isTauri()) {
+          void refreshWorkspaceRef.current(workspaceRootRef.current);
+        }
       } catch (err) {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
       }
     },
-    [activeTab.filePath, insertImageIntoActivePane, notify, t.toasts.errorPrefix]
+    [activeTab, isSideEditorActive, insertImageIntoActivePane, notify, t.toasts.errorPrefix]
   );
 
   const openPathInTab = useCallback(
-    async (filePath: string) => {
+    async (filePath: string): Promise<DocumentTab | null> => {
       const existing = tabsRef.current.find((tb) => tb.filePath === filePath);
       if (existing) {
         setActiveTabId(existing.id);
         pushRecentFile(filePath);
-        return;
+        return existing;
       }
       try {
         const res = await readFileByPath(filePath);
@@ -1187,8 +1415,10 @@ export function App() {
         });
         setActiveTabId(created.id);
         pushRecentFile(res.path);
+        return created;
       } catch (err) {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        return null;
       }
     },
     [notify, pushRecentFile, t.toasts.errorPrefix]
@@ -1321,13 +1551,14 @@ export function App() {
         scanWorkspaceDir(workspaceRootRef.current)
           .then(setWorkspaceEntries)
           .catch(() => {});
+        void refreshGitStatus(workspaceRootRef.current);
       }
     } catch {
       // ignore polling errors
     } finally {
       syncLockRef.current = false;
     }
-  }, [notify, t.toasts.reloadedExternal]);
+  }, [notify, t.toasts.reloadedExternal, refreshGitStatus]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -1342,6 +1573,7 @@ export function App() {
           scanWorkspaceDir(root)
             .then(setWorkspaceEntries)
             .catch(() => {});
+          void refreshGitStatus(root);
         }
       }
     };
@@ -1357,7 +1589,7 @@ export function App() {
       document.removeEventListener('visibilitychange', onFocusOrVisible);
       window.clearInterval(interval);
     };
-  }, [syncOpenTabsWithDisk]);
+  }, [syncOpenTabsWithDisk, refreshGitStatus]);
 
   // Auto-save file-backed tabs when enabled and conflict-free
   useEffect(() => {
@@ -1403,6 +1635,9 @@ export function App() {
             };
           })
         );
+        if (workspaceRootRef.current) {
+          void refreshGitStatus(workspaceRootRef.current);
+        }
       } catch {
         // leave dirty if auto-save fails
       } finally {
@@ -1420,6 +1655,7 @@ export function App() {
     activeTab.eol,
     activeTab.encoding,
     activeTab.externalStatus,
+    refreshGitStatus,
   ]);
 
   const handleReloadFromDisk = useCallback(
@@ -1531,13 +1767,20 @@ export function App() {
 
   const dropHelpersRef = useRef({
     docPath: activeTab.filePath,
+    workspaceRoot,
+    imageAssetFolder: settings.imageAssetFolder,
     insertImageIntoActivePane,
     openPathInTab,
     notify,
     errorPrefix: t.toasts.errorPrefix,
   });
   dropHelpersRef.current = {
-    docPath: activeTab.filePath,
+    docPath:
+      isSideEditorActive() && sideTab
+        ? sideTab.filePath
+        : activeTab.filePath,
+    workspaceRoot,
+    imageAssetFolder: settings.imageAssetFolder,
     insertImageIntoActivePane,
     openPathInTab,
     notify,
@@ -1577,12 +1820,19 @@ export function App() {
           } else if (event.payload.type === 'drop') {
             setIsDraggingFile(false);
             const paths = event.payload.paths || [];
+            let savedAnyImage = false;
             for (const p of paths) {
               if (/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p)) {
                 try {
-                  const savedSrc = await saveImageAsset(p, dropHelpersRef.current.docPath);
+                  const savedSrc = await saveImageAsset(
+                    p,
+                    dropHelpersRef.current.docPath,
+                    dropHelpersRef.current.workspaceRoot,
+                    dropHelpersRef.current.imageAssetFolder
+                  );
                   const baseName = (p.split(/[/\\]/).pop() || 'image').replace(/\.[^.]+$/, '');
                   dropHelpersRef.current.insertImageIntoActivePane(savedSrc, baseName);
+                  savedAnyImage = true;
                 } catch (err) {
                   dropHelpersRef.current.notify(
                     `${dropHelpersRef.current.errorPrefix} ${(err as Error).message}`
@@ -1593,6 +1843,9 @@ export function App() {
               ) {
                 await dropHelpersRef.current.openPathInTab(p);
               }
+            }
+            if (savedAnyImage && workspaceRootRef.current) {
+              void refreshWorkspaceRef.current(workspaceRootRef.current);
             }
           }
         });
@@ -1701,10 +1954,11 @@ export function App() {
 
   const handleSave = useCallback(
     async (forceSaveAs = false) => {
-      const savedSnapshot = activeTab.content;
-      const prevPath = activeTab.filePath;
-      const targetEncoding: TextEncodingId = activeTab.encoding ?? 'utf-8';
-      const targetEol: '\n' | '\r\n' = activeTab.eol ?? '\n';
+      const targetTab = isSideEditorActive() && sideTab ? sideTab : activeTab;
+      const savedSnapshot = targetTab.content;
+      const prevPath = targetTab.filePath;
+      const targetEncoding: TextEncodingId = targetTab.encoding ?? 'utf-8';
+      const targetEol: '\n' | '\r\n' = targetTab.eol ?? '\n';
       if (!forceSaveAs && prevPath) {
         savingPathsRef.current.add(prevPath);
       }
@@ -1713,20 +1967,20 @@ export function App() {
           targetEol === '\r\n'
             ? savedSnapshot.replace(/\n/g, '\r\n')
             : savedSnapshot;
-        const needsDialog = forceSaveAs || !activeTab.filePath;
+        const needsDialog = forceSaveAs || !targetTab.filePath;
         const res = needsDialog
           ? await runWithHiddenNativeBrowser(() =>
               saveMarkdownFile(
                 contentToWrite,
-                forceSaveAs ? undefined : activeTab.filePath,
-                activeTab.title,
+                forceSaveAs ? undefined : targetTab.filePath,
+                targetTab.title,
                 targetEncoding
               )
             )
           : await saveMarkdownFile(
               contentToWrite,
-              activeTab.filePath,
-              activeTab.title,
+              targetTab.filePath,
+              targetTab.title,
               targetEncoding
             );
         if (!res) return;
@@ -1735,7 +1989,7 @@ export function App() {
         const newMtime = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
         setTabs((prev) =>
           prev.map((tab) => {
-            if (tab.id !== activeTab.id) return tab;
+            if (tab.id !== targetTab.id) return tab;
             const nextSaved = {
               ...tab,
               title: res.name,
@@ -1759,6 +2013,14 @@ export function App() {
           })
         );
         pushRecentFile(res.path);
+        if (workspaceRootRef.current) {
+          void refreshGitStatus(workspaceRootRef.current);
+          if (isTauri()) {
+            indexWorkspaceNotes(workspaceRootRef.current)
+              .then(setWorkspaceNoteIndex)
+              .catch(() => {});
+          }
+        }
         notify(t.toasts.savedSuccess);
         if (
           isTauri() &&
@@ -1782,7 +2044,7 @@ export function App() {
         notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
       } finally {
         if (prevPath) savingPathsRef.current.delete(prevPath);
-        if (activeTab.filePath) savingPathsRef.current.delete(activeTab.filePath);
+        if (targetTab.filePath) savingPathsRef.current.delete(targetTab.filePath);
         // Clear any Save-As path lock cleanly on next tick
         window.setTimeout(() => {
           savingPathsRef.current.clear();
@@ -1791,8 +2053,11 @@ export function App() {
     },
     [
       activeTab,
+      sideTab,
+      isSideEditorActive,
       runWithHiddenNativeBrowser,
       pushRecentFile,
+      refreshGitStatus,
       notify,
       t.toasts.errorPrefix,
       t.toasts.savedSuccess,
@@ -1902,7 +2167,12 @@ export function App() {
       const target = tabs.find((tb) => tb.id === id);
       if (!target) return;
       if (target.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
-      if (sideTabId === id) setSideTabId(null);
+      if (sideTabId === id) {
+        setSideTabId(null);
+        setGitHeadComparison(null);
+      } else if (gitHeadComparison?.tabId === id) {
+        setGitHeadComparison(null);
+      }
       const remaining = tabs.filter((tb) => tb.id !== id);
       if (remaining.length === 0) {
         const fresh = makeTab(t.dialogs.untitledName, '', undefined, undefined, {
@@ -1922,6 +2192,7 @@ export function App() {
       tabs,
       activeTabId,
       sideTabId,
+      gitHeadComparison?.tabId,
       settings.defaultNewFileEncoding,
       settings.defaultNewFileEol,
       t.dialogs.unsavedCloseConfirm,
@@ -1959,6 +2230,7 @@ export function App() {
       if (mode !== 'advanced') handleModeChange('advanced');
       if (layout === 'editor') setLayout('split');
       setRightPaneMode('markdown');
+      setGitHeadComparison(null);
       setSideTabId(id);
       setSidePaneMode('edit');
     },
@@ -1979,6 +2251,7 @@ export function App() {
       if (mode !== 'advanced') handleModeChange('advanced');
       if (layout === 'editor') setLayout('split');
       setRightPaneMode('markdown');
+      setGitHeadComparison(null);
       setSideTabId(targetId);
       setSidePaneMode('diff');
     },
@@ -2008,6 +2281,7 @@ export function App() {
       }
       if (sideTabId && !remaining.some((tb) => tb.id === sideTabId)) {
         setSideTabId(null);
+        setGitHeadComparison(null);
       }
     },
     [tabs, activeTabId, sideTabId, t.dialogs.unsavedCloseConfirm]
@@ -2033,6 +2307,7 @@ export function App() {
       }
       if (sideTabId && closeIds.has(sideTabId)) {
         setSideTabId(null);
+        setGitHeadComparison(null);
       }
     },
     [tabs, activeTabId, sideTabId, t.dialogs.unsavedCloseConfirm]
@@ -2057,28 +2332,353 @@ export function App() {
     [notify, t.toasts.errorPrefix]
   );
 
+  const handleCompareTabWithGitHead = useCallback(
+    async (tabId: string) => {
+      const target = tabsRef.current.find((tb) => tb.id === tabId);
+      if (!target || !target.filePath) {
+        notify(t.encoding.noFileToReopen);
+        return;
+      }
+      try {
+        const res = await getGitHeadFile(workspaceRootRef.current, target.filePath);
+        if (mode !== 'advanced') handleModeChange('advanced');
+        if (layout === 'editor') setLayout('split');
+        setRightPaneMode('markdown');
+        setActiveTabId(target.id);
+        setSideTabId(target.id);
+        setSidePaneMode('diff');
+        setGitHeadComparison({
+          tabId: target.id,
+          title: target.title,
+          branch: res.branch,
+          existsInHead: res.existsInHead,
+          headContent: res.content,
+        });
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [mode, layout, handleModeChange, notify, t.encoding.noFileToReopen, t.toasts.errorPrefix]
+  );
+
+  const handleCompareFileWithGitHead = useCallback(
+    async (filePath: string) => {
+      const opened = await openPathInTab(filePath);
+      if (opened) {
+        await handleCompareTabWithGitHead(opened.id);
+      }
+    },
+    [openPathInTab, handleCompareTabWithGitHead]
+  );
+
   // Workspace folder actions
-  const refreshWorkspace = useCallback(async (root: string) => {
-    try {
-      const list = await scanWorkspaceDir(root);
-      setWorkspaceEntries(list);
-    } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
-    }
-  }, [notify, t.toasts.errorPrefix]);
+  const refreshWorkspace = useCallback(
+    async (root: string) => {
+      try {
+        const list = await scanWorkspaceDir(root);
+        setWorkspaceEntries(list);
+        void refreshGitStatus(root);
+        if (isTauri()) {
+          indexWorkspaceNotes(root)
+            .then(setWorkspaceNoteIndex)
+            .catch(() => {});
+        }
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [notify, t.toasts.errorPrefix, refreshGitStatus]
+  );
+  refreshWorkspaceRef.current = refreshWorkspace;
+
+  const workspaceNotes = useMemo<WorkspaceNoteItem[]>(() => {
+    return workspaceEntries
+      .filter((e) => !e.isDir && /\.(md|markdown|mdown|mdx)$/i.test(e.name))
+      .map((e) => ({
+        name: e.name.replace(/\.(md|markdown|mdown|mdx)$/i, ''),
+        relPath: e.relativePath,
+        path: e.path,
+      }));
+  }, [workspaceEntries]);
+
+  const handleOpenWikiLink = useCallback(
+    async (rawTarget: string) => {
+      const [rawNotePart, anchorPart] = rawTarget.split('#');
+      const cleanQuery = rawNotePart.trim().replace(/\\/g, '/');
+      if (!cleanQuery) return;
+      const lowerQuery = cleanQuery.toLowerCase();
+      const baseQuery = lowerQuery.replace(/\.(md|markdown|mdown|mdx)$/i, '');
+
+      const matchedNote =
+        workspaceNotes.find((n) => n.relPath.toLowerCase() === lowerQuery) ||
+        workspaceNotes.find((n) => n.relPath.toLowerCase() === `${baseQuery}.md`) ||
+        workspaceNotes.find((n) => n.name.toLowerCase() === baseQuery) ||
+        workspaceNotes.find((n) => n.relPath.toLowerCase().endsWith(`/${baseQuery}.md`));
+
+      const jumpToAnchor = (content: string) => {
+        if (!anchorPart) return;
+        const anchorLower = anchorPart.trim().toLowerCase();
+        const heading = extractHeadings(content).find(
+          (h) => h.text.trim().toLowerCase() === anchorLower || h.id.toLowerCase() === anchorLower
+        );
+        if (heading) {
+          window.setTimeout(() => editorRef.current?.scrollToLine(heading.line), 60);
+        }
+      };
+
+      if (matchedNote) {
+        const opened = await openPathInTab(matchedNote.path);
+        if (opened) jumpToAnchor(opened.content);
+        return;
+      }
+
+      const openTabMatch = tabsRef.current.find((tb) => {
+        const titleNoExt = tb.title.replace(/\.(md|markdown|mdown|mdx)$/i, '').toLowerCase();
+        return tb.title.toLowerCase() === lowerQuery || titleNoExt === baseQuery;
+      });
+      if (openTabMatch) {
+        setActiveTabId(openTabMatch.id);
+        jumpToAnchor(openTabMatch.content);
+        return;
+      }
+
+      if (workspaceRootRef.current && isTauri()) {
+        const fileName = cleanQuery.endsWith('.md') ? cleanQuery : `${cleanQuery}.md`;
+        const confirmMsg =
+          locale === 'ja'
+            ? `ノート「${fileName}」が見つかりません。新規作成しますか？`
+            : `Note "${fileName}" was not found. Create it?`;
+        if (window.confirm(confirmMsg)) {
+          try {
+            const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
+            const eol = settings.defaultNewFileEol ?? '\n';
+            const fullPath = await createFileInDir(
+              workspaceRootRef.current,
+              fileName,
+              `# ${cleanQuery.replace(/\.md$/i, '')}\n\n`,
+              encoding
+            );
+            await refreshWorkspace(workspaceRootRef.current);
+            const created = makeTab(
+              fileName.split(/[/\\]/).pop() || fileName,
+              `# ${cleanQuery.replace(/\.md$/i, '')}\n\n`,
+              fullPath,
+              undefined,
+              { encoding, eol }
+            );
+            setTabs((prev) => [...prev, created]);
+            setActiveTabId(created.id);
+            pushRecentFile(fullPath);
+          } catch (err) {
+            notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          }
+        }
+      } else {
+        notify(
+          locale === 'ja'
+            ? `リンク先のノート「${cleanQuery}」が見つかりませんでした`
+            : `Wiki link target "${cleanQuery}" was not found`
+        );
+      }
+    },
+    [
+      workspaceNotes,
+      openPathInTab,
+      locale,
+      settings.defaultNewFileEncoding,
+      settings.defaultNewFileEol,
+      refreshWorkspace,
+      pushRecentFile,
+      notify,
+      t.toasts.errorPrefix,
+    ]
+  );
+
+  const handleInsertOrUpdateToc = useCallback(() => {
+    const offset = editorRef.current?.getCursorOffset();
+    const { nextMarkdown } = upsertTocInMarkdown(activeTab.content, offset);
+    updateActiveContent(nextMarkdown);
+    notify(t.toasts.aiCleaned);
+  }, [activeTab.content, updateActiveContent, notify, t.toasts.aiCleaned]);
+
+  const handleApplyReviewFix = useCallback(
+    (finding: ReviewFinding) => {
+      if (!finding.original || finding.replacement === undefined) return;
+      const lines = activeTab.content.replace(/\r\n/g, '\n').split('\n');
+      const idx = finding.line - 1;
+      let nextContent: string | null = null;
+      if (idx >= 0 && idx < lines.length && lines[idx].includes(finding.original)) {
+        lines[idx] = lines[idx].replace(finding.original, finding.replacement);
+        nextContent = lines.join('\n');
+      } else if (activeTab.content.includes(finding.original)) {
+        nextContent = activeTab.content.replace(finding.original, finding.replacement);
+      }
+      if (nextContent !== null && nextContent !== activeTab.content) {
+        updateActiveContent(nextContent);
+        notify(t.toasts.aiCleaned);
+      }
+    },
+    [activeTab.content, updateActiveContent, notify, t.toasts.aiCleaned]
+  );
 
   const pendingFolderActionRef = useRef<
     { type: 'open-picker' } | { type: 'open-path'; path: string } | { type: 'close-folder' }
   >({ type: 'open-picker' });
 
   const proceedCloseWorkspaceFolder = useCallback(() => {
+    if (workspaceRootRef.current) {
+      saveWorkspaceSessionEntry(
+        workspaceRootRef.current,
+        tabsRef.current,
+        activeTabIdRef.current,
+        sideTabIdRef.current
+      );
+    }
     setWorkspaceRoot(null);
     setWorkspaceEntries([]);
+    setWorkspaceNoteIndex([]);
     setSearchMatches([]);
+    setGitStatusEntries({});
+    setGitBranch(null);
+    setGitHeadComparison(null);
     setProjectSetupLogs([]);
     setProjectSetupFeedback(null);
     setProjectSetupActionId(null);
   }, []);
+
+  const activateWorkspaceDir = useCallback(
+    async (dir: string) => {
+      const prevRoot = workspaceRootRef.current;
+      const isSameRoot =
+        Boolean(prevRoot) && normalizeWorkspaceKey(prevRoot!) === normalizeWorkspaceKey(dir);
+
+      if (prevRoot && !isSameRoot) {
+        saveWorkspaceSessionEntry(
+          prevRoot,
+          tabsRef.current,
+          activeTabIdRef.current,
+          sideTabIdRef.current
+        );
+      }
+
+      setGitHeadComparison(null);
+      setSearchMatches([]);
+
+      if (!isSameRoot && settings.restoreSessionEnabled) {
+        const savedEntry = loadWorkspaceSessionsMap()[normalizeWorkspaceKey(dir)];
+        if (savedEntry && Array.isArray(savedEntry.tabs) && savedEntry.tabs.length > 0) {
+          const fallbackTitle = locale === 'ja' ? 'ようこそ.md' : 'Welcome.md';
+          const pendingIds: string[] = [];
+          const restoredTabs: DocumentTab[] = savedEntry.tabs.map((rec) => {
+            const { tab, needsDiskLoad } = hydrateTabRecord(rec, fallbackTitle);
+            if (needsDiskLoad) pendingIds.push(tab.id);
+            return tab;
+          });
+          if (!prevRoot) {
+            for (const tb of tabsRef.current) {
+              if (tb.dirty && !tb.filePath && !restoredTabs.some((r) => r.id === tb.id)) {
+                restoredTabs.push(tb);
+              }
+            }
+          }
+          const nextActive = restoredTabs.some((tb) => tb.id === savedEntry.activeTabId)
+            ? savedEntry.activeTabId
+            : restoredTabs[0].id;
+          const nextSide =
+            savedEntry.sideTabId && restoredTabs.some((tb) => tb.id === savedEntry.sideTabId)
+              ? savedEntry.sideTabId
+              : null;
+
+          setTabs(restoredTabs);
+          setActiveTabId(nextActive);
+          setSideTabId(nextSide);
+          notify(t.toasts.sessionRestored);
+
+          if (pendingIds.length > 0 && isTauri()) {
+            void (async () => {
+              const targetTabs = restoredTabs.filter((tb) => pendingIds.includes(tb.id) && tb.filePath);
+              const paths = targetTabs.map((tb) => tb.filePath!);
+              const syncList = await checkFilesSync(paths).catch(() => []);
+              const syncMap = new Map(syncList.map((s) => [s.path, s]));
+              const loadedById = new Map<
+                string,
+                { content: string; eol: '\n' | '\r\n'; encoding: TextEncodingId; modifiedMs?: number }
+              >();
+              const missingIds = new Set<string>();
+              for (const tb of targetTabs) {
+                const path = tb.filePath!;
+                const syncInfo = syncMap.get(path);
+                if (syncInfo && !syncInfo.exists) {
+                  missingIds.add(tb.id);
+                  continue;
+                }
+                try {
+                  const res = await readFileByPath(path, tb.encoding);
+                  const norm = res.content.includes('\r\n')
+                    ? res.content.replace(/\r\n/g, '\n')
+                    : res.content;
+                  loadedById.set(tb.id, {
+                    content: norm,
+                    eol: res.eol,
+                    encoding: res.encoding,
+                    modifiedMs: syncInfo?.modifiedMs,
+                  });
+                } catch {
+                  missingIds.add(tb.id);
+                }
+              }
+              setTabs((prev) => {
+                const next = prev
+                  .filter((tb) => !missingIds.has(tb.id))
+                  .map((tb) => {
+                    const loaded = loadedById.get(tb.id);
+                    if (!loaded) return tb;
+                    return {
+                      ...tb,
+                      content: loaded.content,
+                      savedContent: loaded.content,
+                      eol: loaded.eol,
+                      savedEol: loaded.eol,
+                      encoding: loaded.encoding,
+                      savedEncoding: loaded.encoding,
+                      dirty: false,
+                      diskModifiedMs: loaded.modifiedMs ?? tb.diskModifiedMs,
+                    };
+                  });
+                if (next.length === 0) {
+                  const fresh = makeTab(t.dialogs.untitledName, '');
+                  setActiveTabId(fresh.id);
+                  return [fresh];
+                }
+                if (!next.some((tb) => tb.id === activeTabIdRef.current)) {
+                  setActiveTabId(next[0].id);
+                }
+                return next;
+              });
+            })();
+          }
+        }
+      }
+
+      setWorkspaceRoot(dir);
+      setSidebarTab('files');
+      setShowSidebar(true);
+      if (mode !== 'advanced') handleModeChange('advanced');
+      pushRecentFolder(dir);
+      await refreshWorkspace(dir);
+    },
+    [
+      settings.restoreSessionEnabled,
+      locale,
+      mode,
+      handleModeChange,
+      pushRecentFolder,
+      refreshWorkspace,
+      notify,
+      t.toasts.sessionRestored,
+      t.dialogs.untitledName,
+    ]
+  );
 
   const openWorkspaceFolderPath = useCallback(
     async (dir: string) => {
@@ -2092,21 +2692,13 @@ export function App() {
         setFolderSwitchGuardMode('server-running');
         return;
       }
-      setWorkspaceRoot(dir);
-      setSidebarTab('files');
-      setShowSidebar(true);
-      if (mode !== 'advanced') handleModeChange('advanced');
-      pushRecentFolder(dir);
-      await refreshWorkspace(dir);
+      await activateWorkspaceDir(dir);
     },
     [
       projectSetupBusy,
       projectServer?.running,
       projectServer?.starting,
-      mode,
-      handleModeChange,
-      pushRecentFolder,
-      refreshWorkspace,
+      activateWorkspaceDir,
     ]
   );
 
@@ -2114,21 +2706,13 @@ export function App() {
     try {
       const dir = await runWithHiddenNativeBrowser(() => openFolderDialog());
       if (!dir) return;
-      setWorkspaceRoot(dir);
-      setSidebarTab('files');
-      setShowSidebar(true);
-      if (mode !== 'advanced') handleModeChange('advanced');
-      pushRecentFolder(dir);
-      await refreshWorkspace(dir);
+      await activateWorkspaceDir(dir);
     } catch (err) {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     }
   }, [
     runWithHiddenNativeBrowser,
-    mode,
-    handleModeChange,
-    pushRecentFolder,
-    refreshWorkspace,
+    activateWorkspaceDir,
     notify,
     t.toasts.errorPrefix,
   ]);
@@ -2194,12 +2778,7 @@ export function App() {
       if (pending.type === 'close-folder') {
         proceedCloseWorkspaceFolder();
       } else if (pending.type === 'open-path') {
-        setWorkspaceRoot(pending.path);
-        setSidebarTab('files');
-        setShowSidebar(true);
-        if (mode !== 'advanced') handleModeChange('advanced');
-        pushRecentFolder(pending.path);
-        await refreshWorkspace(pending.path);
+        await activateWorkspaceDir(pending.path);
       } else {
         await proceedOpenFolderPicker();
       }
@@ -2215,10 +2794,7 @@ export function App() {
     notify,
     t.toasts.devServerStopped,
     t.toasts.errorPrefix,
-    mode,
-    handleModeChange,
-    pushRecentFolder,
-    refreshWorkspace,
+    activateWorkspaceDir,
     proceedCloseWorkspaceFolder,
     proceedOpenFolderPicker,
   ]);
@@ -2500,6 +3076,269 @@ export function App() {
       t.sidebar.replaceDoneToast,
       t.toasts.errorPrefix,
     ]
+  );
+
+  const handleAfterWorkspaceGrepReplace = useCallback(
+    async (modifiedPaths: string[], count: number) => {
+      if (workspaceRootRef.current) {
+        await refreshWorkspace(workspaceRootRef.current);
+      }
+      if (modifiedPaths.length > 0) {
+        const modifiedSet = new Set(modifiedPaths);
+        const cleanTargets = tabsRef.current.filter(
+          (tb) => tb.filePath && modifiedSet.has(tb.filePath) && !tb.dirty
+        );
+        for (const tb of cleanTargets) {
+          try {
+            const reloaded = await readFileByPath(tb.filePath!, tb.encoding);
+            const norm = reloaded.content.includes('\r\n')
+              ? reloaded.content.replace(/\r\n/g, '\n')
+              : reloaded.content;
+            const syncInfo = await checkFilesSync([tb.filePath!]).catch(() => []);
+            const mtime = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : tb.diskModifiedMs;
+            setTabs((prev) =>
+              prev.map((item) =>
+                item.id === tb.id
+                  ? {
+                      ...item,
+                      content: norm,
+                      savedContent: norm,
+                      dirty: false,
+                      diskModifiedMs: mtime,
+                      externalStatus: null,
+                    }
+                  : item
+              )
+            );
+          } catch {
+            // ignore
+          }
+        }
+        void syncOpenTabsWithDisk();
+      }
+      notify(
+        t.grepModal.doneToast
+          .replace('{files}', String(modifiedPaths.length))
+          .replace('{count}', String(count))
+      );
+    },
+    [refreshWorkspace, syncOpenTabsWithDisk, notify, t.grepModal.doneToast]
+  );
+
+  const handleOpenFileAtLine = useCallback(
+    async (filePath: string, line: number) => {
+      const opened = await openPathInTab(filePath);
+      if (opened) {
+        window.setTimeout(() => {
+          editorRef.current?.scrollToLine(line, 1);
+        }, 60);
+      }
+    },
+    [openPathInTab, editorRef]
+  );
+
+  const handleToggleFocusMode = useCallback(() => {
+    setSettings((s) => ({ ...s, focusMode: !s.focusMode }));
+  }, []);
+
+  const handleBookmarksChange = useCallback((lines: number[], sourceDocId?: string) => {
+    const targetId = sourceDocId || activeTabIdRef.current;
+    setTabs((prev) =>
+      prev.map((tb) => {
+        if (tb.id !== targetId) return tb;
+        const prevBm = tb.bookmarks ?? [];
+        if (prevBm.length === lines.length && prevBm.every((v, i) => v === lines[i])) {
+          return tb;
+        }
+        return { ...tb, bookmarks: lines };
+      })
+    );
+  }, []);
+
+  const handleOpenDailyNote = useCallback(async () => {
+    const dateStr = formatLocalDateYmd();
+    const fileName = `${dateStr}.md`;
+    const starter = generateDailyNoteContent(dateStr, locale);
+    const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
+    const eol = settings.defaultNewFileEol ?? '\n';
+
+    if (workspaceRootRef.current && isTauri()) {
+      const root = workspaceRootRef.current;
+      const folder = (settings.dailyNotesFolder || '')
+        .trim()
+        .replace(/^[/\\]+|[/\\]+$/g, '');
+      const relPath = folder ? `${folder.replace(/\\/g, '/')}/${fileName}` : fileName;
+      const sep = root.includes('\\') ? '\\' : '/';
+      const fullPath = `${root.replace(/[/\\]+$/, '')}${sep}${relPath.replace(/\//g, sep)}`;
+
+      const existingEntry = workspaceEntries.find(
+        (e) =>
+          !e.isDir &&
+          e.relativePath.replace(/\\/g, '/').toLowerCase() === relPath.toLowerCase()
+      );
+      if (existingEntry) {
+        await openPathInTab(existingEntry.path);
+        return;
+      }
+      const syncRes = await checkFilesSync([fullPath]).catch(() => []);
+      if (syncRes[0]?.exists) {
+        await openPathInTab(fullPath);
+        return;
+      }
+      try {
+        if (folder) {
+          await createWorkspaceFolder(root, folder.replace(/\\/g, '/')).catch(() => {});
+        }
+        const createdPath = await createFileInDir(
+          root,
+          relPath.replace(/\//g, sep),
+          starter,
+          encoding
+        );
+        await refreshWorkspace(root);
+        const syncAfter = await checkFilesSync([createdPath]).catch(() => []);
+        const modifiedMs = syncAfter[0]?.exists ? syncAfter[0].modifiedMs : undefined;
+        const created = makeTab(fileName, starter, createdPath, modifiedMs, { encoding, eol });
+        setTabs((prev) => [...prev, created]);
+        setActiveTabId(created.id);
+        pushRecentFile(createdPath);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+      return;
+    }
+
+    const existingTab = tabsRef.current.find((tb) => tb.title === fileName && !tb.filePath);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      return;
+    }
+    const created = makeTab(fileName, starter, undefined, undefined, { encoding, eol });
+    setTabs((prev) => [...prev, created]);
+    setActiveTabId(created.id);
+  }, [
+    locale,
+    settings.defaultNewFileEncoding,
+    settings.defaultNewFileEol,
+    settings.dailyNotesFolder,
+    workspaceEntries,
+    openPathInTab,
+    refreshWorkspace,
+    pushRecentFile,
+    notify,
+    t.toasts.errorPrefix,
+  ]);
+
+  const handleCreateFromTemplate = useCallback(
+    async (payload: { title: string; fileName: string; content: string }) => {
+      const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = settings.defaultNewFileEol ?? '\n';
+      const cleanName = (payload.fileName || 'note.md').replace(/^[/\\]+/, '');
+
+      if (workspaceRootRef.current && isTauri()) {
+        const root = workspaceRootRef.current;
+        const sep = root.includes('\\') ? '\\' : '/';
+        let candidate = cleanName;
+        const existingRelSet = new Set(
+          workspaceEntries.map((e) => e.relativePath.replace(/\\/g, '/').toLowerCase())
+        );
+        if (existingRelSet.has(candidate.toLowerCase())) {
+          const dotIdx = candidate.lastIndexOf('.');
+          const base = dotIdx > 0 ? candidate.slice(0, dotIdx) : candidate;
+          const ext = dotIdx > 0 ? candidate.slice(dotIdx) : '.md';
+          let counter = 2;
+          while (existingRelSet.has(`${base}-${counter}${ext}`.toLowerCase())) {
+            counter += 1;
+          }
+          candidate = `${base}-${counter}${ext}`;
+        }
+        try {
+          const fullPath = await createFileInDir(
+            root,
+            candidate.replace(/\//g, sep),
+            payload.content,
+            encoding
+          );
+          await refreshWorkspace(root);
+          const syncAfter = await checkFilesSync([fullPath]).catch(() => []);
+          const modifiedMs = syncAfter[0]?.exists ? syncAfter[0].modifiedMs : undefined;
+          const baseName = candidate.split(/[/\\]/).pop() || candidate;
+          const created = makeTab(baseName, payload.content, fullPath, modifiedMs, {
+            encoding,
+            eol,
+          });
+          setTabs((prev) => [...prev, created]);
+          setActiveTabId(created.id);
+          pushRecentFile(fullPath);
+        } catch (err) {
+          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        }
+        return;
+      }
+
+      const created = makeTab(cleanName, payload.content, undefined, undefined, {
+        encoding,
+        eol,
+      });
+      const dirtyTab: DocumentTab = {
+        ...created,
+        savedContent: '',
+        dirty: payload.content.length > 0,
+      };
+      setTabs((prev) => [...prev, dirtyTab]);
+      setActiveTabId(dirtyTab.id);
+    },
+    [
+      settings.defaultNewFileEncoding,
+      settings.defaultNewFileEol,
+      workspaceEntries,
+      refreshWorkspace,
+      pushRecentFile,
+      notify,
+      t.toasts.errorPrefix,
+    ]
+  );
+
+  const handleOpenClippedNote = useCallback(
+    (payload: { title: string; suggestedFileName: string; markdown: string }) => {
+      const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = settings.defaultNewFileEol ?? '\n';
+      const fileName = payload.suggestedFileName || 'web-clip.md';
+      const created = makeTab(fileName, payload.markdown, undefined, undefined, {
+        encoding,
+        eol,
+      });
+      const dirtyTab: DocumentTab = {
+        ...created,
+        savedContent: '',
+        dirty: true,
+      };
+      setTabs((prev) => [...prev, dirtyTab]);
+      setActiveTabId(dirtyTab.id);
+    },
+    [settings.defaultNewFileEncoding, settings.defaultNewFileEol]
+  );
+
+  const handleSaveChatAsNote = useCallback(
+    (title: string, markdown: string) => {
+      const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = settings.defaultNewFileEol ?? '\n';
+      const safeTitle = (title || 'ai-chat').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60);
+      const fileName = safeTitle.endsWith('.md') ? safeTitle : `${safeTitle}.md`;
+      const created = makeTab(fileName, markdown, undefined, undefined, {
+        encoding,
+        eol,
+      });
+      const dirtyTab: DocumentTab = {
+        ...created,
+        savedContent: '',
+        dirty: true,
+      };
+      setTabs((prev) => [...prev, dirtyTab]);
+      setActiveTabId(dirtyTab.id);
+      notify(t.aiChat.savedAsNoteToast);
+    },
+    [settings.defaultNewFileEncoding, settings.defaultNewFileEol, notify, t.aiChat.savedAsNoteToast]
   );
 
   // AI & Clipboard Actions
@@ -2870,8 +3709,12 @@ export function App() {
         return;
       }
 
+      const hasSidePane =
+        Boolean(sideTabIdRef.current) &&
+        !(settingsRef.current.builtinBrowserEnabled && rightPaneModeRef.current === 'browser');
       const useVisual =
         !fromMacro &&
+        !hasSidePane &&
         (layout === 'preview' ||
           (layout === 'split' && (activePaneRef.current === 'visual' || previewRef.current?.isFocused())));
 
@@ -2884,7 +3727,7 @@ export function App() {
         handleRecordMacroStep({ type: 'toolbarAction', action });
       }
 
-      const ed = editorRef.current;
+      const ed = getActiveEditorTarget();
       switch (action) {
         case 'undo':
           ed?.undoAction();
@@ -2963,6 +3806,7 @@ export function App() {
     },
     [
       layout,
+      getActiveEditorTarget,
       handleNewFile,
       handleOpenFile,
       handleSave,
@@ -3674,7 +4518,10 @@ export function App() {
       } else if (meta && e.key === ',') {
         e.preventDefault();
         setShowSettings((v) => !v);
-      } else if (meta && (e.key.toLowerCase() === 'k' || e.key.toLowerCase() === 'p')) {
+      } else if (meta && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setShowQuickOpen((v) => !v);
+      } else if (meta && (e.key.toLowerCase() === 'k' || (e.shiftKey && e.key.toLowerCase() === 'p'))) {
         e.preventDefault();
         setShowPalette((v) => !v);
       } else if (meta && e.key.toLowerCase() === 'f' && !e.shiftKey) {
@@ -3693,6 +4540,9 @@ export function App() {
         } else {
           findBarRef.current?.findNext();
         }
+      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        setShowWorkspaceGrep((v) => !v);
       } else if (meta && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         toggleZenMode();
@@ -3726,10 +4576,20 @@ export function App() {
         e.preventDefault();
         handleSetZoom(100);
       } else if (e.key === 'Escape') {
-        if (diffPreview || inlineAiState) return;
+        if (
+          diffPreview ||
+          inlineAiState ||
+          showSlideModal ||
+          showWorkspaceGrep ||
+          showTemplateModal ||
+          showWebClipModal
+        ) {
+          return;
+        }
         if (folderSwitchGuardMode) {
           if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
-        } else if (showGoToLine) setShowGoToLine(false);
+        } else if (showQuickOpen) setShowQuickOpen(false);
+        else if (showGoToLine) setShowGoToLine(false);
         else if (showSettings) setShowSettings(false);
         else if (showFind) {
           setShowFind(false);
@@ -3749,9 +4609,14 @@ export function App() {
     zenMode,
     folderSwitchGuardMode,
     stoppingServerForSwitch,
+    showQuickOpen,
     showGoToLine,
     showSettings,
     showFind,
+    showSlideModal,
+    showWorkspaceGrep,
+    showTemplateModal,
+    showWebClipModal,
     diffPreview,
     inlineAiState,
     handleOpenInlineAiEdit,
@@ -3797,6 +4662,7 @@ export function App() {
     'mode-simple': () => handleModeChange('simple'),
     'mode-basic': () => handleModeChange('basic'),
     'mode-advanced': () => handleModeChange('advanced'),
+    'quick-open': () => setShowQuickOpen((v) => !v),
     palette: () => setShowPalette((v) => !v),
     'toggle-top-bar': handleToggleTopBar,
     'toggle-format-toolbar': handleToggleFormatToolbar,
@@ -3853,6 +4719,13 @@ export function App() {
   // Command Palette commands
   const paletteCommands: PaletteCommand[] = useMemo(() => {
     const list: PaletteCommand[] = [
+      {
+        id: 'quick-open',
+        category: 'File',
+        label: t.actions.quickOpen,
+        shortcut: formatShortcut('⌘P'),
+        action: () => setShowQuickOpen(true),
+      },
       {
         id: 'open-settings',
         category: 'Settings',
@@ -4043,6 +4916,16 @@ export function App() {
         },
       },
       {
+        id: 'review-panel',
+        category: 'AI',
+        label: t.reviewPanel.title,
+        action: () => {
+          if (mode === 'simple') handleModeChange('basic');
+          setInspectorTab('review');
+          setShowInspector(true);
+        },
+      },
+      {
         id: 'insert-image',
         category: 'Edit',
         label: t.toolbar.image,
@@ -4172,6 +5055,100 @@ export function App() {
             },
           ]
         : []),
+      ...(activeTab.filePath
+        ? [
+            {
+              id: 'compare-git-head',
+              category: 'Git',
+              label: t.actions.compareWithGitHead,
+              action: () => void handleCompareTabWithGitHead(activeTab.id),
+            },
+          ]
+        : []),
+      {
+        id: 'insert-update-toc',
+        category: 'Markdown',
+        label: t.actions.insertOrUpdateToc,
+        action: handleInsertOrUpdateToc,
+      },
+      {
+        id: 'format-markdown-tables',
+        category: 'Markdown',
+        label: t.actions.formatMarkdownTables,
+        action: () => void editorRef.current?.runContextAction('formatMarkdownTables'),
+      },
+      {
+        id: 'rectangular-selection',
+        category: 'Edit',
+        label: t.contextMenu.rectangularSelection,
+        action: () => void editorRef.current?.runContextAction('rectangularSelection'),
+      },
+      {
+        id: 'sort-lines-asc',
+        category: 'Edit',
+        label: t.contextMenu.sortLinesAsc,
+        action: () => void editorRef.current?.runContextAction('sortLinesAsc'),
+      },
+      {
+        id: 'sort-lines-desc',
+        category: 'Edit',
+        label: t.contextMenu.sortLinesDesc,
+        action: () => void editorRef.current?.runContextAction('sortLinesDesc'),
+      },
+      {
+        id: 'dedupe-lines',
+        category: 'Edit',
+        label: t.contextMenu.dedupeLines,
+        action: () => void editorRef.current?.runContextAction('dedupeLines'),
+      },
+      {
+        id: 'reverse-lines',
+        category: 'Edit',
+        label: t.contextMenu.reverseLines,
+        action: () => void editorRef.current?.runContextAction('reverseLines'),
+      },
+      {
+        id: 'remove-empty-lines',
+        category: 'Edit',
+        label: t.contextMenu.removeEmptyLines,
+        action: () => void editorRef.current?.runContextAction('removeEmptyLines'),
+      },
+      {
+        id: 'format-json',
+        category: 'Data',
+        label: t.actions.formatJson,
+        action: () => void editorRef.current?.runContextAction('formatJson'),
+      },
+      {
+        id: 'minify-json',
+        category: 'Data',
+        label: t.actions.minifyJson,
+        action: () => void editorRef.current?.runContextAction('minifyJson'),
+      },
+      {
+        id: 'sort-json-keys',
+        category: 'Data',
+        label: t.actions.sortJsonKeys,
+        action: () => void editorRef.current?.runContextAction('sortJsonKeys'),
+      },
+      {
+        id: 'json-to-yaml',
+        category: 'Data',
+        label: t.actions.jsonToYaml,
+        action: () => void editorRef.current?.runContextAction('jsonToYaml'),
+      },
+      {
+        id: 'yaml-to-json',
+        category: 'Data',
+        label: t.actions.yamlToJson,
+        action: () => void editorRef.current?.runContextAction('yamlToJson'),
+      },
+      {
+        id: 'format-env',
+        category: 'Data',
+        label: t.actions.formatEnv,
+        action: () => void editorRef.current?.runContextAction('formatEnv'),
+      },
       {
         id: 'fold-all',
         category: 'Edit',
@@ -4211,6 +5188,74 @@ export function App() {
         label: t.actions.goToLine,
         shortcut: formatShortcut('⌘L'),
         action: () => setShowGoToLine(true),
+      },
+      {
+        id: 'toggle-bookmark',
+        category: 'Edit',
+        label: t.actions.toggleBookmark,
+        shortcut: formatShortcut('⌘F2'),
+        action: () => getActiveEditorTarget()?.toggleBookmarkAction(),
+      },
+      {
+        id: 'next-bookmark',
+        category: 'Edit',
+        label: t.actions.nextBookmark,
+        shortcut: 'F2',
+        action: () => getActiveEditorTarget()?.nextBookmarkAction(),
+      },
+      {
+        id: 'prev-bookmark',
+        category: 'Edit',
+        label: t.actions.prevBookmark,
+        shortcut: formatShortcut('⇧F2'),
+        action: () => getActiveEditorTarget()?.prevBookmarkAction(),
+      },
+      {
+        id: 'clear-bookmarks',
+        category: 'Edit',
+        label: t.actions.clearBookmarks,
+        action: () => getActiveEditorTarget()?.clearBookmarksAction(),
+      },
+      {
+        id: 'workspace-grep',
+        category: 'Workspace',
+        label: t.actions.workspaceGrep,
+        shortcut: formatShortcut('⌘⇧G'),
+        action: () => setShowWorkspaceGrep(true),
+      },
+      {
+        id: 'open-daily-note',
+        category: 'Note',
+        label: t.actions.openDailyNote,
+        action: () => void handleOpenDailyNote(),
+      },
+      {
+        id: 'new-from-template',
+        category: 'Note',
+        label: t.actions.newFromTemplate,
+        action: () => setShowTemplateModal(true),
+      },
+      {
+        id: 'web-clip-url',
+        category: 'Note',
+        label: t.actions.webClipUrl,
+        action: () => setShowWebClipModal(true),
+      },
+      ...(previewKind === 'markdown'
+        ? [
+            {
+              id: 'slide-presentation',
+              category: 'Markdown',
+              label: t.actions.slidePresentation,
+              action: () => setShowSlideModal(true),
+            },
+          ]
+        : []),
+      {
+        id: 'toggle-focus-mode',
+        category: 'View',
+        label: t.actions.toggleFocusMode,
+        action: handleToggleFocusMode,
       },
       {
         id: 'macro-toggle-record',
@@ -4296,6 +5341,7 @@ export function App() {
     layout,
     rightPaneMode,
     externalPreviewUrl,
+    previewKind,
     t,
     locale,
     zenMode,
@@ -4330,6 +5376,11 @@ export function App() {
     handlePrintSource,
     handleOpenInlineAiEdit,
     handleCompareTabWithActive,
+    handleCompareTabWithGitHead,
+    handleInsertOrUpdateToc,
+    handleOpenDailyNote,
+    handleToggleFocusMode,
+    getActiveEditorTarget,
     toggleZenMode,
     openPathInTab,
     openWorkspaceFolderPath,
@@ -4349,6 +5400,10 @@ export function App() {
 
   // HTML5 Drag & Drop fallback (for browser preview)
   const handleHtmlDrop = async (e: React.DragEvent) => {
+    if (e.dataTransfer?.types?.includes('application/x-onigiri-workspace-entry')) {
+      setIsDraggingFile(false);
+      return;
+    }
     if (isTauri()) return;
     e.preventDefault();
     setIsDraggingFile(false);
@@ -4369,12 +5424,45 @@ export function App() {
     }
   };
 
+  const handleTabScrollTopChange = useCallback((scrollTop: number, sourceDocId?: string) => {
+    const targetId = sourceDocId || activeTabIdRef.current;
+    setTabs((prev) =>
+      prev.map((tb) => {
+        if (tb.id !== targetId) return tb;
+        if (Math.abs((tb.scrollTop ?? 0) - scrollTop) < 4) return tb;
+        return { ...tb, scrollTop };
+      })
+    );
+  }, []);
+
+  const handleTabFoldedLinesChange = useCallback((foldedLines: number[], sourceDocId?: string) => {
+    const targetId = sourceDocId || activeTabIdRef.current;
+    setTabs((prev) =>
+      prev.map((tb) => {
+        if (tb.id !== targetId) return tb;
+        const prevLines = tb.foldedLines ?? [];
+        if (
+          prevLines.length === foldedLines.length &&
+          prevLines.every((v, i) => v === foldedLines[i])
+        ) {
+          return tb;
+        }
+        return { ...tb, foldedLines };
+      })
+    );
+  }, []);
+
   const anyModalOpen =
     showSettings ||
     showAbout ||
     showImageModal ||
+    showQuickOpen ||
     showPalette ||
     showGoToLine ||
+    showSlideModal ||
+    showWorkspaceGrep ||
+    showTemplateModal ||
+    showWebClipModal ||
     Boolean(inlineAiState) ||
     Boolean(encodingModalMode) ||
     Boolean(diffPreview) ||
@@ -4400,6 +5488,9 @@ export function App() {
       data-print-mode={printMode}
       style={syntaxCssVars}
       onDragOver={(e) => {
+        if (e.dataTransfer?.types?.includes('application/x-onigiri-workspace-entry')) {
+          return;
+        }
         if (!isTauri()) {
           e.preventDefault();
           setIsDraggingFile(true);
@@ -4437,6 +5528,14 @@ export function App() {
               onToggleZen={toggleZenMode}
               onOpenSettings={() => setShowSettings(true)}
               onOpenAbout={() => setShowAbout(true)}
+              onOpenSlidePresentation={() => setShowSlideModal(true)}
+              onOpenDailyNote={() => void handleOpenDailyNote()}
+              onOpenTemplateModal={() => setShowTemplateModal(true)}
+              onOpenWebClip={() => setShowWebClipModal(true)}
+              onOpenWorkspaceGrep={() => setShowWorkspaceGrep(true)}
+              focusMode={Boolean(settings.focusMode)}
+              onToggleFocusMode={handleToggleFocusMode}
+              isMarkdown={previewKind === 'markdown'}
               isDirty={activeTab.dirty}
               activeTitle={activeTab.title}
             />
@@ -4476,6 +5575,7 @@ export function App() {
           onTogglePinTab={handleTogglePinTab}
           onOpenTabToSide={handleOpenTabToSide}
           onCompareTabWithActive={handleCompareTabWithActive}
+          onCompareTabWithGitHead={(id) => void handleCompareTabWithGitHead(id)}
           onCloseOtherTabs={handleCloseOtherTabs}
           onCloseTabsToRight={handleCloseTabsToRight}
           onCopyTabPath={(p) => void handleCopyPath(p)}
@@ -4502,7 +5602,9 @@ export function App() {
             onChooseFolder={handleOpenFolder}
             onCloseFolder={handleCloseFolder}
             onRefreshFolder={() => workspaceRoot && refreshWorkspace(workspaceRoot)}
-            onOpenWorkspaceFile={openPathInTab}
+            onOpenWorkspaceFile={(p) => {
+              void openPathInTab(p);
+            }}
             onOpenFileToSide={(p) => void handleOpenFileToSide(p)}
             onOpenWorkspaceImage={(p) => setPreviewWorkspaceImagePath(p)}
             onCreateFileInFolder={handleCreateFileInFolder}
@@ -4518,7 +5620,7 @@ export function App() {
             headings={headings}
             currentLine={activeTab.cursorLine}
             onJumpToHeading={handleJumpToHeading}
-            onInsertSnippet={(content) => editorRef.current?.insertText(content)}
+            onInsertSnippet={(content) => getActiveEditorTarget()?.insertText(content)}
             projectInfo={projectInfo}
             projectServer={projectServer}
             setupBusy={projectSetupBusy}
@@ -4531,6 +5633,17 @@ export function App() {
             onOpenProjectUrl={handleOpenProjectUrl}
             onAssistProjectSetup={handleAssistProjectSetup}
             onRecheckProjectEnv={handleRefreshProjectInfo}
+            gitStatusEntries={gitStatusEntries}
+            gitBranch={gitBranch}
+            onCompareFileWithGitHead={(p) => void handleCompareFileWithGitHead(p)}
+            customSnippets={customSnippets}
+            onCustomSnippetsChange={setCustomSnippets}
+            noteIndexEntries={workspaceNoteIndex}
+            activeDocTitle={activeTab.title}
+            onOpenFileAtLine={(fp, ln) => void handleOpenFileAtLine(fp, ln)}
+            onOpenWorkspaceGrepModal={() => setShowWorkspaceGrep(true)}
+            onOpenDailyNote={() => void handleOpenDailyNote()}
+            onOpenTemplateModal={() => setShowTemplateModal(true)}
           />
         )}
 
@@ -4664,11 +5777,18 @@ export function App() {
                       <EditorPane
                         ref={topEditorRef}
                         t={t}
+                        locale={locale}
                         docId={activeTab.id}
                         fileName={activeTab.title}
+                        filePath={activeTab.filePath}
+                        workspaceRoot={workspaceRoot}
                         languageOverride={activeTab.languageOverride}
                         detectedLanguageId={detectedLanguageId}
                         value={activeTab.content}
+                        initialCursor={{ line: activeTab.cursorLine, col: activeTab.cursorCol }}
+                        initialScrollTop={activeTab.scrollTop}
+                        initialFoldedLines={activeTab.foldedLines}
+                        initialBookmarks={activeTab.bookmarks}
                         onChange={(next, sourceDocId) =>
                           updateTabContentById(sourceDocId || activeTab.id, next)
                         }
@@ -4683,16 +5803,33 @@ export function App() {
                             )
                           );
                         }}
+                        onScrollTopChange={(st, sourceDocId) => {
+                          if (activeEditorSlotRef.current === 'top') {
+                            handleTabScrollTopChange(st, sourceDocId);
+                          }
+                        }}
+                        onFoldedLinesChange={handleTabFoldedLinesChange}
+                        onBookmarksChange={handleBookmarksChange}
                         onScrollRatio={(ratio) => {
                           if (activeEditorSlotRef.current === 'top') {
                             handleEditorScroll(ratio);
                           }
                         }}
                         onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
+                        onTablePasteNotify={() =>
+                          notify(
+                            locale === 'ja'
+                              ? '表データを Markdown テーブルに変換しました'
+                              : 'Converted pasted table to Markdown'
+                          )
+                        }
                         onLineCopyNotify={() => notify(t.toasts.copiedLine)}
                         onStatusNotify={notify}
                         onAiEditSelection={handleOpenInlineAiEdit}
                         onImagePasteOrDrop={handleImageFileInput}
+                        customSnippets={customSnippets}
+                        workspaceNotes={workspaceNotes}
+                        onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                         onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
                         onEditorSelectionChange={(range) =>
                           findBarRef.current?.onEditorSelection(range)
@@ -4722,11 +5859,18 @@ export function App() {
                       <EditorPane
                         ref={bottomEditorRef}
                         t={t}
+                        locale={locale}
                         docId={activeTab.id}
                         fileName={activeTab.title}
+                        filePath={activeTab.filePath}
+                        workspaceRoot={workspaceRoot}
                         languageOverride={activeTab.languageOverride}
                         detectedLanguageId={detectedLanguageId}
                         value={activeTab.content}
+                        initialCursor={{ line: activeTab.cursorLine, col: activeTab.cursorCol }}
+                        initialScrollTop={activeTab.scrollTop}
+                        initialFoldedLines={activeTab.foldedLines}
+                        initialBookmarks={activeTab.bookmarks}
                         onChange={(next, sourceDocId) =>
                           updateTabContentById(sourceDocId || activeTab.id, next)
                         }
@@ -4741,16 +5885,33 @@ export function App() {
                             )
                           );
                         }}
+                        onScrollTopChange={(st, sourceDocId) => {
+                          if (activeEditorSlotRef.current === 'bottom') {
+                            handleTabScrollTopChange(st, sourceDocId);
+                          }
+                        }}
+                        onFoldedLinesChange={handleTabFoldedLinesChange}
+                        onBookmarksChange={handleBookmarksChange}
                         onScrollRatio={(ratio) => {
                           if (activeEditorSlotRef.current === 'bottom') {
                             handleEditorScroll(ratio);
                           }
                         }}
                         onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
+                        onTablePasteNotify={() =>
+                          notify(
+                            locale === 'ja'
+                              ? '表データを Markdown テーブルに変換しました'
+                              : 'Converted pasted table to Markdown'
+                          )
+                        }
                         onLineCopyNotify={() => notify(t.toasts.copiedLine)}
                         onStatusNotify={notify}
                         onAiEditSelection={handleOpenInlineAiEdit}
                         onImagePasteOrDrop={handleImageFileInput}
+                        customSnippets={customSnippets}
+                        workspaceNotes={workspaceNotes}
+                        onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                         onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
                         onEditorSelectionChange={(range) =>
                           findBarRef.current?.onEditorSelection(range)
@@ -4771,11 +5932,18 @@ export function App() {
                   <EditorPane
                     ref={topEditorRef}
                     t={t}
+                    locale={locale}
                     docId={activeTab.id}
                     fileName={activeTab.title}
+                    filePath={activeTab.filePath}
+                    workspaceRoot={workspaceRoot}
                     languageOverride={activeTab.languageOverride}
                     detectedLanguageId={detectedLanguageId}
                     value={activeTab.content}
+                    initialCursor={{ line: activeTab.cursorLine, col: activeTab.cursorCol }}
+                    initialScrollTop={activeTab.scrollTop}
+                    initialFoldedLines={activeTab.foldedLines}
+                    initialBookmarks={activeTab.bookmarks}
                     onChange={(next, sourceDocId) =>
                       updateTabContentById(sourceDocId || activeTab.id, next)
                     }
@@ -4784,6 +5952,7 @@ export function App() {
                       setActivePane('code');
                       activeEditorSlotRef.current = 'top';
                       setActiveEditorSlot('top');
+                      setFocusedSplitSide('main');
                     }}
                     onCursorChange={(line, col) =>
                       setTabs((prev) =>
@@ -4794,12 +5963,25 @@ export function App() {
                         )
                       )
                     }
+                    onScrollTopChange={handleTabScrollTopChange}
+                    onFoldedLinesChange={handleTabFoldedLinesChange}
+                    onBookmarksChange={handleBookmarksChange}
                     onScrollRatio={handleEditorScroll}
                     onSmartPasteNotify={() => notify(t.toasts.htmlPasted)}
+                    onTablePasteNotify={() =>
+                      notify(
+                        locale === 'ja'
+                          ? '表データを Markdown テーブルに変換しました'
+                          : 'Converted pasted table to Markdown'
+                      )
+                    }
                     onLineCopyNotify={() => notify(t.toasts.copiedLine)}
                     onStatusNotify={notify}
                     onAiEditSelection={handleOpenInlineAiEdit}
                     onImagePasteOrDrop={handleImageFileInput}
+                    customSnippets={customSnippets}
+                    workspaceNotes={workspaceNotes}
+                    onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                     onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
                     onEditorSelectionChange={(range) =>
                       findBarRef.current?.onEditorSelection(range)
@@ -4899,16 +6081,29 @@ export function App() {
                   {showSideComparePane && sideTab ? (
                     <SideComparePane
                       t={t}
+                      locale={locale}
                       mode={sidePaneMode}
                       onChangeMode={setSidePaneMode}
                       tabs={tabs}
                       activeTab={activeTab}
                       sideTab={sideTab}
+                      sideEditorRef={sideEditorRef}
+                      focusedPane={focusedSplitSide}
+                      onFocusSidePane={() => setFocusedSplitSide('side')}
                       onSelectSideTab={setSideTabId}
                       onSwapTabs={handleSwapSideTabs}
-                      onClose={() => setSideTabId(null)}
+                      onClose={() => {
+                        setSideTabId(null);
+                        setGitHeadComparison(null);
+                      }}
                       onChangeTabContent={updateTabContentById}
+                      onBookmarksChange={(tabId, lines) => handleBookmarksChange(lines, tabId)}
                       onStatusNotify={notify}
+                      gitHeadComparison={gitHeadComparison}
+                      onClearGitHeadComparison={() => setGitHeadComparison(null)}
+                      workspaceRoot={workspaceRoot}
+                      workspaceNotes={workspaceNotes}
+                      onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                       theme={theme}
                       settings={settings}
                     />
@@ -4933,6 +6128,17 @@ export function App() {
                       onServeDistPreview={handleServeDistPreview}
                       onAssistProjectSetup={handleAssistProjectSetup}
                       onRecheckProjectEnv={handleRefreshProjectInfo}
+                      onStatusNotify={notify}
+                    />
+                  ) : previewKind === 'data' ? (
+                    <DataPreviewPane
+                      t={t}
+                      fileName={activeTab.title}
+                      languageOverride={activeTab.languageOverride}
+                      content={activeTab.content}
+                      activeLine={activeTab.cursorLine}
+                      onJumpToLine={(ln) => handleGoToLine(ln)}
+                      onCopyNotify={() => notify(t.toasts.copiedMarkdown)}
                     />
                   ) : previewKind === 'code' ? (
                     <CodePreviewPane
@@ -5017,10 +6223,13 @@ export function App() {
         {showInspector && !zenMode && mode !== 'simple' && (
           <InspectorDrawer
             t={t}
+            locale={locale}
             activeTab={inspectorTab}
             onTabChange={setInspectorTab}
+            activeTabId={activeTab.id}
             markdown={activeTab.content}
             activeDocTitle={activeTab.title}
+            activeFilePath={activeTab.filePath}
             savedContent={activeTab.savedContent}
             stats={stats}
             snapshots={activeTab.snapshots}
@@ -5039,9 +6248,10 @@ export function App() {
             aiConfig={aiConfig}
             onAiConfigChange={setAiConfig}
             onInsertToEditor={(text) => {
-              editorRef.current?.insertText(text);
+              getActiveEditorTarget()?.insertText(text);
               notify(t.toasts.aiCleaned);
             }}
+            onSaveChatAsNote={handleSaveChatAsNote}
             onReplaceDocument={(text, createSnapshot) => {
               setTabs((prev) =>
                 prev.map((tab) => {
@@ -5075,6 +6285,7 @@ export function App() {
               notify(t.toasts.copiedMarkdown);
             }}
             workspaceRoot={workspaceRoot}
+            workspaceFilePaths={workspaceEntries.filter((e) => !e.isDir).map((e) => e.path)}
             onWorkspaceRefresh={() => workspaceRoot && refreshWorkspace(workspaceRoot)}
             onFileWritten={(relPath) => {
               notify(`${t.toasts.folderFileWritten}: ${relPath}`);
@@ -5085,6 +6296,8 @@ export function App() {
               if (workspaceRoot) void refreshWorkspace(workspaceRoot);
             }}
             onRequestDiffPreview={setDiffPreview}
+            onJumpToLine={(ln) => handleGoToLine(ln)}
+            onApplyReviewFix={handleApplyReviewFix}
             onOpenFullSettings={() => setShowSettings(true)}
           />
         )}
@@ -5127,6 +6340,20 @@ export function App() {
           onToggleMacroRecording={handleToggleMacroRecording}
         />
       )}
+
+      <QuickOpenModal
+        t={t}
+        open={showQuickOpen}
+        onClose={() => setShowQuickOpen(false)}
+        tabs={tabs}
+        activeTabId={activeTab.id}
+        workspaceEntries={workspaceEntries}
+        recentFiles={recentFiles}
+        headings={headings}
+        onSelectTab={setActiveTabId}
+        onOpenFilePath={(fp) => void openPathInTab(fp)}
+        onJumpToLine={(ln) => handleGoToLine(ln)}
+      />
 
       <CommandPalette
         t={t}
@@ -5223,6 +6450,41 @@ export function App() {
         onSelectImagePath={setPreviewWorkspaceImagePath}
         onClose={() => setPreviewWorkspaceImagePath(null)}
         onInsertToEditor={(src, alt) => insertImageIntoActivePane(src, alt)}
+      />
+
+      <SlidePresentationModal
+        t={t}
+        open={showSlideModal}
+        title={activeTab.title}
+        markdown={activeTab.content}
+        docPath={activeTab.filePath}
+        theme={theme}
+        onClose={() => setShowSlideModal(false)}
+      />
+
+      <WorkspaceGrepModal
+        t={t}
+        open={showWorkspaceGrep}
+        workspaceRoot={workspaceRoot}
+        onClose={() => setShowWorkspaceGrep(false)}
+        onOpenFileAtLine={(fp, ln) => void handleOpenFileAtLine(fp, ln)}
+        onAfterReplace={(paths, count) => void handleAfterWorkspaceGrepReplace(paths, count)}
+      />
+
+      <TemplatePickerModal
+        t={t}
+        locale={locale}
+        open={showTemplateModal}
+        onClose={() => setShowTemplateModal(false)}
+        onOpenDailyNote={() => void handleOpenDailyNote()}
+        onCreateFromTemplate={(payload) => void handleCreateFromTemplate(payload)}
+      />
+
+      <WebClipModal
+        t={t}
+        open={showWebClipModal}
+        onClose={() => setShowWebClipModal(false)}
+        onOpenClippedNote={handleOpenClippedNote}
       />
 
       {isDraggingFile && (

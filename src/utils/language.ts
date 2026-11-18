@@ -40,6 +40,8 @@ export const LANGUAGE_OPTIONS: LanguageOption[] = [
   { id: 'dockerfile', label: 'Dockerfile', sampleFilename: 'Dockerfile' },
   { id: 'vue', label: 'Vue', sampleFilename: 'App.vue' },
   { id: 'svelte', label: 'Svelte', sampleFilename: 'App.svelte' },
+  { id: 'csv', label: 'CSV', sampleFilename: 'data.csv' },
+  { id: 'tsv', label: 'TSV', sampleFilename: 'data.tsv' },
 ];
 
 const MARKDOWN_EXT_RE = /\.(md|markdown|mdown|mdx)$/i;
@@ -106,6 +108,8 @@ const EXT_TO_LANGUAGE_ID: Record<string, string> = {
   psd1: 'powershell',
   vue: 'vue',
   svelte: 'svelte',
+  csv: 'csv',
+  tsv: 'tsv',
 };
 
 const LANG_ID_TO_HLJS: Record<string, string | null> = {
@@ -139,6 +143,8 @@ const LANG_ID_TO_HLJS: Record<string, string | null> = {
   dockerfile: 'dockerfile',
   vue: 'xml',
   svelte: 'xml',
+  csv: null,
+  tsv: null,
 };
 
 const EXTRA_EXT_TO_HLJS: Record<string, string> = {

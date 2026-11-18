@@ -15,6 +15,7 @@ interface TabBarProps {
   onTogglePinTab?: (id: string) => void;
   onOpenTabToSide?: (id: string) => void;
   onCompareTabWithActive?: (id: string) => void;
+  onCompareTabWithGitHead?: (id: string) => void;
   onCloseOtherTabs?: (id: string) => void;
   onCloseTabsToRight?: (id: string) => void;
   onCopyTabPath?: (path: string) => void;
@@ -33,6 +34,7 @@ export const TabBar: React.FC<TabBarProps> = ({
   onTogglePinTab,
   onOpenTabToSide,
   onCompareTabWithActive,
+  onCompareTabWithGitHead,
   onCloseOtherTabs,
   onCloseTabsToRight,
   onCopyTabPath,
@@ -242,6 +244,20 @@ export const TabBar: React.FC<TabBarProps> = ({
           >
             <span className="editor-ctx-label">{t.tabMenu.compareWithActive}</span>
           </button>
+
+          {onCompareTabWithGitHead && (
+            <button
+              type="button"
+              className={`editor-ctx-item ${!ctxTab.filePath ? 'is-disabled' : ''}`}
+              disabled={!ctxTab.filePath}
+              onClick={() => {
+                onCompareTabWithGitHead(ctxTab.id);
+                setCtxMenu(null);
+              }}
+            >
+              <span className="editor-ctx-label">{t.tabMenu.compareGitHead}</span>
+            </button>
+          )}
 
           <div className="editor-ctx-sep" />
 

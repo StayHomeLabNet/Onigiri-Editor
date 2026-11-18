@@ -2,10 +2,65 @@ import type { Locale } from '../types';
 
 export interface SnippetItem {
   id: string;
-  category: 'diagram' | 'structure' | 'ai' | 'math';
+  category: 'diagram' | 'structure' | 'ai' | 'math' | 'custom';
   title: Record<Locale, string>;
   description: Record<Locale, string>;
   content: string;
+  isCustom?: boolean;
+}
+
+export const CUSTOM_SNIPPETS_KEY = 'onigiri-markdown.custom-snippets.v1';
+
+export interface CustomSnippetRecord {
+  id: string;
+  category: 'diagram' | 'structure' | 'ai' | 'math' | 'custom';
+  title: string;
+  description: string;
+  content: string;
+}
+
+export function loadCustomSnippets(): CustomSnippetRecord[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CUSTOM_SNIPPETS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (item): item is CustomSnippetRecord =>
+          Boolean(item && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.content === 'string')
+      )
+      .map((item) => ({
+        id: item.id,
+        category: item.category || 'custom',
+        title: item.title,
+        description: typeof item.description === 'string' ? item.description : '',
+        content: item.content,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomSnippets(items: CustomSnippetRecord[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(CUSTOM_SNIPPETS_KEY, JSON.stringify(items));
+  } catch {
+    // ignore quota errors
+  }
+}
+
+export function customRecordToSnippetItem(rec: CustomSnippetRecord): SnippetItem {
+  return {
+    id: rec.id,
+    category: rec.category || 'custom',
+    title: { ja: rec.title, en: rec.title },
+    description: { ja: rec.description, en: rec.description },
+    content: rec.content,
+    isCustom: true,
+  };
 }
 
 export const SNIPPETS: SnippetItem[] = [

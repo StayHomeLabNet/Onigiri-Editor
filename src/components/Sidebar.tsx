@@ -24,6 +24,16 @@ import {
   AlertCircle,
   Clock,
   Replace,
+  Plus,
+  Pencil,
+  Trash2,
+  GitBranch,
+  Network,
+  Hash,
+  ArrowUpLeft,
+  CalendarDays,
+  FileStack,
+  TextSearch,
 } from 'lucide-react';
 import type {
   HeadingItem,
@@ -33,9 +43,17 @@ import type {
   SearchMatch,
   SidebarTab,
   WorkspaceEntry,
+  WorkspaceNoteIndexEntry,
 } from '../types';
 import type { Translations } from '../i18n/types';
-import { SNIPPETS } from '../utils/snippets';
+import {
+  SNIPPETS,
+  customRecordToSnippetItem,
+  loadCustomSnippets,
+  saveCustomSnippets,
+  type CustomSnippetRecord,
+} from '../utils/snippets';
+import { buildTagSummaries, findBacklinksForNote } from '../utils/knowledge';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 
 const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
@@ -249,6 +267,17 @@ interface SidebarProps {
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
   onRecheckProjectEnv?: () => void;
+  gitStatusEntries?: Record<string, string>;
+  gitBranch?: string | null;
+  onCompareFileWithGitHead?: (path: string) => void;
+  customSnippets?: CustomSnippetRecord[];
+  onCustomSnippetsChange?: (items: CustomSnippetRecord[]) => void;
+  noteIndexEntries?: WorkspaceNoteIndexEntry[];
+  activeDocTitle?: string;
+  onOpenFileAtLine?: (path: string, line: number) => void;
+  onOpenWorkspaceGrepModal?: () => void;
+  onOpenDailyNote?: () => void;
+  onOpenTemplateModal?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -297,15 +326,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenProjectUrl,
   onAssistProjectSetup,
   onRecheckProjectEnv,
+  gitStatusEntries = {},
+  gitBranch = null,
+  onCompareFileWithGitHead,
+  customSnippets: controlledCustomSnippets,
+  onCustomSnippetsChange,
+  noteIndexEntries = [],
+  activeDocTitle,
+  onOpenFileAtLine,
+  onOpenWorkspaceGrepModal,
+  onOpenDailyNote,
+  onOpenTemplateModal,
 }) => {
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [showReplace, setShowReplace] = useState(false);
   const [replaceQuery, setReplaceQuery] = useState('');
   const [replaceCaseSensitive, setReplaceCaseSensitive] = useState(false);
   const [replaceRegex, setReplaceRegex] = useState(false);
   const [replaceBusy, setReplaceBusy] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
+  const [localCustomSnippets, setLocalCustomSnippets] = useState<CustomSnippetRecord[]>(() =>
+    loadCustomSnippets()
+  );
+  const effectiveCustomSnippets = controlledCustomSnippets ?? localCustomSnippets;
+  const updateCustomSnippets = (next: CustomSnippetRecord[]) => {
+    if (onCustomSnippetsChange) {
+      onCustomSnippetsChange(next);
+    } else {
+      setLocalCustomSnippets(next);
+      saveCustomSnippets(next);
+    }
+  };
+  const [snippetFormOpen, setSnippetFormOpen] = useState(false);
+  const [editingSnippetId, setEditingSnippetId] = useState<string | null>(null);
+  const [snippetTitleDraft, setSnippetTitleDraft] = useState('');
+  const [snippetDescDraft, setSnippetDescDraft] = useState('');
+  const [snippetContentDraft, setSnippetContentDraft] = useState('');
   const prevRootRef = useRef<string | null>(workspaceRoot);
   const [treeCtx, setTreeCtx] = useState<{
     x: number;
@@ -416,6 +474,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
     [expandedDirs]
   );
 
+  const dirtyGitDirs = useMemo(() => {
+    const dirs = new Set<string>();
+    for (const relPath of Object.keys(gitStatusEntries)) {
+      const parts = normalizeRelPath(relPath).split('/');
+      let acc = '';
+      for (let i = 0; i < parts.length - 1; i++) {
+        acc = acc ? `${acc}/${parts[i]}` : parts[i];
+        dirs.add(acc);
+      }
+    }
+    return dirs;
+  }, [gitStatusEntries]);
+
   const toggleDir = (relPath: string) => {
     setExpandedDirs((prev) => ({
       ...prev,
@@ -442,6 +513,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         const isExpanded =
           Boolean(expandedDirs[node.relativePath]) ||
           (isFiltering && filterAutoExpanded.has(node.relativePath));
+        const hasGitChanges = dirtyGitDirs.has(normalizeRelPath(node.relativePath));
         return (
           <React.Fragment key={`dir:${node.relativePath}`}>
             <button
@@ -477,6 +549,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <Folder size={14} className="tree-folder-icon" />
               )}
               <span className="tree-label">{node.name}</span>
+              {hasGitChanges && <span className="tree-git-dir-dot" aria-hidden="true" />}
             </button>
             {isExpanded && node.children.length > 0 && renderTreeNodes(node.children, depth + 1)}
           </React.Fragment>
@@ -486,11 +559,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const isActive =
         Boolean(activeNormalizedPath) &&
         normalizeAbsPath(node.path) === activeNormalizedPath;
+      const gitCode = gitStatusEntries[normalizeRelPath(node.relativePath)];
+      const gitClass =
+        gitCode === 'A'
+          ? 'is-added'
+          : gitCode === '?'
+            ? 'is-untracked'
+            : gitCode === 'D'
+              ? 'is-deleted'
+              : gitCode === 'R'
+                ? 'is-renamed'
+                : 'is-modified';
 
       return (
         <button
           key={`file:${node.relativePath}`}
           type="button"
+          draggable
+          onDragStart={(e) => {
+            try {
+              e.dataTransfer.setData(
+                'application/x-onigiri-workspace-entry',
+                JSON.stringify({
+                  path: node.path,
+                  name: node.name,
+                  relPath: node.relativePath,
+                  isDir: false,
+                })
+              );
+              e.dataTransfer.setData('text/plain', node.relativePath);
+              e.dataTransfer.effectAllowed = 'copyLink';
+            } catch {
+              // ignore
+            }
+          }}
           className={`tree-row is-file ${isActive ? 'is-active' : ''}`}
           style={{ paddingLeft: `${6 + depth * 14}px` }}
           onClick={() => handleFileClick(node)}
@@ -515,6 +617,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <span className="tree-chevron-spacer" aria-hidden="true" />
           {renderFileTypeIcon(node.name)}
           <span className="tree-label">{node.name}</span>
+          {gitCode && <span className={`tree-git-badge ${gitClass}`}>{gitCode}</span>}
         </button>
       );
     });
@@ -527,6 +630,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
     return best;
   }, [headings, currentLine]);
+
+  const backlinks = useMemo(
+    () => findBacklinksForNote(noteIndexEntries, activeFilePath, activeDocTitle),
+    [noteIndexEntries, activeFilePath, activeDocTitle]
+  );
+
+  const tagSummaries = useMemo(
+    () => buildTagSummaries(noteIndexEntries),
+    [noteIndexEntries]
+  );
+
+  const selectedTagSummary = useMemo(
+    () => (selectedTag ? tagSummaries.find((tg) => tg.tag === selectedTag) || null : null),
+    [selectedTag, tagSummaries]
+  );
 
   const handleNewNote = () => {
     const name = window.prompt(t.sidebar.newFilePrompt, 'note.md');
@@ -573,6 +691,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           type="button"
           className={`sidebar-tab-btn ${activeTab === 'files' ? 'is-active' : ''}`}
           onClick={() => onTabChange('files')}
+          title={t.sidebar.files}
         >
           <Folder size={14} />
           <span>{t.sidebar.files}</span>
@@ -581,14 +700,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
           type="button"
           className={`sidebar-tab-btn ${activeTab === 'outline' ? 'is-active' : ''}`}
           onClick={() => onTabChange('outline')}
+          title={t.sidebar.outline}
         >
           <ListTree size={14} />
           <span>{t.sidebar.outline}</span>
         </button>
         <button
           type="button"
+          className={`sidebar-tab-btn ${activeTab === 'knowledge' ? 'is-active' : ''}`}
+          onClick={() => onTabChange('knowledge')}
+          title={t.sidebar.knowledge}
+        >
+          <Network size={14} />
+          <span>{t.sidebar.knowledge}</span>
+        </button>
+        <button
+          type="button"
           className={`sidebar-tab-btn ${activeTab === 'snippets' ? 'is-active' : ''}`}
           onClick={() => onTabChange('snippets')}
+          title={t.sidebar.snippets}
         >
           <Puzzle size={14} />
           <span>{t.sidebar.snippets}</span>
@@ -607,6 +737,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <button type="button" className="primary-btn" onClick={onChooseFolder}>
                     {t.sidebar.chooseFolder}
                   </button>
+                  {(onOpenDailyNote || onOpenTemplateModal) && (
+                    <div className="sidebar-empty-quick-actions">
+                      {onOpenDailyNote && (
+                        <button type="button" className="mini-pill-btn" onClick={onOpenDailyNote}>
+                          <CalendarDays size={12} />
+                          <span>{t.sidebar.createDailyNoteBtn}</span>
+                        </button>
+                      )}
+                      {onOpenTemplateModal && (
+                        <button type="button" className="mini-pill-btn" onClick={onOpenTemplateModal}>
+                          <FileStack size={12} />
+                          <span>{t.sidebar.newTemplateNoteBtn}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {(recentFolders.length > 0 || recentFiles.length > 0) && (
@@ -684,9 +830,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ) : (
               <>
                 <div className="folder-header">
-                  <span className="folder-name" title={workspaceRoot}>
-                    {workspaceRoot.split(/[/\\]/).pop()}
-                  </span>
+                  <div className="folder-title-wrap">
+                    <span className="folder-name" title={workspaceRoot}>
+                      {workspaceRoot.split(/[/\\]/).pop()}
+                    </span>
+                    {gitBranch && (
+                      <span className="sidebar-git-branch" title={gitBranch}>
+                        <GitBranch size={11} />
+                        <span>{gitBranch}</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="folder-actions">
                     <button
                       type="button"
@@ -744,6 +898,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                   </div>
                 </div>
+
+                {(onOpenDailyNote || onOpenTemplateModal || onOpenWorkspaceGrepModal) && (
+                  <div className="sidebar-quick-bar">
+                    {onOpenDailyNote && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn"
+                        onClick={onOpenDailyNote}
+                        title={t.actions.openDailyNote}
+                      >
+                        <CalendarDays size={12} />
+                        <span>{t.sidebar.createDailyNoteBtn}</span>
+                      </button>
+                    )}
+                    {onOpenTemplateModal && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn"
+                        onClick={onOpenTemplateModal}
+                        title={t.actions.newFromTemplate}
+                      >
+                        <FileStack size={12} />
+                        <span>{t.sidebar.newTemplateNoteBtn}</span>
+                      </button>
+                    )}
+                    {onOpenWorkspaceGrepModal && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn"
+                        onClick={onOpenWorkspaceGrepModal}
+                        title={t.actions.workspaceGrep}
+                      >
+                        <TextSearch size={12} />
+                        <span>{t.sidebar.openWorkspaceGrepBtn}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {projectInfo && projectInfo.kind !== 'none' && (
                   <div className="sidebar-project-card">
@@ -999,7 +1191,158 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {activeTab === 'snippets' && (
           <div className="sidebar-section">
-            <div className="sub-label">{t.sidebar.insertSnippet}</div>
+            <div className="sidebar-snippets-head">
+              <span className="sub-label">{t.sidebar.customSnippetsTitle}</span>
+              <button
+                type="button"
+                className="mini-pill-btn"
+                onClick={() => {
+                  if (snippetFormOpen) {
+                    setSnippetFormOpen(false);
+                    setEditingSnippetId(null);
+                  } else {
+                    setEditingSnippetId(null);
+                    setSnippetTitleDraft('');
+                    setSnippetDescDraft('');
+                    setSnippetContentDraft('');
+                    setSnippetFormOpen(true);
+                  }
+                }}
+              >
+                <Plus size={12} />
+                <span>{t.sidebar.addCustomSnippet}</span>
+              </button>
+            </div>
+
+            {snippetFormOpen && (
+              <div className="custom-snippet-form">
+                <input
+                  type="text"
+                  className="text-input"
+                  value={snippetTitleDraft}
+                  onChange={(e) => setSnippetTitleDraft(e.target.value)}
+                  placeholder={t.sidebar.snippetTitlePlaceholder}
+                />
+                <input
+                  type="text"
+                  className="text-input"
+                  value={snippetDescDraft}
+                  onChange={(e) => setSnippetDescDraft(e.target.value)}
+                  placeholder={t.sidebar.snippetDescPlaceholder}
+                />
+                <textarea
+                  rows={4}
+                  className="textarea-input"
+                  value={snippetContentDraft}
+                  onChange={(e) => setSnippetContentDraft(e.target.value)}
+                  placeholder={t.sidebar.snippetContentPlaceholder}
+                />
+                <div className="custom-snippet-form-actions">
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    onClick={() => {
+                      setSnippetFormOpen(false);
+                      setEditingSnippetId(null);
+                    }}
+                  >
+                    {t.actions.cancel}
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    disabled={!snippetTitleDraft.trim() || !snippetContentDraft.trim()}
+                    onClick={() => {
+                      const title = snippetTitleDraft.trim();
+                      const desc = snippetDescDraft.trim();
+                      const content = snippetContentDraft;
+                      if (!title || !content.trim()) return;
+                      if (editingSnippetId) {
+                        updateCustomSnippets(
+                          effectiveCustomSnippets.map((item) =>
+                            item.id === editingSnippetId
+                              ? { ...item, title, description: desc, content }
+                              : item
+                          )
+                        );
+                      } else {
+                        updateCustomSnippets([
+                          {
+                            id: `cs-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                            category: 'custom',
+                            title,
+                            description: desc,
+                            content,
+                          },
+                          ...effectiveCustomSnippets,
+                        ]);
+                      }
+                      setSnippetFormOpen(false);
+                      setEditingSnippetId(null);
+                      setSnippetTitleDraft('');
+                      setSnippetDescDraft('');
+                      setSnippetContentDraft('');
+                    }}
+                  >
+                    {t.sidebar.snippetSaveBtn}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {effectiveCustomSnippets.length > 0 && (
+              <div className="snippet-list">
+                {effectiveCustomSnippets.map((rec) => {
+                  const s = customRecordToSnippetItem(rec);
+                  return (
+                    <div key={s.id} className="snippet-card-wrap">
+                      <button
+                        type="button"
+                        className="snippet-card is-custom"
+                        onClick={() => onInsertSnippet(s.content)}
+                      >
+                        <div className="snippet-title">{s.title[locale]}</div>
+                        {s.description[locale] && (
+                          <div className="snippet-desc">{s.description[locale]}</div>
+                        )}
+                      </button>
+                      <div className="snippet-card-actions">
+                        <button
+                          type="button"
+                          className="icon-btn-sm"
+                          title={t.sidebar.editSnippet}
+                          onClick={() => {
+                            setEditingSnippetId(rec.id);
+                            setSnippetTitleDraft(rec.title);
+                            setSnippetDescDraft(rec.description);
+                            setSnippetContentDraft(rec.content);
+                            setSnippetFormOpen(true);
+                          }}
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn-sm is-danger"
+                          title={t.sidebar.deleteSnippet}
+                          onClick={() =>
+                            updateCustomSnippets(
+                              effectiveCustomSnippets.filter((item) => item.id !== rec.id)
+                            )
+                          }
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="sub-label" style={{ marginTop: effectiveCustomSnippets.length > 0 ? 12 : 4 }}>
+              {t.sidebar.builtinSnippetsTitle}
+            </div>
             <div className="snippet-list">
               {SNIPPETS.map((s) => (
                 <button
@@ -1013,6 +1356,123 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {activeTab === 'knowledge' && (
+          <div className="sidebar-section sidebar-knowledge-section">
+            {!workspaceRoot ? (
+              <div className="muted-msg">{t.sidebar.openFolderForKnowledge}</div>
+            ) : (
+              <>
+                <div className="sidebar-knowledge-block">
+                  <div className="sidebar-knowledge-head">
+                    <span className="sub-label">
+                      <ArrowUpLeft size={12} /> {t.sidebar.backlinksTitle} ({backlinks.length})
+                    </span>
+                  </div>
+                  {backlinks.length === 0 ? (
+                    <div className="muted-msg">{t.sidebar.noBacklinks}</div>
+                  ) : (
+                    <div className="sidebar-backlinks-list">
+                      {backlinks.map((bl, idx) => (
+                        <button
+                          key={`${bl.sourcePath}:${bl.line}:${bl.kind}:${idx}`}
+                          type="button"
+                          className="sidebar-backlink-item"
+                          onClick={() =>
+                            onOpenFileAtLine
+                              ? onOpenFileAtLine(bl.sourcePath, bl.line)
+                              : onOpenWorkspaceFile(bl.sourcePath)
+                          }
+                          title={bl.sourceRelativePath}
+                        >
+                          <div className="sidebar-backlink-head">
+                            <span className="sidebar-backlink-title">
+                              {bl.sourceTitle || bl.sourceName}
+                            </span>
+                            <span className="match-line">L{bl.line}</span>
+                          </div>
+                          <div className="sidebar-backlink-path">{bl.sourceRelativePath}</div>
+                          {bl.snippet && (
+                            <div className="match-snippet">{bl.snippet}</div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="sidebar-knowledge-block">
+                  <div className="sidebar-knowledge-head">
+                    <span className="sub-label">
+                      <Hash size={12} /> {t.sidebar.tagsTitle} ({tagSummaries.length})
+                    </span>
+                    {selectedTag && (
+                      <button
+                        type="button"
+                        className="sidebar-recent-clear"
+                        onClick={() => setSelectedTag(null)}
+                      >
+                        {t.sidebar.filterByTagClear}
+                      </button>
+                    )}
+                  </div>
+                  {tagSummaries.length === 0 ? (
+                    <div className="muted-msg">{t.sidebar.noTags}</div>
+                  ) : (
+                    <>
+                      <div className="sidebar-tags-cloud">
+                        {tagSummaries.map((tg) => (
+                          <button
+                            key={tg.tag}
+                            type="button"
+                            className={`sidebar-tag-chip ${
+                              selectedTag === tg.tag ? 'is-active' : ''
+                            }`}
+                            onClick={() =>
+                              setSelectedTag((prev) => (prev === tg.tag ? null : tg.tag))
+                            }
+                          >
+                            <span>#{tg.tag}</span>
+                            <span className="sidebar-tag-count">{tg.count}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {selectedTagSummary && (
+                        <div className="sidebar-tagged-notes">
+                          <div className="sub-label">
+                            #{selectedTagSummary.tag} ({selectedTagSummary.notes.length})
+                          </div>
+                          {selectedTagSummary.notes.map((n, idx) => (
+                            <button
+                              key={`${n.path}:${n.line}:${idx}`}
+                              type="button"
+                              className="sidebar-backlink-item"
+                              onClick={() =>
+                                onOpenFileAtLine
+                                  ? onOpenFileAtLine(n.path, n.line)
+                                  : onOpenWorkspaceFile(n.path)
+                              }
+                              title={n.relativePath}
+                            >
+                              <div className="sidebar-backlink-head">
+                                <span className="sidebar-backlink-title">
+                                  {n.title || n.name}
+                                </span>
+                                <span className="match-line">L{n.line}</span>
+                              </div>
+                              <div className="sidebar-backlink-path">{n.relativePath}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1046,6 +1506,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   }}
                 >
                   <span className="editor-ctx-label">{t.sidebar.ctxOpenSide}</span>
+                </button>
+              )}
+              {onCompareFileWithGitHead && !RASTER_IMAGE_EXT_RE.test(treeCtx.node.name) && (
+                <button
+                  type="button"
+                  className="editor-ctx-item"
+                  onClick={() => {
+                    onCompareFileWithGitHead(treeCtx.node.path);
+                    setTreeCtx(null);
+                  }}
+                >
+                  <span className="editor-ctx-label">{t.sidebar.ctxCompareGitHead}</span>
                 </button>
               )}
               <div className="editor-ctx-sep" />

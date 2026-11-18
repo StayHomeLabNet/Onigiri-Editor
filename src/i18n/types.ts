@@ -92,6 +92,27 @@ export interface Translations {
     selectNextOccurrence: string;
     foldAll: string;
     unfoldAll: string;
+    quickOpen: string;
+    insertOrUpdateToc: string;
+    formatMarkdownTables: string;
+    compareWithGitHead: string;
+    formatJson: string;
+    minifyJson: string;
+    sortJsonKeys: string;
+    jsonToYaml: string;
+    yamlToJson: string;
+    formatEnv: string;
+    workspaceGrep: string;
+    openDailyNote: string;
+    newFromTemplate: string;
+    webClipUrl: string;
+    slidePresentation: string;
+    toggleFocusMode: string;
+    dualEditorSide: string;
+    toggleBookmark: string;
+    nextBookmark: string;
+    prevBookmark: string;
+    clearBookmarks: string;
   };
   toolbar: {
     heading1: string;
@@ -136,6 +157,15 @@ export interface Translations {
     newFilePrompt: string;
     newFolderPrompt: string;
     insertSnippet: string;
+    customSnippetsTitle: string;
+    builtinSnippetsTitle: string;
+    addCustomSnippet: string;
+    editSnippet: string;
+    deleteSnippet: string;
+    snippetTitlePlaceholder: string;
+    snippetDescPlaceholder: string;
+    snippetContentPlaceholder: string;
+    snippetSaveBtn: string;
     replaceInFolderToggle: string;
     replacePlaceholder: string;
     replaceAllInFolderBtn: string;
@@ -148,6 +178,7 @@ export interface Translations {
     clearRecent: string;
     ctxOpen: string;
     ctxOpenSide: string;
+    ctxCompareGitHead: string;
     ctxRename: string;
     ctxDuplicate: string;
     ctxDelete: string;
@@ -158,6 +189,16 @@ export interface Translations {
     ctxReveal: string;
     renamePrompt: string;
     deleteConfirm: string;
+    knowledge: string;
+    backlinksTitle: string;
+    tagsTitle: string;
+    noBacklinks: string;
+    noTags: string;
+    openFolderForKnowledge: string;
+    filterByTagClear: string;
+    openWorkspaceGrepBtn: string;
+    createDailyNoteBtn: string;
+    newTemplateNoteBtn: string;
   };
   inspector: {
     chat: string;
@@ -165,6 +206,7 @@ export interface Translations {
     stats: string;
     diff: string;
     frontmatter: string;
+    review: string;
     settings: string;
     aiCleanerTitle: string;
     aiCleanerDesc: string;
@@ -292,6 +334,9 @@ export interface Translations {
       showStatusBar: string;
       defaultNewFileEncoding: string;
       defaultNewFileEol: string;
+      focusMode: string;
+      imageAssetFolder: string;
+      dailyNotesFolder: string;
     };
   };
   settingsModal: {
@@ -330,6 +375,14 @@ export interface Translations {
     platformNoteWebKitGtk: string;
     browserErrorRecoveryWindows: string;
     browserErrorRecoveryLinux: string;
+    svgCopyCode: string;
+    svgCopyPng: string;
+    svgBgChecker: string;
+    svgBgLight: string;
+    svgBgDark: string;
+    svgCopiedPngToast: string;
+    htmlCodeToggle: string;
+    htmlVisualToggle: string;
   };
   project: {
     detectedLabel: string;
@@ -469,6 +522,10 @@ export interface Translations {
     insertAtCursor: string;
     replaceDoc: string;
     copyReply: string;
+    threadModeTab: string;
+    threadModeShared: string;
+    saveAsNoteBtn: string;
+    savedAsNoteToast: string;
     quickPrompts: {
       proofread: string;
       proofreadPrompt: string;
@@ -646,6 +703,7 @@ export interface Translations {
     sortLinesAsc: string;
     sortLinesDesc: string;
     dedupeLines: string;
+    removeEmptyLines: string;
     trimLeading: string;
     trimTrailing: string;
     insertQuote: string;
@@ -670,6 +728,7 @@ export interface Translations {
     unpin: string;
     openSide: string;
     compareWithActive: string;
+    compareGitHead: string;
     close: string;
     closeOthers: string;
     closeRight: string;
@@ -686,6 +745,38 @@ export interface Translations {
     selectTabPlaceholder: string;
     needTwoTabsToast: string;
   };
+  quickOpen: {
+    placeholder: string;
+    noResults: string;
+    hint: string;
+    badgeOpenTab: string;
+    badgeWorkspace: string;
+    badgeRecent: string;
+    badgeHeading: string;
+  };
+  dataPreview: {
+    titleCsv: string;
+    titleTsv: string;
+    filterPlaceholder: string;
+    rowsLabel: string;
+    colsLabel: string;
+    copyMarkdownBtn: string;
+    copyCsvBtn: string;
+    viewTableBtn: string;
+    viewRawBtn: string;
+    emptyTable: string;
+  };
+  reviewPanel: {
+    title: string;
+    desc: string;
+    runLocalBtn: string;
+    runAiBtn: string;
+    runningAiBtn: string;
+    noFindings: string;
+    applyFixBtn: string;
+    jumpToLineTitle: string;
+    countSummary: string;
+  };
   inlineAiModal: {
     title: string;
     selectionSummary: string;
@@ -695,6 +786,11 @@ export interface Translations {
     noSelectionToast: string;
     previewTitle: string;
     confirmApplyBtn: string;
+    savePresetBtn: string;
+    managePresetsBtn: string;
+    doneManageBtn: string;
+    resetPresetsBtn: string;
+    presetLabelPlaceholder: string;
     presets: {
       refactorLabel: string;
       refactorPrompt: string;
@@ -726,6 +822,60 @@ export interface Translations {
     eolChangedToast: string;
     noFileToReopen: string;
     newFilePrefix: string;
+  };
+  slides: {
+    title: string;
+    slideOf: string;
+    prev: string;
+    next: string;
+    overview: string;
+    fullscreen: string;
+    exitFullscreen: string;
+    noSlidesHint: string;
+    shortcutsHint: string;
+  };
+  grepModal: {
+    title: string;
+    queryPlaceholder: string;
+    replacePlaceholder: string;
+    caseSensitive: string;
+    regex: string;
+    searchBtn: string;
+    searching: string;
+    replaceSelectedBtn: string;
+    replacing: string;
+    selectAll: string;
+    deselectAll: string;
+    summary: string;
+    noResults: string;
+    confirmReplace: string;
+    doneToast: string;
+    truncatedNotice: string;
+    noFolderHint: string;
+  };
+  templateModal: {
+    title: string;
+    newCustomBtn: string;
+    dailyNoteQuickBtn: string;
+    useTemplateBtn: string;
+    saveCustomBtn: string;
+    deleteBtn: string;
+    titleLabel: string;
+    descLabel: string;
+    fileNameLabel: string;
+    contentLabel: string;
+    varsHint: string;
+  };
+  webClipModal: {
+    title: string;
+    urlLabel: string;
+    urlPlaceholder: string;
+    includeFrontmatter: string;
+    fetchBtn: string;
+    fetching: string;
+    openAsNoteBtn: string;
+    previewLabel: string;
+    errorInvalidUrl: string;
   };
   sampleDocument: string;
 }

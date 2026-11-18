@@ -205,6 +205,10 @@ export function dedupeLines(lines: string[]): string[] {
   return result;
 }
 
+export function removeEmptyLines(lines: string[]): string[] {
+  return lines.filter((line) => line.trim().length > 0);
+}
+
 export function trimLeadingLine(line: string): string {
   return line.replace(/^[ \t\u3000]+/, '');
 }

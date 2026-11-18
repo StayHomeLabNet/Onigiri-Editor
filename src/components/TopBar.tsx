@@ -20,6 +20,13 @@ import {
   Languages,
   Bot,
   Settings,
+  Presentation,
+  CalendarDays,
+  FileStack,
+  Globe,
+  TextSearch,
+  Focus,
+  Wrench,
 } from 'lucide-react';
 import type { AppMode, Locale, ThemeId, ViewLayout } from '../types';
 import type { Translations } from '../i18n/types';
@@ -49,6 +56,14 @@ interface TopBarProps {
   onToggleZen: () => void;
   onOpenSettings: () => void;
   onOpenAbout: () => void;
+  onOpenSlidePresentation?: () => void;
+  onOpenDailyNote?: () => void;
+  onOpenTemplateModal?: () => void;
+  onOpenWebClip?: () => void;
+  onOpenWorkspaceGrep?: () => void;
+  focusMode?: boolean;
+  onToggleFocusMode?: () => void;
+  isMarkdown?: boolean;
   isDirty: boolean;
   activeTitle: string;
 }
@@ -77,6 +92,14 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleZen,
   onOpenSettings,
   onOpenAbout,
+  onOpenSlidePresentation,
+  onOpenDailyNote,
+  onOpenTemplateModal,
+  onOpenWebClip,
+  onOpenWorkspaceGrep,
+  focusMode,
+  onToggleFocusMode,
+  isMarkdown = true,
   isDirty,
   activeTitle,
 }) => {
@@ -234,6 +257,68 @@ export const TopBar: React.FC<TopBarProps> = ({
               {isMac ? <Command size={13} /> : <span>Ctrl+</span>}
               <span>K</span>
             </button>
+            {(onOpenSlidePresentation ||
+              onOpenDailyNote ||
+              onOpenTemplateModal ||
+              onOpenWebClip ||
+              onOpenWorkspaceGrep ||
+              onToggleFocusMode) && (
+              <div className="dropdown-wrapper">
+                <button type="button" className="icon-btn" title={t.actions.newFromTemplate}>
+                  <Wrench size={15} />
+                </button>
+                <div className="dropdown-menu">
+                  {onOpenDailyNote && (
+                    <button type="button" onClick={onOpenDailyNote}>
+                      <CalendarDays size={13} />
+                      <span>{t.actions.openDailyNote}</span>
+                    </button>
+                  )}
+                  {onOpenTemplateModal && (
+                    <button type="button" onClick={onOpenTemplateModal}>
+                      <FileStack size={13} />
+                      <span>{t.actions.newFromTemplate}</span>
+                    </button>
+                  )}
+                  {onOpenWebClip && (
+                    <button type="button" onClick={onOpenWebClip}>
+                      <Globe size={13} />
+                      <span>{t.actions.webClipUrl}</span>
+                    </button>
+                  )}
+                  {onOpenWorkspaceGrep && (
+                    <button type="button" onClick={onOpenWorkspaceGrep}>
+                      <TextSearch size={13} />
+                      <span>{t.actions.workspaceGrep}</span>
+                    </button>
+                  )}
+                  {onOpenSlidePresentation && isMarkdown && (
+                    <button type="button" onClick={onOpenSlidePresentation}>
+                      <Presentation size={13} />
+                      <span>{t.actions.slidePresentation}</span>
+                    </button>
+                  )}
+                  {onToggleFocusMode && (
+                    <button type="button" onClick={onToggleFocusMode}>
+                      <Focus size={13} />
+                      <span>
+                        {t.actions.toggleFocusMode} {focusMode ? '✓' : ''}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+            {onOpenSlidePresentation && isMarkdown && (
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={onOpenSlidePresentation}
+                title={t.actions.slidePresentation}
+              >
+                <Presentation size={15} />
+              </button>
+            )}
             <div className="dropdown-wrapper">
               <button type="button" className="icon-btn" title={t.actions.exportHtml}>
                 <Download size={16} />

@@ -833,7 +833,7 @@ export function exportStandaloneHtml(
 </html>`;
 }
 
-export type DocumentPreviewKind = 'markdown' | 'webpage' | 'code';
+export type DocumentPreviewKind = 'markdown' | 'webpage' | 'code' | 'data';
 
 export function getDocumentPreviewKind(
   fileName?: string,
@@ -841,9 +841,18 @@ export function getDocumentPreviewKind(
   languageOverride?: string | null,
   content?: string
 ): DocumentPreviewKind {
+  const isSvgContent = Boolean(
+    content && /^\s*(?:<\?xml\b[^>]*>\s*)?<svg[\s>]/i.test(content.slice(0, 1024))
+  );
+  const target = (filePath || fileName || '').trim().toLowerCase();
+  const base = target.split(/[/\\]/).pop() || '';
+  const isSvgFile = /\.svg$/i.test(base) || isSvgContent;
+
   if (languageOverride) {
     if (languageOverride === 'markdown') return 'markdown';
     if (languageOverride === 'html') return 'webpage';
+    if (languageOverride === 'xml' && isSvgFile) return 'webpage';
+    if (languageOverride === 'csv' || languageOverride === 'tsv') return 'data';
     return 'code';
   }
   const effectiveLangId = resolveEffectiveLanguageId({
@@ -852,11 +861,11 @@ export function getDocumentPreviewKind(
     content,
     languageOverride: null,
   });
-  const target = (filePath || fileName || '').trim().toLowerCase();
-  const base = target.split(/[/\\]/).pop() || '';
   if (effectiveLangId === 'markdown') return 'markdown';
   if (effectiveLangId === 'html') return 'webpage';
-  if (/\.svg$/i.test(base)) return 'webpage';
+  if (effectiveLangId === 'xml' && isSvgFile) return 'webpage';
+  if (effectiveLangId === 'csv' || effectiveLangId === 'tsv') return 'data';
+  if (isSvgFile) return 'webpage';
   if (effectiveLangId) return 'code';
 
   const dotIdx = base.lastIndexOf('.');
@@ -865,10 +874,123 @@ export function getDocumentPreviewKind(
   if (ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'svg') {
     return 'webpage';
   }
+  if (ext === 'csv' || ext === 'tsv') {
+    return 'data';
+  }
   if (ext === 'md' || ext === 'markdown' || ext === 'mdown' || ext === 'mdx') {
     return 'markdown';
   }
   return 'code';
+}
+
+export function splitMarkdownSlides(markdown: string): string[] {
+  const normalized = markdown.replace(/\r\n/g, '\n');
+  const fmMatch = normalized.match(/^---\n[\s\S]*?\n---(?:\n|$)/);
+  const body = fmMatch ? normalized.slice(fmMatch[0].length) : normalized;
+
+  const lines = body.split('\n');
+  const slides: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+  let fenceChar = '';
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const ch = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (ch === fenceChar) {
+        inFence = false;
+        fenceChar = '';
+      }
+      current.push(line);
+      continue;
+    }
+
+    if (!inFence && /^---\s*$/.test(trimmed)) {
+      const slideText = current.join('\n').trim();
+      if (slideText || slides.length > 0) {
+        slides.push(slideText);
+      }
+      current = [];
+      continue;
+    }
+
+    current.push(line);
+  }
+
+  const lastSlide = current.join('\n').trim();
+  if (lastSlide || slides.length === 0) {
+    slides.push(lastSlide);
+  }
+
+  return slides.filter((s, idx) => s.length > 0 || (idx === 0 && slides.length === 1));
+}
+
+export function slugifyHeadingForAnchor(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s+/g, '-');
+}
+
+export function generateTocMarkdown(markdown: string, maxDepth = 4): string {
+  const headings = extractHeadings(markdown).filter((h) => h.level <= maxDepth);
+  if (headings.length === 0) {
+    return '<!-- TOC -->\n<!-- /TOC -->';
+  }
+  const minLevel = Math.min(...headings.map((h) => h.level));
+  const seenSlugs = new Map<string, number>();
+  const lines = headings.map((h) => {
+    const indent = '  '.repeat(Math.max(0, h.level - minLevel));
+    const baseSlug = slugifyHeadingForAnchor(h.text) || `section-${h.line}`;
+    const count = seenSlugs.get(baseSlug) || 0;
+    seenSlugs.set(baseSlug, count + 1);
+    const slug = count === 0 ? baseSlug : `${baseSlug}-${count}`;
+    return `${indent}- [${h.text}](#${slug})`;
+  });
+  return `<!-- TOC -->\n${lines.join('\n')}\n<!-- /TOC -->`;
+}
+
+export function upsertTocInMarkdown(
+  markdown: string,
+  insertOffset?: number
+): { nextMarkdown: string; updatedExisting: boolean } {
+  const tocBlock = generateTocMarkdown(markdown);
+  const existingRe = /<!--\s*TOC\s*-->[\s\S]*?<!--\s*\/TOC\s*-->/i;
+  if (existingRe.test(markdown)) {
+    return {
+      nextMarkdown: markdown.replace(existingRe, tocBlock),
+      updatedExisting: true,
+    };
+  }
+  if (typeof insertOffset === 'number' && insertOffset >= 0 && insertOffset <= markdown.length) {
+    const before = markdown.slice(0, insertOffset);
+    const after = markdown.slice(insertOffset);
+    const needLeadNl = before.length > 0 && !before.endsWith('\n') ? '\n\n' : before.length > 0 && !before.endsWith('\n\n') ? '\n' : '';
+    const needTrailNl = after.length > 0 && !after.startsWith('\n') ? '\n\n' : '';
+    return {
+      nextMarkdown: `${before}${needLeadNl}${tocBlock}${needTrailNl}${after}`,
+      updatedExisting: false,
+    };
+  }
+  const fmMatch = markdown.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  if (fmMatch) {
+    const head = fmMatch[0];
+    const rest = markdown.slice(head.length).replace(/^\r?\n+/, '');
+    return {
+      nextMarkdown: `${head}\n${tocBlock}\n\n${rest}`,
+      updatedExisting: false,
+    };
+  }
+  return {
+    nextMarkdown: `${tocBlock}\n\n${markdown}`,
+    updatedExisting: false,
+  };
 }
 
 export function escapeHtmlText(raw: string): string {

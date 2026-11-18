@@ -606,6 +606,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <label className="check-row">
                     <input
                       type="checkbox"
+                      checked={settings.focusMode ?? false}
+                      onChange={(e) =>
+                        onSettingsChange({ ...settings, focusMode: e.target.checked })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.focusMode}</span>
+                  </label>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
                       checked={settings.smartPasteHtml}
                       onChange={(e) =>
                         onSettingsChange({ ...settings, smartPasteHtml: e.target.checked })
@@ -623,6 +633,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                     <span>{t.inspector.frontmatterLabels.showCard}</span>
                   </label>
+                </div>
+
+                <div className="settings-card">
+                  <div className="settings-grid-2">
+                    <div className="field-row">
+                      <label>{t.inspector.settingsLabels.imageAssetFolder}</label>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={settings.imageAssetFolder ?? 'assets'}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            imageAssetFolder: e.target.value,
+                          })
+                        }
+                        placeholder="assets"
+                      />
+                    </div>
+                    <div className="field-row">
+                      <label>{t.inspector.settingsLabels.dailyNotesFolder}</label>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={settings.dailyNotesFolder ?? ''}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            dailyNotesFolder: e.target.value,
+                          })
+                        }
+                        placeholder="daily"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="ins-divider" />

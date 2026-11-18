@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v106">What's New in v1.0.6</a> ・
+    <a href="#whats-new-in-v110">What's New in v1.1.0</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.0.6-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.1.0-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,26 +39,26 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.0.6`
+Current version: `v1.1.0`
 
 ## Key Features
 
 - **Three UI Modes (`⌘\` / `Ctrl+\`)**:
   - **Simple Mode**: Ultra-minimal single-pane editor with distraction-free focus and automatic file-extension syntax highlighting.
   - **Basic Mode**: Clean editor + bidirectional live preview with synchronized scrolling and essential formatting controls.
-  - **Advanced Mode**: Multi-tab editing (with pinning, drag-reordering, side-by-side split & 2-tab diff compare), collapsible workspace folder explorer with context menu & image gallery, folder-wide Search & Replace, dev-server integration, snapshots, and AI workspace tools.
-- **Bidirectional Visual Editing & Sync Line Markers**: Edit Markdown in CodeMirror 6 (left) or TipTap visual WYSIWYG (right), with real-time line/block highlight indicators across both panes.
-- **100+ Language Syntax Highlighting, Override Selector & Custom Colors**: Built-in support for Markdown, PHP, TypeScript/JavaScript, Python, Rust, SQL, HTML, CSS, YAML, JSON, and more—clickable Status Bar language override, code folding, `⌘D` multi-occurrence selection, auto-close brackets, 7 theme presets, and 10 per-token color pickers.
-- **Built-in AI Chat, Inline Selection Edit (`⌘⇧E`) & Diff Preview**:
-  - Supports **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** with model selection, live streaming progress & Stop/Cancel, folder permission pill, inline selection presets, and guided Terminal setup/login.
+  - **Advanced Mode**: Multi-tab editing (with pinning, drag-reordering, side-by-side dual editor & 2-tab diff compare), collapsible workspace folder explorer (Git status badges, tree D&D relative links, context menu & image gallery), **Knowledge tab** (`[[WikiLinks]]`, Backlinks & `#tag` browser), cross-folder Regex Grep & Replace (`⌘⇧G`), dev-server integration, snapshots, and AI workspace tools.
+- **Bidirectional Visual Editing, Slide Mode & Writing Workflow**: Edit Markdown in CodeMirror 6 (left) or TipTap visual WYSIWYG (right) with real-time line/block highlights, **Slash Commands (`/`)**, **Custom Snippets**, **Auto TOC**, **Clipboard Image Paste Auto-Save**, **Daily Notes & Templates**, **URL Web Clipper**, and **Markdown Slide Presentation Mode**.
+- **100+ Language Syntax Highlighting, Structured Data & Visual Previews**: Built-in support for Markdown, PHP, TypeScript/JavaScript, Python, Rust, SQL, HTML, CSS, YAML, JSON, CSV/TSV, SVG, and more—clickable Status Bar language override, **CSV/TSV interactive table preview**, **JSON/YAML/ENV formatting & conversion**, enhanced **SVG (zoom/background/PNG copy)** & **HTML Visual/Source preview**, code folding, persisted **Line Bookmarks (`F2`)**, **Focus Mode**, `⌘D` multi-occurrence selection, 7 syntax presets, and 10 per-token color pickers.
+- **Built-in AI Chat (Per-Tab Threads), Document Review & Diff Preview**:
+  - Supports **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** with model selection, **per-tab or shared chat threads**, **Export Chat as `.md` Note**, live streaming progress & Stop/Cancel, folder permission pill, **Inline AI Selection Edit (`⌘⇧E`)**, and **Proofread & Document Review**.
   - Shows a **line-by-line Diff Preview Modal** before applying AI document/selection replacements (with optional pre-apply snapshot) or workspace file writes.
-- **Session Restore, Recent History, Draft Recovery & Auto-Save**: Automatically saves and restores open tabs, unsaved drafts, cursor positions, workspace state, recent files & folders (synced to native **File → Open Recent**), and window position/size across restarts, plus optional 1.5s auto-save.
+- **Project-Scoped Session Restore, Git HEAD Diff & Auto-Save**: Saves and restores open tabs, unsaved drafts, cursor & scroll positions, folding state, bookmarks, language overrides, recent history, and window geometry per workspace folder across restarts, plus optional 1.5s auto-save and `Git HEAD` diff compare.
 - **External File Change Detection & Conflict Banner**: Watches open files on disk (including changes from external editors or AI CLIs)—auto-reloading clean tabs or displaying a conflict banner with **Reload**, **Compare Diff**, and **Keep Mine** actions when unsaved edits exist.
 - **Web Dev & Dual Browser Preview**:
   - Auto-detects Vite, Next.js, Laravel, WordPress, Docker Compose, Python, Hugo, and static projects, runs pre-flight environment diagnostics, and offers guided setup.
   - **Pattern 1**: Native multi-WebView **Embedded Web Browser** in the right pane (`Settings` toggleable).
-  - **Pattern 2**: **External Live Browser Preview** over local HTTP (`127.0.0.1`) with real-time auto-reload.
-- **Productivity Extras**: Keyboard macro recording & playback (`⌘⇧M` / `⌘⇧P`), Format Toolbar edit/zoom controls & Status Bar zoom popover (`25%`–`400%`), Smart Line Copy (`⌘C` / `Ctrl+C`), Mermaid diagrams, KaTeX math, GitHub callouts, YAML Frontmatter editor, AI output cleanup & table formatter, estimated LLM token counter, Rich Text copy & HTML-to-Markdown smart paste, snapshots & diff viewer, Find & Replace (Regex & Folder-wide), Command Palette (`⌘K` / `Ctrl+K`), Zen Mode (`⌘⇧F` / `Ctrl+Shift+F`), and HTML / Markdown / Source Code PDF export.
+  - **Pattern 2**: **External Live Browser Preview** over local HTTP (`127.0.0.1` or LAN `0.0.0.0`) with real-time auto-reload.
+- **Productivity Extras**: **Quick Open (`⌘P` / `@headings`)**, Keyboard macro recording & playback (`⌘⇧M` / `F8`), Format Toolbar edit/zoom controls & Status Bar zoom popover (`25%`–`400%`), Smart Line Copy (`⌘C` / `Ctrl+C`), Mermaid diagrams, KaTeX math, GitHub callouts, YAML Frontmatter editor, AI output cleanup & table formatter, estimated LLM token counter, Rich Text copy & HTML/TSV smart paste, Find & Replace, Command Palette (`⌘K` / `Ctrl+K`), Zen Mode (`⌘⇧F` / `Ctrl+Shift+F`), and HTML / Markdown / Source Code PDF export.
 - **OS-Aware First-Launch Language**: Automatically launches in Japanese when the OS language is Japanese, and English for all other languages (manual switch available anytime in Settings or TopBar).
 
 ## Requirements
@@ -96,13 +96,23 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.0.6
+## What's New in v1.1.0
+
+- **Quick Open (`⌘P` / `@headings`), Persisted Bookmarks (`F2`), Focus Mode & Per-Project Sessions**: Jump to open/workspace/recent files or `@headings` instantly, toggle line bookmarks across sessions, dim inactive paragraphs in Focus Mode, and preserve tabs, scroll positions, folds, and language overrides per workspace folder (with improved language auto-detection).
+- **Knowledge Management & Markdown Authoring**: Added **Slash Commands (`/`)**, **Custom Snippets UI**, **Auto TOC (`<!-- toc -->`)**, **`[[WikiLinks]]`**, Sidebar **Knowledge** tab (**Backlinks & `#tag` Browser**), **Daily Notes & Templates (`{{date}}`/`{{time}}`/`{{title}}`)**, **URL → Markdown Web Clipper**, **Clipboard Image Auto-Save** (configurable `assets` folder with workspace fallback), and **Sidebar Tree Drag & Drop** for relative Markdown links.
+- **Cross-Folder Regex Grep Replace (`⌘⇧G`), Slide Presentation Mode & Enhanced Previews**: Search & selectively replace across folders, present Markdown docs as slides (`---`), inspect **CSV/TSV Interactive Tables**, format/convert **JSON / YAML / `.env`**, and use **SVG Zoom / Background / PNG Copy** & **HTML Visual/Source Toggle** in standalone webpage previews.
+- **Dual Editor, Document Review, Per-Tab AI Threads & Git Integration**: Full focus routing for simultaneous Side-by-Side editing, **Proofread & Document Review** tab, **per-tab AI chat threads + `.md` note export**, and **Git status badges + `Git HEAD` diff compare**.
+
+<details>
+<summary>Previous release: v1.0.6</summary>
 
 - **Side-by-Side Tab Split & 2-Tab Diff Compare**: Open a second tab in the right pane to edit side-by-side or inspect line-by-line diffs with left/right swap.
 - **Keyboard Macro Recording & Playback (`⌘⇧M` / `⌘⇧P`)**: Record and replay typing, navigation, editing, toolbar, and context-menu actions across sessions.
 - **Inline AI Selection Edit (`⌘⇧E` / `Ctrl+Shift+E`)**: Edit selected text or code with AI presets (Refactor, Comments, Fix Typos, Concise, Polite, Translate JA/EN) and Diff Preview confirmation.
 - **Status Bar Language Selector, Code Folding & `⌘D` Selection**: Override syntax highlighting per tab from the Status Bar, fold code blocks, highlight matching selections (`⌘D` next occurrence), and configure auto-close brackets.
 - **Pinned/Draggable Tabs, Tree Context Menu, Close Folder & Folder Replace**: Pin/reorder/middle-click tabs, create/rename/duplicate/delete files & folders in the sidebar, close the active workspace folder cleanly, run folder-wide Search & Replace, sync Recent Files/Folders to the native menu, and print/export source code to PDF.
+
+</details>
 
 <details>
 <summary>Previous release: v1.0.5</summary>

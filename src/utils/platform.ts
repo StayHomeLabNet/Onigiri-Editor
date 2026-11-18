@@ -1,13 +1,18 @@
 import type {
   AiCapabilities,
   AiProviderId,
+  FetchedUrlContent,
   FileSyncInfo,
+  GitHeadFileResult,
+  GitStatusResult,
   ProjectInfo,
   ProjectServerStatus,
   ProjectSetupResult,
   SearchMatch,
   TextEncodingId,
   WorkspaceEntry,
+  WorkspaceGrepResult,
+  WorkspaceNoteIndexEntry,
 } from '../types';
 import {
   decodeBytesBrowser,
@@ -56,7 +61,7 @@ const SUPPORTED_DOC_EXTENSIONS = [
   'php', 'phtml', 'html', 'htm', 'css', 'scss', 'less',
   'js', 'jsx', 'mjs', 'cjs', 'ts', 'tsx', 'json', 'yaml', 'yml', 'toml', 'xml',
   'sql', 'py', 'rs', 'go', 'java', 'kt', 'swift', 'rb', 'c', 'h', 'cpp', 'hpp', 'cs',
-  'sh', 'bash', 'zsh', 'vue', 'svelte', 'ini', 'conf',
+  'sh', 'bash', 'zsh', 'vue', 'svelte', 'ini', 'conf', 'csv', 'tsv',
 ];
 
 export interface OpenedTextFile {
@@ -198,12 +203,19 @@ export async function resolveImageSrc(src: string, baseDir?: string | null): Pro
   return trimmed;
 }
 
-export async function saveImageAsset(sourcePath: string, docPath?: string | null): Promise<string> {
+export async function saveImageAsset(
+  sourcePath: string,
+  docPath?: string | null,
+  workspaceRoot?: string | null,
+  assetDir?: string | null
+): Promise<string> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
     return invoke<string>('save_image_asset', {
       sourcePath,
       docPath: docPath || null,
+      workspaceRoot: workspaceRoot || null,
+      assetDir: assetDir || null,
     });
   }
   return sourcePath;
@@ -212,7 +224,9 @@ export async function saveImageAsset(sourcePath: string, docPath?: string | null
 export async function savePastedImage(
   base64Data: string,
   ext: string,
-  docPath?: string | null
+  docPath?: string | null,
+  workspaceRoot?: string | null,
+  assetDir?: string | null
 ): Promise<string> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -220,6 +234,8 @@ export async function savePastedImage(
       base64Data,
       ext,
       docPath: docPath || null,
+      workspaceRoot: workspaceRoot || null,
+      assetDir: assetDir || null,
     });
   }
   return base64Data;
@@ -924,10 +940,78 @@ export async function replaceInWorkspace(params: {
   replacement: string;
   caseSensitive: boolean;
   useRegex: boolean;
+  includedPaths?: string[];
 }): Promise<WorkspaceReplaceResult> {
   if (!isTauri()) {
     throw new Error('Workspace replace requires the desktop application');
   }
   const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<WorkspaceReplaceResult>('replace_in_workspace', params);
+  return invoke<WorkspaceReplaceResult>('replace_in_workspace', {
+    rootPath: params.rootPath,
+    query: params.query,
+    replacement: params.replacement,
+    caseSensitive: params.caseSensitive,
+    useRegex: params.useRegex,
+    includedPaths: params.includedPaths ?? null,
+  });
+}
+
+export async function searchWorkspaceAdvanced(params: {
+  rootPath: string;
+  query: string;
+  caseSensitive: boolean;
+  useRegex: boolean;
+}): Promise<WorkspaceGrepResult> {
+  if (!isTauri()) {
+    return { files: [], totalFiles: 0, totalMatches: 0, truncated: false };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<WorkspaceGrepResult>('search_workspace_advanced', params);
+}
+
+export async function indexWorkspaceNotes(rootPath: string): Promise<WorkspaceNoteIndexEntry[]> {
+  if (!isTauri() || !rootPath) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<WorkspaceNoteIndexEntry[]>('index_workspace_notes', { rootPath });
+}
+
+export async function fetchUrlContent(url: string): Promise<FetchedUrlContent> {
+  if (!isTauri()) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
+    return {
+      finalUrl: resp.url || url,
+      status: resp.status,
+      contentType: resp.headers.get('content-type') || 'text/html',
+      html: await resp.text(),
+    };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<FetchedUrlContent>('fetch_url_content', { url });
+}
+
+export async function getGitStatus(rootPath: string): Promise<GitStatusResult> {
+  if (!isTauri() || !rootPath) {
+    return { isRepo: false, branch: null, entries: {} };
+  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<GitStatusResult>('get_git_status', { rootPath });
+  } catch {
+    return { isRepo: false, branch: null, entries: {} };
+  }
+}
+
+export async function getGitHeadFile(
+  rootPath: string | null | undefined,
+  filePath: string
+): Promise<GitHeadFileResult> {
+  if (!isTauri()) {
+    throw new Error('Git diff requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<GitHeadFileResult>('get_git_head_file', {
+    rootPath: rootPath || null,
+    filePath,
+  });
 }

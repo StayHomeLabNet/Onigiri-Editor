@@ -10,10 +10,13 @@ import {
   Loader2,
   Layers,
   Eye,
+  Copy,
+  Image as ImageIcon,
+  Code2,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
-import { isTauri, readFileByPath, resolveImageSrc } from '../utils/platform';
+import { isTauri, readFileByPath, resolveImageSrc, writeClipboardText } from '../utils/platform';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 
 interface WebPagePreviewPaneProps {
@@ -36,6 +39,7 @@ interface WebPagePreviewPaneProps {
   onServeDistPreview?: (target: 'builtin' | 'external') => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
   onRecheckProjectEnv?: () => void;
+  onStatusNotify?: (message: string) => void;
 }
 
 function isRelativeAsset(url: string): boolean {
@@ -149,11 +153,15 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
   onServeDistPreview,
   onAssistProjectSetup,
   onRecheckProjectEnv,
+  onStatusNotify,
 }) => {
   const [viewport, setViewport] = useState<'full' | 'mobile'>('full');
   const [reloadNonce, setReloadNonce] = useState(0);
   const [preparedDoc, setPreparedDoc] = useState('');
   const [forceRawPreview, setForceRawPreview] = useState(false);
+  const [svgZoom, setSvgZoom] = useState<'fit' | 50 | 100 | 200>('fit');
+  const [svgBg, setSvgBg] = useState<'checker' | 'light' | 'dark'>('checker');
+  const [showHtmlSource, setShowHtmlSource] = useState(false);
 
   const isSvg =
     fileName.toLowerCase().endsWith('.svg') || content.trimStart().startsWith('<svg');
@@ -181,12 +189,108 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
 
   useEffect(() => {
     setForceRawPreview(false);
+    setShowHtmlSource(false);
   }, [docPath, fileName]);
+
+  const handleCopySvgCode = async () => {
+    try {
+      await writeClipboardText(content);
+      onStatusNotify?.(t.toasts.copiedSvg);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onStatusNotify?.(`${t.toasts.errorPrefix}: ${msg}`);
+    }
+  };
+
+  const handleCopySvgAsPng = async () => {
+    try {
+      const match = content.match(/<svg[\s\S]*<\/svg>/i);
+      const rawSvg = match ? match[0] : content.trim();
+      if (!rawSvg.toLowerCase().startsWith('<svg')) {
+        throw new Error('SVG root element not found');
+      }
+      const doc = new DOMParser().parseFromString(rawSvg, 'image/svg+xml');
+      const svgEl = doc.documentElement;
+      if (!svgEl || svgEl.tagName.toLowerCase() !== 'svg') {
+        throw new Error('Invalid SVG');
+      }
+      if (!svgEl.getAttribute('xmlns')) {
+        svgEl.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      }
+      let width = parseFloat(svgEl.getAttribute('width') || '0');
+      let height = parseFloat(svgEl.getAttribute('height') || '0');
+      const viewBox = svgEl.getAttribute('viewBox');
+      if ((!width || !height) && viewBox) {
+        const parts = viewBox.trim().split(/[\s,]+/).map(Number);
+        if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+          width = parts[2];
+          height = parts[3];
+        }
+      }
+      if (!width || !Number.isFinite(width)) width = 512;
+      if (!height || !Number.isFinite(height)) height = 512;
+      const scale = Math.min(4, Math.max(1, Math.min(2048 / Math.max(width, height), 2)));
+      const outW = Math.round(width * scale);
+      const outH = Math.round(height * scale);
+      svgEl.setAttribute('width', String(outW));
+      svgEl.setAttribute('height', String(outH));
+
+      const serialized = new XMLSerializer().serializeToString(svgEl);
+      const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(svgBlob);
+
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = () => reject(new Error('Failed to rasterize SVG'));
+          el.src = blobUrl;
+        });
+        const canvas = document.createElement('canvas');
+        canvas.width = outW;
+        canvas.height = outH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas 2D context unavailable');
+        ctx.drawImage(img, 0, 0, outW, outH);
+
+        const pngBlob = await new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG encode failed'))), 'image/png');
+        });
+        if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+          throw new Error('Clipboard image write unsupported');
+        }
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+        onStatusNotify?.(t.browser.svgCopiedPngToast);
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onStatusNotify?.(`${t.toasts.errorPrefix}: ${msg}`);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
     const timer = window.setTimeout(async () => {
       if (isSvg) {
+        const bgCss =
+          svgBg === 'dark'
+            ? 'background-color: #0f172a;'
+            : svgBg === 'light'
+              ? 'background-color: #ffffff;'
+              : `background-color: #f8fafc;
+    background-image:
+      linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+      linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+      linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0;`;
+        const zoomRule =
+          svgZoom === 'fit'
+            ? 'svg { max-width: 92vw; max-height: 92vh; height: auto; }'
+            : `svg { transform: scale(${svgZoom / 100}); transform-origin: center center; }`;
         const wrapped = `<!doctype html>
 <html>
 <head>
@@ -195,19 +299,14 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
   html, body {
     margin: 0;
     min-height: 100vh;
+    padding: 16px;
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: #f8fafc;
-    background-image:
-      linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
-      linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
-      linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
-    background-size: 20px 20px;
-    background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+    ${bgCss}
   }
-  svg { max-width: 92vw; max-height: 92vh; }
+  ${zoomRule}
 </style>
 </head>
 <body>${content}</body>
@@ -255,7 +354,7 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [content, docPath, workspaceRoot, isSvg]);
+  }, [content, docPath, workspaceRoot, isSvg, svgZoom, svgBg]);
 
   const showLauncherCard = isSpaEntry && !forceRawPreview;
   const serverRunningHere =
@@ -273,33 +372,102 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
           {isSvg ? t.browser.svgLiveLabel : t.browser.htmlLiveLabel}
         </span>
         <div className="webpage-preview-actions">
-          {!showLauncherCard && (
+          {isSvg ? (
             <>
+              {(['fit', 50, 100, 200] as const).map((z) => (
+                <button
+                  key={String(z)}
+                  type="button"
+                  className={`mini-pill-btn ${svgZoom === z ? 'is-active' : ''}`}
+                  onClick={() => setSvgZoom(z)}
+                >
+                  <span>{z === 'fit' ? 'Fit' : `${z}%`}</span>
+                </button>
+              ))}
+              <span className="webpage-preview-sep" />
+              {(
+                [
+                  { id: 'checker', label: t.browser.svgBgChecker },
+                  { id: 'light', label: t.browser.svgBgLight },
+                  { id: 'dark', label: t.browser.svgBgDark },
+                ] as const
+              ).map((bg) => (
+                <button
+                  key={bg.id}
+                  type="button"
+                  className={`mini-pill-btn ${svgBg === bg.id ? 'is-active' : ''}`}
+                  onClick={() => setSvgBg(bg.id)}
+                >
+                  <span>{bg.label}</span>
+                </button>
+              ))}
+              <span className="webpage-preview-sep" />
               <button
                 type="button"
-                className={`mini-pill-btn ${viewport === 'full' ? 'is-active' : ''}`}
-                onClick={() => setViewport('full')}
+                className="mini-pill-btn"
+                onClick={handleCopySvgCode}
               >
-                <Monitor size={12} />
-                <span>{t.browser.viewportFull}</span>
+                <Copy size={12} />
+                <span>{t.browser.svgCopyCode}</span>
               </button>
               <button
                 type="button"
-                className={`mini-pill-btn ${viewport === 'mobile' ? 'is-active' : ''}`}
-                onClick={() => setViewport('mobile')}
+                className="mini-pill-btn"
+                onClick={handleCopySvgAsPng}
               >
-                <Smartphone size={12} />
-                <span>{t.browser.viewportMobile}</span>
-              </button>
-              <button
-                type="button"
-                className="icon-btn-sm"
-                onClick={() => setReloadNonce((n) => n + 1)}
-                title={t.browser.reload}
-              >
-                <RotateCw size={13} />
+                <ImageIcon size={12} />
+                <span>{t.browser.svgCopyPng}</span>
               </button>
             </>
+          ) : (
+            !showLauncherCard && (
+              <>
+                <button
+                  type="button"
+                  className={`mini-pill-btn ${!showHtmlSource ? 'is-active' : ''}`}
+                  onClick={() => setShowHtmlSource(false)}
+                >
+                  <Eye size={12} />
+                  <span>{t.browser.htmlVisualToggle}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`mini-pill-btn ${showHtmlSource ? 'is-active' : ''}`}
+                  onClick={() => setShowHtmlSource(true)}
+                >
+                  <Code2 size={12} />
+                  <span>{t.browser.htmlCodeToggle}</span>
+                </button>
+                {!showHtmlSource && (
+                  <>
+                    <button
+                      type="button"
+                      className={`mini-pill-btn ${viewport === 'full' ? 'is-active' : ''}`}
+                      onClick={() => setViewport('full')}
+                    >
+                      <Monitor size={12} />
+                      <span>{t.browser.viewportFull}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`mini-pill-btn ${viewport === 'mobile' ? 'is-active' : ''}`}
+                      onClick={() => setViewport('mobile')}
+                    >
+                      <Smartphone size={12} />
+                      <span>{t.browser.viewportMobile}</span>
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="icon-btn-sm"
+                  onClick={() => setReloadNonce((n) => n + 1)}
+                  title={t.browser.reload}
+                >
+                  <RotateCw size={13} />
+                </button>
+              </>
+            )
           )}
           {isSpaEntry && forceRawPreview && (
             <button
@@ -583,15 +751,23 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
             onAssistSetup={onAssistProjectSetup}
             onRecheck={onRecheckProjectEnv}
           />
-          <div className={`webpage-preview-stage ${viewport === 'mobile' ? 'is-mobile' : ''}`}>
-            <iframe
-              key={reloadNonce}
-              title="Live HTML Page Preview"
-              srcDoc={preparedDoc}
-              sandbox="allow-scripts allow-forms allow-modals allow-popups"
-              className={`webpage-preview-iframe ${viewport === 'mobile' ? 'is-mobile' : ''}`}
-            />
-          </div>
+          {!isSvg && showHtmlSource ? (
+            <div className="webpage-source-stage">
+              <pre className="webpage-source-pre">
+                <code>{content}</code>
+              </pre>
+            </div>
+          ) : (
+            <div className={`webpage-preview-stage ${viewport === 'mobile' ? 'is-mobile' : ''}`}>
+              <iframe
+                key={reloadNonce}
+                title="Live HTML Page Preview"
+                srcDoc={preparedDoc}
+                sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                className={`webpage-preview-iframe ${viewport === 'mobile' ? 'is-mobile' : ''}`}
+              />
+            </div>
+          )}
         </>
       )}
     </div>

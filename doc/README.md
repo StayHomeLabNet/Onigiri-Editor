@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.0.6)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.1.0)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -13,14 +13,14 @@
 ## Table of Contents
 
 1. [Getting Started & Language Settings](#1-getting-started--language-settings)
-2. [Three UI Modes & Layout Controls](#2-three-ui-modes--layout-controls)
-3. [Markdown & Bidirectional Visual Editing](#3-markdown--bidirectional-visual-editing)
-4. [Advanced Editing & Right-Click Context Menu](#4-advanced-editing--right-click-context-menu)
+2. [Three UI Modes, Dual Editor & Layout Controls](#2-three-ui-modes-dual-editor--layout-controls)
+3. [Markdown, Slash Commands, WikiLinks & Slide Mode](#3-markdown-slash-commands-wikilinks--slide-mode)
+4. [Advanced Editing, Quick Open, Bookmarks & Context Menu](#4-advanced-editing-quick-open-bookmarks--context-menu)
 5. [Character Encodings & Line Endings (EOL)](#5-character-encodings--line-endings-eol)
-6. [Multi-Language Syntax Highlighting & Previews](#6-multi-language-syntax-highlighting--previews)
-7. [Workspace, Session Restore & File Watching](#7-workspace-session-restore--file-watching)
+6. [Multi-Language Syntax Highlighting, Data & SVG/HTML Previews](#6-multi-language-syntax-highlighting-data--svghtml-previews)
+7. [Workspace, Knowledge Graph, Grep Replace & Session Restore](#7-workspace-knowledge-graph-grep-replace--session-restore)
 8. [Dev Server Integration & Dual Browser Preview](#8-dev-server-integration--dual-browser-preview)
-9. [AI Chat, Connection Assistant & Formatting Tools](#9-ai-chat-connection-assistant--formatting-tools)
+9. [AI Chat, Inline Edit, Document Review & Formatting Tools](#9-ai-chat-inline-edit-document-review--formatting-tools)
 10. [Export, Themes & Settings Reference](#10-export-themes--settings-reference)
 11. [Keyboard Shortcuts & Menu Bar Reference](#11-keyboard-shortcuts--menu-bar-reference)
 
@@ -38,7 +38,7 @@
 
 ---
 
-## 2. Three UI Modes & Layout Controls
+## 2. Three UI Modes, Dual Editor & Layout Controls
 
 Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 
@@ -46,20 +46,22 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 | :--- | :--- | :--- |
 | **Simple** | Quick notes & fast code edits | Ultra-minimal single-pane editor with tabs and sidebar hidden |
 | **Basic** | Daily writing, visual editing & AI | Editor + bidirectional live preview + format toolbar + AI Chat |
-| **Advanced** | Dev workflows & multi-file projects | Multi-tab bar, left sidebar (Files / Outline / Snippets), dev server launcher, snapshots, writing goal & token counter |
+| **Advanced** | Dev workflows & multi-file projects | Multi-tab bar (pinned/draggable), left sidebar (Files / Outline / Knowledge / Snippets), dual editor / diff compare, dev server launcher, snapshots, writing goal & token counter |
 
-### Layout & Bar Visibility
+### Layout, Dual Editor & Focus Mode
 
 - **View Layout**: Switch between **Editor**, **Split**, and **Preview** in the top header bar.
+- **Side-by-Side Dual Editor & Tab Diff Compare**: Right-click any tab (or sidebar file) → **Open to the Side** / **Compare Diff with Active Tab**. You can edit two files simultaneously side-by-side (active pane focus automatically routes `⌘S`, toolbar actions, snippets, bookmarks, and AI inserts) or inspect diffs with left/right swap.
+- **Top / Bottom Same-File Split**: Split the main editor horizontally (`Toggle Editor Split`) to edit two sections of the same document at once.
+- **Focus Mode**: Dim inactive paragraphs/lines outside the active block to keep attention on what you are writing (toggle via TopBar, Settings, or Command Palette).
 - **Zen Mode**: Press `⌘⇧F` / `Ctrl+Shift+F` to hide surrounding chrome for distraction-free writing (`Esc` to exit).
 - **Header Bar, Format Toolbar & Status Bar Toggles**:
-  - Toggle **View → Show Header Bar** and **View → Show Format Toolbar** from the native menu bar, Settings, or Command Palette.
+  - Toggle **View → Show Header Bar**, **View → Show Format Toolbar**, and **Status Bar** from the menu bar, Settings, or Command Palette.
   - **Settings → General & View** also provides **Hide top header bar in Simple mode** and **Show format toolbar in Simple mode**.
-  - Even while the top header bar is hidden, you can restore modes or open Settings via the bottom-right **Status Bar quick buttons** (`Simple → Basic`, `Settings`), the **View** menu, `⌘,` / `Ctrl+,`, or `⌘\` / `Ctrl+\`.
 
 ---
 
-## 3. Markdown & Bidirectional Visual Editing
+## 3. Markdown, Slash Commands, WikiLinks & Slide Mode
 
 ### Bidirectional Sync (CodeMirror 6 ↔ TipTap)
 
@@ -67,73 +69,77 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 - **Active Line / Block Sync Highlight**: When enabled in Settings, editing in one pane highlights the corresponding block or line in the opposite pane.
 - **Sync Scroll & Typewriter Scroll**: Toggle synchronized scrolling between editor and preview, or keep the active line centered vertically in **Typewriter Scroll** mode.
 
-### Format Toolbar, Edit/Zoom Controls & Rich Content
+### Slash Commands (`/`), Auto TOC & Tables
 
-- **Edit & Display Zoom**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons directly on the Format Toolbar (also works in Visual Preview), plus a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
-- **Headings & Text Styling**: `H1` / `H2` / `H3`, Bold (`⌘B` / `Ctrl+B`), Italic (`⌘I` / `Ctrl+I`), Strikethrough, Inline Code, and Code Block.
-- **Lists & Structure**: Bullet List, Numbered List, Task List (`- [ ]`), Blockquote (`>`), GFM Table, and Divider (`---`).
-- **Links & Images**:
-  - Use the Image toolbar button to insert from a **Local File** or **Image URL** with optional Alt text.
-  - You can also **drag & drop image files** onto the editor or preview pane, or **paste images directly from the clipboard**.
+- **Slash Commands**: Type `/` at the beginning of a line (or after whitespace) to pick headings, lists, task lists, GFM tables, Mermaid diagrams, KaTeX math blocks, or GitHub callouts (`> [!NOTE]`, `> [!TIP]`, etc.) directly from the autocomplete menu.
+- **Auto Table of Contents (TOC)**: Run **Insert / Update Table of Contents (TOC)** from the Command Palette to insert or refresh a `<!-- toc -->` block from document headings.
+- **TSV Smart Table Paste & Formatter**: Pasting tab-separated spreadsheet cells automatically converts them into a formatted GFM table; run **Format Markdown Tables** from the Command Palette or Inspector anytime.
+
+### `[[WikiLinks]]`, Daily Notes, Templates & Web Clipper
+
+- **`[[WikiLinks]]`**: Type `[[` in a workspace to autocomplete note names. Ctrl/Cmd-click (or follow the link in preview) to jump to or create the linked note.
+- **Daily Notes**: Click the **Daily Note** button in the TopBar/Sidebar (or run **Open / Create Today's Daily Note** in the Command Palette) to open or create `YYYY-MM-DD.md` inside your configured **Daily Notes Folder**.
+- **Document Templates**: Open **Templates & Daily Notes** from the TopBar (`+` / Template menu), Sidebar, or Command Palette. Supports built-in templates (**Meeting Notes**, **Technical Design Doc**, **ADR**, **Weekly/Daily Report**) and **Custom Templates** with `{{date}}`, `{{time}}`, and `{{title}}` variables.
+- **Web Clipper (URL → Markdown)**: Open **Clip Web Page URL to Markdown...** from the TopBar, Template menu, or Command Palette to fetch a webpage, strip navigation noise, resolve relative links/images, optionally attach YAML frontmatter, and open as a clean Markdown tab.
+
+### Format Toolbar, Clipboard Image Auto-Save & Extended Blocks
+
+- **Edit & Display Zoom**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
+- **Images & Clipboard Auto-Save**:
+  - Paste screenshots (`⌘V` / `Ctrl+V`) or drag & drop image files directly onto the editor/preview to auto-save PNG/image assets to your configured **Image Asset Folder** (default `assets`, falls back to workspace root for unsaved tabs) and insert `![image](assets/...)`.
+  - Drag files or images from the left **Sidebar tree** into the editor to automatically compute and insert a relative Markdown link or image tag.
 - **Extended Blocks**:
   - **Math (KaTeX)**: Inline (`$ ... $`) and block (`$$ ... $$`) LaTeX math rendering.
-  - **Mermaid Diagrams**: Live rendering for `` ```mermaid `` code blocks (flowcharts, sequence diagrams, state diagrams, etc.) with one-click SVG copy.
+  - **Mermaid Diagrams**: Live rendering for `` ```mermaid `` code blocks with one-click SVG copy.
   - **GitHub Callouts**: Styled rendering for `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, and `> [!CAUTION]`.
-- **YAML Frontmatter (Metadata)**: Open the **Metadata** tab in the right Options drawer to add frontmatter, edit key/value pairs, or toggle the metadata card at the top of the preview.
+  - **YAML Frontmatter (Metadata)**: Open the **Metadata** tab in the right Options drawer to add frontmatter, edit key/value pairs, or toggle the metadata card at the top of the preview.
+
+### Markdown Slide Presentation Mode
+
+- Click **Slides** in the TopBar (available for Markdown files) or run **Markdown Slide Presentation** from the Command Palette.
+- Automatically splits your document at `---` horizontal rules (ignoring fences/frontmatter) and presents clean cards with Mermaid & KaTeX support, **Overview Grid (`G`)**, **Fullscreen (`F`)**, and keyboard navigation (`←` / `→` / `Space` / `Esc`).
 
 ---
 
-## 4. Advanced Editing & Right-Click Context Menu
+## 4. Advanced Editing, Quick Open, Bookmarks & Context Menu
 
-### Smart Line Copy
+### Quick Open (`⌘P` / `Ctrl+P`) & Go to Line (`⌘L` / `Ctrl+L`)
 
-- Press **`⌘C` / `Ctrl+C` with no text selected** to copy the entire current line automatically.
-- Configure behavior under **Settings → Editor & Line Copy**:
-  - **Line Copy Trigger**: **End of line only** or **Anywhere on line (when no selection)**
-  - **Trailing Newline**: Toggle **Include trailing newline (`\n`) when copying line**
+- **Quick Open (`⌘P` / `Ctrl+P`)**: Fuzzy-search open tabs, workspace files, and recent files to jump immediately. Type **`@`** at the start to search and jump to headings in the active file.
+- **Go to Line (`⌘L` / `Ctrl+L`)**: Enter `120` (line) or `120:15` (`line:col`) to jump directly; full-width digits/colons are supported.
 
-### Column Ruler, Wrap Modes, Visible Symbols & Bracket Matching
+### Persisted Line Bookmarks (`F2`)
 
-- **Column Ruler**: Displays a column scale (`0`, `10`, `20`, ...) along the top of the editor.
-- **Word Wrap Modes**: Choose **Wrap at Window Edge**, **Wrap at Specified Column** (customizable column width), or **No Wrap**.
-- **Visible Symbols**: Independently toggle **Line Ending Symbols (`↓`)** and **Whitespace & Tab Symbols (`·` / `□` / `→`)**.
-- **Matching Bracket Highlighting**: Placing the cursor on `()`, `[]`, `{}`, etc. highlights the matching bracket pair (toggleable in Settings).
-- All of these options are also searchable in the **Command Palette (`⌘K` / `Ctrl+K`)**.
+- Press **`⌘F2` / `Ctrl+F2`** (or right-click → **Bookmarks → Toggle Bookmark**) to pin markers in the line-number gutter.
+- Navigate with **`F2`** (Next Bookmark) and **`⇧F2`** (Previous Bookmark). Bookmarks persist per tab across restarts.
+
+### Smart Line Copy, Macros & Multi-Occurrence (`⌘D`)
+
+- **Smart Line Copy**: Press **`⌘C` / `Ctrl+C` with no text selected** to copy the entire current line (configurable trigger and trailing newline in Settings).
+- **Select Next Occurrence (`⌘D` / `Ctrl+D`)**: Repeatedly add the next matching occurrence to multi-cursor selection.
+- **Keyboard Macros (`⌘⇧M` / `F8`)**: Record typing, navigation, editing, toolbar, and context-menu operations (`⌘⇧M` to start/stop, `F8` to replay).
+
+### Column Ruler, Wrap Modes, Code Folding & Bracket Matching
+
+- **Column Ruler**, **Word Wrap Modes** (Window Edge / Fixed Column / No Wrap), **Visible Symbols** (`↓` EOL, whitespace/tab dots), **Code Folding** (**Fold All / Unfold All**), **Auto-Close Brackets**, and **Matching Bracket Highlighting** are all configurable in Settings and the Command Palette.
 
 ### Find & Replace (`⌘F` / `Ctrl+F`)
 
-- On Windows/Linux, `Ctrl+H` jumps directly to the Replace input. Navigate matches with `F3` / `⌘G` and `Shift+F3` / `⌘⇧G`.
-- **Search Options**:
-  - **Match Case**
-  - **Distinguish Full/Half-Width Alphanumerics**
-  - **Whole Word**
-  - **Regular Expression** (when OFF, `$1` etc. in replacements are kept literal)
-  - **In Selection**: Restrict find/replace to the selected range (click **Re-capture current editor selection** to refresh the range)
-
-### Go to Line (`⌘L` / `Ctrl+L`)
-
-- Open from **Edit → Go to Line...**, shortcut **`⌘L` / `Ctrl+L`**, Command Palette, or by **clicking the `Ln X, Col Y` readout in the Status Bar**.
-- Enter `120` (line number) or `120:15` (`line:col`); full-width digits and colons are also accepted.
+- On Windows/Linux, `Ctrl+H` jumps directly to Replace. Navigate matches with `F3` / `⌘G` and `Shift+F3` / `⌘⇧G`.
+- Supports **Match Case**, **Distinguish Full/Half-Width**, **Whole Word**, **Regular Expression**, and **In Selection** scope.
 
 ### Editor Right-Click Context Menu
 
 Right-click inside the editor to access:
 
-- **Standard Actions**: Undo, Redo, Cut, Copy, Paste, Delete, Select All
+- **Standard Actions**: Undo, Redo, Cut, Copy, Paste, Delete, Select All, **AI Edit Selection... (`⌘⇧E`)**
 - **Rectangular Selection**: Toggle box-selection mode (drag to select rectangular columns, `Esc` to exit), or hold `Alt` (`Option` on macOS) while dragging anytime.
 - **Advanced**:
-  - **Indent / Unindent (Tab & Space)**
-  - **Insert / Remove Comment** (uses syntax appropriate for the active language)
-  - **Convert Spaces to Tabs / Tabs to Spaces**
-  - **Convert to Lowercase / Uppercase**
-  - **Reverse Lines / Sort Lines (Ascending / Descending) / Remove Duplicate Lines**
-  - **Trim Leading / Trailing Whitespace**
-  - **Insert / Remove `>` Quote**
-  - **Insert Line Breaks at Wrap / Remove Line Breaks**
-- **Half / Full-Width**: `To Full-width`, `To Full-width (Katakana)`, `To Full-width (Alphanumeric)`, `To Half-width`, `To Half-width (Katakana)`, `To Half-width (Alphanumeric)`
-- **Bookmarks**:
-  - **Toggle Bookmark** (shows markers in the line-number gutter)
-  - **Next Bookmark / Previous Bookmark / Clear All Bookmarks**
+  - **Indent / Unindent (Tab & Space)**, **Insert / Remove Comment**, **Spaces ↔ Tabs**, **Lowercase / Uppercase**
+  - **Reverse Lines / Sort Lines (Ascending / Descending) / Remove Duplicate Lines / Remove Empty Lines**
+  - **Trim Leading / Trailing Whitespace**, **Insert / Remove `>` Quote**, **Insert / Remove Line Breaks**
+- **Half / Full-Width**: Convert full-width/half-width characters (All, Katakana, Alphanumeric)
+- **Bookmarks**: Toggle Bookmark, Next/Previous Bookmark, Clear All Bookmarks
 
 ---
 
@@ -146,85 +152,57 @@ Right-click inside the editor to access:
 
 ### How to Use
 
-- **New File with Encoding**: Open via **File → New File with Encoding...**, Command Palette, or the Status Bar encoding popover (**New File with Encoding...**) to choose both encoding and EOL for a new tab.
-- **Reopen from Disk**: Use **File → Reopen with Encoding...** or click the **Encoding pill (e.g. `UTF-8`) in the Status Bar → Reopen tab** to reload a saved file from disk using a specific encoding (prompts if you have unsaved edits).
-- **Change Save Encoding / EOL**: Click the **Encoding pill (`Save As` tab)** or **`LF` / `CRLF` pill** in the Status Bar, or run the command from the Command Palette. Saving warns you if characters cannot be represented in the target encoding (such as Shift_JIS).
-- **Defaults**: Configure **Default Encoding for New Files** and **Default Line Ending for New Files** under **Settings → Editor & Line Copy**.
+- Click the Status Bar **Encoding** or **`LF` / `CRLF`** pill (or use **File** menu / Command Palette) to create a new file with a specific encoding, reopen from disk with another encoding, or change the save encoding/EOL (with warnings if characters cannot be encoded in the target charset).
 
 ---
 
-## 6. Multi-Language Syntax Highlighting & Previews
+## 6. Multi-Language Syntax Highlighting, Data & SVG/HTML Previews
 
-- **100+ Languages**: Automatic syntax highlighting by file extension for Markdown, PHP, TypeScript/JavaScript, Python, Rust, Go, SQL, HTML, CSS, YAML, JSON, TOML, XML, Shell scripts, and more.
-- **Presets & Per-Token Colors**:
-  - Under **Settings → Syntax Colors**, pick from 7 presets (`Auto`, `GitHub`, `One Dark`, `Dracula`, `Nord`, `Monokai`, `Solarized`).
-  - Customize 10 individual token categories (keywords, strings, numbers/booleans, comments, functions, types, variables, operators, tags, properties).
+- **100+ Languages & Status Bar Override**: Automatic syntax highlighting by file extension and content, plus a **clickable Status Bar language pill** to override highlighting and preview mode per tab.
+- **Presets & Per-Token Colors**: Choose from 7 syntax presets (`Auto`, `GitHub`, `One Dark`, `Dracula`, `Nord`, `Monokai`, `Solarized`) and customize 10 token categories.
+- **Structured Data Tools (CSV / TSV / JSON / YAML / `.env`)**:
+  - **CSV / TSV Preview**: Interactive filterable and column-sortable table view with click-to-jump line sync and one-click **Copy MD Table** / **Copy CSV**.
+  - **JSON / YAML / `.env` Commands**: Run **Format JSON**, **Minify JSON**, **Sort JSON Keys**, **Convert JSON → YAML**, **Convert YAML → JSON**, and **Sort & Format `.env`** from the Command Palette.
 - **Specialized Live Previews**:
-  - **HTML (`.html` / `.htm`)**: **HTML Live Page Preview** in the right pane with **Full Width** and **Mobile (390px)** viewport toggles (plus dev-server prompts if an app entry HTML is detected).
-  - **SVG (`.svg`)**: Real-time **SVG Live Preview**.
-  - **Source Code**: Right-pane **Code Preview (Synced Line)** synchronized with the cursor line.
+  - **HTML (`.html` / `.htm`)**: **HTML Live Page Preview** with **Visual / Code toggle**, **Full Width / Mobile (390px)** viewport switcher, relative CSS/image resolution, and dev-server prompts when an app entry is detected.
+  - **SVG (`.svg`)**: Real-time **SVG Live Preview** with zoom (`Fit`, `50%`, `100%`, `200%`), background toggles (**Checker**, **Light**, **Dark**), **Copy SVG**, and **Copy PNG** rasterization.
+  - **Source Code**: Right-pane **Code Preview (Synced Line)** synchronized with the cursor line, plus clean **Print Source Code** / PDF export.
 
 ---
 
-## 7. Workspace, Session Restore & File Watching
+## 7. Workspace, Knowledge Graph, Grep Replace & Session Restore
 
-### Folder Explorer & Sidebar (Advanced Mode)
+### Sidebar Tabs (Advanced Mode)
 
-- **Files Tab**: Open a workspace folder (`⌘⇧O` / `Ctrl+Shift+O`) to browse a **collapsible hierarchical folder tree** (with **Collapse All** and auto-refresh), preview workspace images in the **Image Gallery Modal** (with Next/Prev and Markdown insertion), filter by filename, run **Full-Text Search** across the folder, or create a **New Note in Folder**. Switching folders while a dev server is running prompts with **Stop & Switch** / **Disconnect & Switch**.
+- **Files Tab**: Browse a collapsible hierarchical folder tree with **Git status badges** (`M`, `A`, `D`, `?`), **Quick Action bar** (Daily Note, Templates, Workspace Grep), right-click context menu (New File/Folder, Open to Side, Compare with Git HEAD, Rename, Duplicate, Delete, Copy Path, Reveal), **Workspace Image Gallery Modal**, **drag-and-drop onto editor** for relative links, **Close Workspace Folder** (with active dev-server guard), and inline search/replace.
 - **Outline Tab**: Lists Markdown headings (`#` to `######`); click any heading to jump to it.
-- **Snippets Tab**: Click to insert Markdown templates, tables, Mermaid diagrams, KaTeX blocks, or callouts at the cursor.
+- **Knowledge Tab**: Displays **Backlinks** (other notes in the workspace referencing the active note via `[[WikiLinks]]` or Markdown links) and a workspace-wide **`#Tag` Browser** (extracting Frontmatter & inline `#tags` to filter and jump to tagged lines).
+- **Snippets Tab**: Manage **Custom Snippets** (add, edit, delete, persisted locally) alongside built-in Markdown/diagram snippets.
 
-### Session Restore, Window Geometry, Draft Recovery & Auto-Save
+### Cross-Folder Regex Grep & Selective Replace (`⌘⇧G` / `Ctrl+Shift+G`)
 
-- Automatically saves and restores open tabs, unsaved drafts, cursor positions, window position/size, and the open workspace folder across restarts (configurable in Settings).
-- **Auto-Save**: Enable **Auto-save modified files to disk** under **Settings → General & View** to save file-backed tabs automatically after 1.5 seconds of inactivity (pauses safely on external file conflicts).
+- Open from the Sidebar Quick Bar, Command Palette, or `⌘⇧G` / `Ctrl+Shift+G`.
+- Search across the workspace with **Match Case** and **Regex** (`$1` capture support), inspect file-grouped matches, click any match to open the file at that line, and check/uncheck individual files before applying batch replacement (open tabs sync automatically).
 
-### External File Change Detection
+### Project-Scoped Session Restore, Git HEAD Diff & File Watching
 
-- Watches open files on disk for modifications from external editors or AI CLIs.
-- Clean tabs reload automatically; if you have unsaved edits or the file was deleted/moved, a banner lets you **Reload from Disk**, **Compare Diff**, **Keep Mine**, **Save to File Again**, or **Keep as Unsaved Draft**.
-
-### Snapshots & History Diff
-
-- Use the **History** tab in the right Options drawer to save labeled checkpoints and inspect line-by-line diffs against snapshots or the saved version on disk, or restore an earlier snapshot.
+- **Per-Project Session Restore**: Remembers open tabs, unsaved drafts, cursor & scroll positions, folded lines, bookmarks, language overrides, recent files/folders (synced to **File → Open Recent**), and window geometry per workspace folder.
+- **Git Integration**: Shows changed-file badges in the Sidebar and lets you **Compare Diff with Git HEAD** from the Tab Bar, Sidebar context menu, or Command Palette.
+- **External File Change Detection**: Watches open files on disk—auto-reloading clean tabs or displaying a conflict banner (**Reload**, **Compare Diff**, **Keep Mine**, **Save Again**) when unsaved edits exist.
+- **Snapshots & History Diff**: Save labeled checkpoints in the **History** Inspector tab and compare line-by-line diffs or restore earlier snapshots.
 
 ---
 
 ## 8. Dev Server Integration & Dual Browser Preview
 
-When you open a project folder (`⌘⇧O` / `Ctrl+Shift+O`) or project file, Onigiri Editor automatically detects the stack and provides dev server controls in the sidebar and right pane.
+When you open a project folder (`⌘⇧O` / `Ctrl+Shift+O`) or project file, Onigiri Editor automatically detects Vite, Next.js, Astro, Nuxt (including serving built `dist/` folders), Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, MkDocs, Hugo, Docker Compose, or static HTML projects, runs pre-flight environment diagnostics, and provides:
 
-### Auto-Detected Stacks
-
-- **JavaScript / Frontend**: Vite, Next.js, Astro, Nuxt (including serving built `dist/` folders over local HTTP)
-- **PHP**: Laravel, WordPress, generic PHP projects
-- **Python**: Django, FastAPI, Flask, Streamlit
-- **Static / Docs / Containers**: MkDocs, Hugo, Docker Compose, Static HTML
-
-### Pre-Flight Environment Check & Guided Setup
-
-- Diagnoses required runtimes (Node.js, PHP, Composer, Python, Docker, etc.) and configuration files (`.env`, `wp-config-sample.php`, etc.) before launching.
-- When prerequisites are missing, guided setup cards provide:
-  - **Blue action button**: Runs setup automatically inside Onigiri Editor
-  - **Run in Terminal**: Opens your OS Terminal / Command Prompt for interactive installation
-  - **Download Page**: Opens the official download page
-- Click **Re-check Environment** once installation finishes (from `v1.0.4` onward, Windows reads Registry `PATH` live so newly installed tools are typically detected without restarting the app).
-
-### Pattern 1: Built-in Web Browser
-
-1. Enable **Enable built-in Web Browser switcher in right pane** under **Settings → AI & Browser**.
-2. Switch the right pane to **Web Browser** or click **Open Built-in Browser** on the project card.
-3. Includes Back, Forward, Reload, URL bar, and **Open in External Browser** (powered by WKWebView on macOS, Edge WebView2 on Windows, and WebKitGTK on Linux).
-
-### Pattern 2: External Browser Live Preview (with LAN Sharing)
-
-1. Click **External Browser** in the preview header, choose **View → Live Preview in External Browser**, or run it from the Command Palette.
-2. Starts a local HTTP server (`127.0.0.1`, configurable port) serving an auto-reloading live preview in Chrome, Safari, Edge, or Firefox.
-3. Enable **Allow access from other devices on the local network (LAN)** in Settings to bind to `0.0.0.0` and copy the **LAN URL** to preview on phones or other PCs on the same Wi-Fi/LAN.
+- **Pattern 1 (Built-in Web Browser)**: Multi-WebView right-pane browser (`Settings → AI & Browser`) with Back/Forward/Reload/URL bar and **Open in External Browser**.
+- **Pattern 2 (External Browser Live Preview + LAN)**: Local HTTP live-reload server (`127.0.0.1`, or `0.0.0.0` with **LAN sharing** to preview on phones/other PCs on the same Wi-Fi).
 
 ---
 
-## 9. AI Chat, Connection Assistant & Formatting Tools
+## 9. AI Chat, Inline Edit, Document Review & Formatting Tools
 
 Click the top-right **Options / AI Chat** icon (robot icon) to open the right drawer.
 
@@ -232,51 +210,35 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 
 | Category | Providers | Highlights |
 | :--- | :--- | :--- |
-| **Subscription CLIs** | **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI** (`agy`) | Local CLI execution, model selector, plus **Setup in Terminal** & **Sign in via Terminal** assistance |
+| **Subscription CLIs** | **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI** (`agy`) | Local CLI execution, model selector, live streaming progress + Stop, plus **Setup / Sign in via Terminal** |
 | **Cloud APIs** | **OpenAI API**, **Anthropic API**, **Gemini API** | Direct connection with your API key, model name, and custom Base URL |
-| **Local AI** | **Ollama**, **LM Studio** | Offline private models with Ollama launcher/model-pull helpers and LM Studio server instructions |
+| **Local AI** | **Ollama**, **LM Studio** | Offline private models with Ollama launcher/model-pull helpers |
 | **Custom CLI** | Any custom command | Integrate custom CLI tools via `{prompt}` placeholder or stdin |
 
-### Document & Folder Context with Diff Preview
+### Per-Tab Chat Threads, Note Export & Inline Selection Edit (`⌘⇧E`)
 
-- **Include current document context**: Share the active file with AI for Q&A, proofreading, summarizing, polishing, or translating (with one-click quick prompts). CLI runs stream live progress updates and provide a **Stop** button to cancel long tasks cleanly.
-- **AI Folder Access (Advanced Mode)** (switchable directly from the AI Chat **Folder Access** pill or **Settings → AI & Browser**):
-  - **Disabled**: Active document only
-  - **Read-Only**: Reference files inside the open folder
-  - **Read + Write (Apply after approval)**: Inspect AI file proposals in a **line-by-line Diff Preview Modal** before writing to the folder
-  - **CLI Direct Workspace Write**: Allow Codex / Claude / Gemini CLI to modify workspace files directly
-- AI replies can be inserted at the cursor (**Insert**), previewed and applied via **Replace Doc** (with optional pre-apply snapshot), or copied.
+- **Per-Tab vs. Shared Threads**: Switch between keeping an isolated AI conversation per active tab or using a shared workspace thread.
+- **Save Chat as `.md` Note**: Export the current AI conversation directly into a new Markdown tab for archiving or further editing.
+- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets, with **Diff Preview** confirmation before applying.
+- **AI Folder Access (Advanced Mode)**: Switch between **Disabled**, **Read-Only**, **Read + Write (Diff Preview approval)**, and **CLI Direct Workspace Write**.
 
-### Formatter & Stats (Token Estimates)
+### Proofread & Document Review, Formatter & Stats
 
-- **Formatter Tab**:
-  - **AI Output Cleanup & Formatter**: Removes zero-width characters, trims trailing spaces, collapses excessive blank lines, aligns GFM table columns, normalizes bullets (`*`/`+` → `-`), fixes heading spacing, and optionally normalizes smart quotes.
-  - **Paste Clipboard HTML as Markdown** (auto-conversion on paste can be toggled in Settings).
-  - **Copy as Rich Text**: Paste cleanly into Notion, Google Docs, or Slack.
-- **Stats Tab**: Shows characters (with/without spaces), words, lines, paragraphs, reading time, **Estimated AI Tokens**, heading/code/table/link counts, and writing goal progress.
+- **Review Tab**: Run **Rule Checks** (broken local/anchor links, skipped heading levels, mixed writing style, repeated words, trailing spaces) or **Run AI Review**, click any finding to jump to its line, or click **Apply Fix**.
+- **Formatter Tab**: **AI Output Cleanup & Formatter**, **Paste Clipboard HTML as Markdown**, **Copy as Rich Text** (Notion / Google Docs / Slack ready).
+- **Stats Tab**: Characters, words, lines, paragraphs, reading time, **Estimated AI Tokens**, element counts, and writing goal progress.
 
 ---
 
 ## 10. Export, Themes & Settings Reference
 
-### Export & Copy Actions
-
-- **Export HTML** (standalone styled HTML document)
-- **Print / Export PDF**
-- **Export Plain Text**
-- **Copy Markdown / Copy HTML / Copy Rich Text**
-
-### Themes & Preview Styling
-
-- **Color Themes**: `Light`, `Dark`, `Sepia`, `Midnight`
-- **Preview Styles**: `Editorial`, `GitHub`, `Notion`, `Academic` + **Custom Preview CSS** targeting `.markdown-body`
-
-### Settings Tabs (`⌘,` / `Ctrl+,`)
-
-- **General & View**: UI Language, Color Theme, Preview Style, Font Size, Line Height, Preview Max Width, Editor Font (`Monospace` / `Sans-serif`), Header Bar / Format Toolbar / Status Bar visibility toggles, Session Restore, Auto-Save, Writing Goal, Custom Preview CSS
-- **Editor & Line Copy**: Line Numbers, Word Wrap Mode & Column Width, Column Ruler, Line Ending & Whitespace Symbols, Matching Brackets, Default New File Encoding & EOL, Active Line/Block Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, Smart Line Copy options
-- **Syntax Colors**: 7 syntax presets + 10 per-token color pickers
-- **AI & Browser**: AI Folder Access mode, Built-in Web Browser toggle & default URL, External Browser Live Preview toggle, local port, and LAN sharing
+- **Exports**: **Export HTML**, **Print / Export PDF** (Markdown preview or Source Code), **Export Plain Text**, **Copy Markdown / HTML / Rich Text**.
+- **Themes & Preview Styles**: `Light`, `Dark`, `Sepia`, `Midnight` + `Editorial`, `GitHub`, `Notion`, `Academic` + **Custom Preview CSS**.
+- **Settings Tabs (`⌘,` / `Ctrl+,`)**:
+  - **General & View**: Language, Theme, Preview Style, Font Size, Line Height, Preview Width, Editor Font, Bar visibility toggles, Focus Mode, Session Restore, Auto-Save, Writing Goal, **Daily Notes Folder**, **Image Asset Folder**, Custom CSS.
+  - **Editor & Line Copy**: Line Numbers, Word Wrap & Column Width, Column Ruler, Visible Symbols, Matching Brackets, Auto-Close Brackets, Default Encoding/EOL, Active Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, Smart Line Copy.
+  - **Syntax Colors**: 7 presets + 10 per-token color pickers.
+  - **AI & Browser**: AI Folder Access, Built-in Browser toggle & default URL, External Live Preview toggle, port, and LAN sharing.
 
 ---
 
@@ -288,15 +250,23 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 | :--- | :--- | :--- |
 | New File | `⌘ + N` | `Ctrl + N` |
 | Open File | `⌘ + O` | `Ctrl + O` |
+| Quick Open (Files / `@Headings`) | `⌘ + P` | `Ctrl + P` |
 | Open Folder | `⌘ + ⇧ + O` | `Ctrl + Shift + O` |
 | Save / Save As | `⌘ + S` / `⌘ + ⇧ + S` | `Ctrl + S` / `Ctrl + Shift + S` |
 | Close Tab | `⌘ + W` | `Ctrl + W` |
 | Open Settings | `⌘ + ,` | `Ctrl + ,` |
-| Command Palette | `⌘ + K` / `⌘ + P` | `Ctrl + K` / `Ctrl + P` |
-| Find & Replace | `⌘ + F` | `Ctrl + F` (Replace focus: `Ctrl + H`) |
-| Find Next / Previous | `⌘ + G` / `⌘ + ⇧ + G` / `F3` | `Ctrl + G` / `Ctrl + Shift + G` / `F3` |
+| Command Palette | `⌘ + K` | `Ctrl + K` |
+| Find & Replace (Active File) | `⌘ + F` | `Ctrl + F` (Replace focus: `Ctrl + H`) |
+| Find Next / Previous | `⌘ + G` / `F3` | `Ctrl + G` / `F3` |
+| Cross-Folder Regex Grep & Replace | `⌘ + ⇧ + G` | `Ctrl + Shift + G` |
+| Inline AI Edit on Selection | `⌘ + ⇧ + E` | `Ctrl + Shift + E` |
+| Select Next Occurrence | `⌘ + D` | `Ctrl + D` |
 | Go to Line | `⌘ + L` | `Ctrl + L` |
+| Toggle Line Bookmark | `⌘ + F2` | `Ctrl + F2` |
+| Next / Previous Bookmark | `F2` / `⇧ + F2` | `F2` / `Shift + F2` |
+| Record Macro / Play Macro | `⌘ + ⇧ + M` / `F8` | `Ctrl + Shift + M` / `F8` |
 | Smart Line Copy (no selection) | `⌘ + C` | `Ctrl + C` |
+| Rectangular Selection | `Option + Drag` | `Alt + Drag` |
 | Bold / Italic | `⌘ + B` / `⌘ + I` | `Ctrl + B` / `Ctrl + I` |
 | Zoom In / Zoom Out / Reset (`25%`–`400%`) | `⌘ + +` / `⌘ + -` / `⌘ + 0` | `Ctrl + +` / `Ctrl + -` / `Ctrl + 0` |
 | Switch Mode (Simple/Basic/Advanced) | `⌘ + \` | `Ctrl + \` |
@@ -306,8 +276,8 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 
 ### Native Menu Bar Structure
 
-- **File**: New File, New File with Encoding..., Open File..., Reopen with Encoding..., Open Folder..., Save, Save As..., Export HTML..., Print / Export PDF..., Close Tab *(on Windows/Linux, Settings and Quit also appear in File)*
-- **Edit**: Undo, Redo, Cut, Copy, Paste, Select All, Find & Replace, Go to Line...
+- **File**: New File, New File with Encoding..., Open File..., Quick Open..., Reopen with Encoding..., Open Folder..., Open Recent (Files & Folders), Save, Save As..., Export HTML..., Print / Export PDF..., Close Tab *(on Windows/Linux, Settings and Quit also appear in File)*
+- **Edit**: Undo, Redo, Cut, Copy, Paste, Select All, Find & Replace, Go to Line..., Macro Record/Play
 - **View**: Simple Mode, Basic Mode, Advanced Mode, Show Header Bar, Show Format Toolbar, Command Palette, Options / AI Chat, Live Preview in External Browser, Zen Mode
 - **Window**: Minimize, Close Window
 - **Help**: **Online Manual**, About Onigiri Editor *(on macOS, Settings is in the **Onigiri Editor** app menu)*

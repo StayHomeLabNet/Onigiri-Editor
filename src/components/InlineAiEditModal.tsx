@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Sparkles, Square, X } from 'lucide-react';
-import type { AiProviderConfig, AiProviderId } from '../types';
+import { ArrowDown, ArrowUp, BookmarkPlus, Loader2, RotateCcw, SlidersHorizontal, Sparkles, Square, Trash2, X } from 'lucide-react';
+import type { AiProviderConfig, AiProviderId, InlineAiPresetItem } from '../types';
 import type { Translations } from '../i18n/types';
 import { cancelAiChat, sendAiChat } from '../utils/platform';
+
+const INLINE_AI_PRESETS_KEY = 'onigiri-markdown.inline-ai-presets.v1';
 
 const DEFAULT_BASE_URLS: Partial<Record<AiProviderId, string>> = {
   'openai-api': 'https://api.openai.com/v1',
@@ -31,6 +33,37 @@ function stripSingleMarkdownFence(output: string, original: string): string {
   return match[1];
 }
 
+function buildBuiltinPresets(t: Translations): InlineAiPresetItem[] {
+  const p = t.inlineAiModal.presets;
+  return [
+    { id: 'builtin-refactor', label: p.refactorLabel, prompt: p.refactorPrompt, isBuiltin: true },
+    { id: 'builtin-comments', label: p.commentsLabel, prompt: p.commentsPrompt, isBuiltin: true },
+    { id: 'builtin-fix', label: p.fixLabel, prompt: p.fixPrompt, isBuiltin: true },
+    { id: 'builtin-concise', label: p.conciseLabel, prompt: p.concisePrompt, isBuiltin: true },
+    { id: 'builtin-polite', label: p.politeLabel, prompt: p.politePrompt, isBuiltin: true },
+    { id: 'builtin-to-ja', label: p.toJaLabel, prompt: p.toJaPrompt, isBuiltin: true },
+    { id: 'builtin-to-en', label: p.toEnLabel, prompt: p.toEnPrompt, isBuiltin: true },
+  ];
+}
+
+function loadSavedPresets(t: Translations): InlineAiPresetItem[] {
+  const defaults = buildBuiltinPresets(t);
+  if (typeof localStorage === 'undefined') return defaults;
+  try {
+    const raw = localStorage.getItem(INLINE_AI_PRESETS_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return defaults;
+    const valid = parsed.filter(
+      (x): x is InlineAiPresetItem =>
+        Boolean(x && typeof x.id === 'string' && typeof x.label === 'string' && typeof x.prompt === 'string')
+    );
+    return valid.length > 0 ? valid : defaults;
+  } catch {
+    return defaults;
+  }
+}
+
 interface InlineAiEditModalProps {
   t: Translations;
   open: boolean;
@@ -57,14 +90,27 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
   const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [presets, setPresets] = useState<InlineAiPresetItem[]>(() => loadSavedPresets(t));
+  const [managingPresets, setManagingPresets] = useState(false);
+  const [addingPreset, setAddingPreset] = useState(false);
+  const [newPresetLabel, setNewPresetLabel] = useState('');
   const requestIdRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(INLINE_AI_PRESETS_KEY, JSON.stringify(presets));
+    } catch {
+      // ignore
+    }
+  }, [presets]);
+
+  useEffect(() => {
     if (!open) return;
     setErrorMsg(null);
     setBusy(false);
+    setAddingPreset(false);
     cancelledRef.current = false;
     requestIdRef.current = null;
     const timer = window.setTimeout(() => {
@@ -93,20 +139,48 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
       .replace('{chars}', String(chars));
   }, [selectedText, t.inlineAiModal.selectionSummary]);
 
-  const presets = useMemo(
-    () => [
-      { label: t.inlineAiModal.presets.refactorLabel, prompt: t.inlineAiModal.presets.refactorPrompt },
-      { label: t.inlineAiModal.presets.commentsLabel, prompt: t.inlineAiModal.presets.commentsPrompt },
-      { label: t.inlineAiModal.presets.fixLabel, prompt: t.inlineAiModal.presets.fixPrompt },
-      { label: t.inlineAiModal.presets.conciseLabel, prompt: t.inlineAiModal.presets.concisePrompt },
-      { label: t.inlineAiModal.presets.politeLabel, prompt: t.inlineAiModal.presets.politePrompt },
-      { label: t.inlineAiModal.presets.toJaLabel, prompt: t.inlineAiModal.presets.toJaPrompt },
-      { label: t.inlineAiModal.presets.toEnLabel, prompt: t.inlineAiModal.presets.toEnPrompt },
-    ],
-    [t.inlineAiModal.presets]
-  );
-
   if (!open) return null;
+
+  const movePreset = (index: number, delta: -1 | 1) => {
+    const nextIdx = index + delta;
+    if (nextIdx < 0 || nextIdx >= presets.length) return;
+    setPresets((prev) => {
+      const next = [...prev];
+      const [item] = next.splice(index, 1);
+      next.splice(nextIdx, 0, item);
+      return next;
+    });
+  };
+
+  const deletePreset = (id: string) => {
+    setPresets((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const handleSaveNewPreset = () => {
+    const label = newPresetLabel.trim();
+    const prompt = instruction.trim();
+    if (!label || !prompt) return;
+    setPresets((prev) => [
+      {
+        id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        label,
+        prompt,
+        isBuiltin: false,
+      },
+      ...prev,
+    ]);
+    setNewPresetLabel('');
+    setAddingPreset(false);
+  };
+
+  const handleResetPresets = () => {
+    setPresets(buildBuiltinPresets(t));
+    try {
+      localStorage.removeItem(INLINE_AI_PRESETS_KEY);
+    } catch {
+      // ignore
+    }
+  };
 
   const handleRun = async (overrideInstruction?: string) => {
     const trimmed = (overrideInstruction ?? instruction).trim();
@@ -198,19 +272,117 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
 
           <pre className="inline-ai-selection-preview">{selectedText}</pre>
 
-          <div className="inline-ai-presets">
-            {presets.map((preset) => (
+          <div className="inline-ai-preset-header">
+            <button
+              type="button"
+              className="mini-pill-btn"
+              disabled={busy || !instruction.trim()}
+              onClick={() => setAddingPreset((v) => !v)}
+            >
+              <BookmarkPlus size={12} />
+              <span>{t.inlineAiModal.savePresetBtn}</span>
+            </button>
+            <div className="inline-ai-preset-header-right">
+              {managingPresets && (
+                <button
+                  type="button"
+                  className="mini-pill-btn"
+                  onClick={handleResetPresets}
+                >
+                  <RotateCcw size={11} />
+                  <span>{t.inlineAiModal.resetPresetsBtn}</span>
+                </button>
+              )}
               <button
-                key={preset.label}
                 type="button"
-                className="inline-ai-preset-btn"
-                disabled={busy}
-                onClick={() => setInstruction(preset.prompt)}
+                className={`mini-pill-btn ${managingPresets ? 'is-active' : ''}`}
+                onClick={() => setManagingPresets((v) => !v)}
               >
-                {preset.label}
+                <SlidersHorizontal size={11} />
+                <span>
+                  {managingPresets
+                    ? t.inlineAiModal.doneManageBtn
+                    : t.inlineAiModal.managePresetsBtn}
+                </span>
               </button>
-            ))}
+            </div>
           </div>
+
+          {addingPreset && (
+            <div className="inline-ai-add-preset-row">
+              <input
+                type="text"
+                className="inline-ai-preset-name-input"
+                value={newPresetLabel}
+                onChange={(e) => setNewPresetLabel(e.target.value)}
+                placeholder={t.inlineAiModal.presetLabelPlaceholder}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveNewPreset();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="mini-pill-btn is-active"
+                disabled={!newPresetLabel.trim() || !instruction.trim()}
+                onClick={handleSaveNewPreset}
+              >
+                {t.actions.save}
+              </button>
+            </div>
+          )}
+
+          {managingPresets ? (
+            <div className="inline-ai-manage-list">
+              {presets.map((preset, idx) => (
+                <div key={preset.id} className="inline-ai-manage-item">
+                  <span className="inline-ai-manage-label">{preset.label}</span>
+                  <div className="inline-ai-manage-actions">
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      disabled={idx === 0}
+                      onClick={() => movePreset(idx, -1)}
+                    >
+                      <ArrowUp size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      disabled={idx === presets.length - 1}
+                      onClick={() => movePreset(idx, 1)}
+                    >
+                      <ArrowDown size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="icon-btn is-danger"
+                      onClick={() => deletePreset(preset.id)}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="inline-ai-presets">
+              {presets.map((preset) => (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className={`inline-ai-preset-btn ${!preset.isBuiltin ? 'is-custom' : ''}`}
+                  disabled={busy}
+                  onClick={() => setInstruction(preset.prompt)}
+                  title={preset.prompt}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <textarea
             ref={inputRef}

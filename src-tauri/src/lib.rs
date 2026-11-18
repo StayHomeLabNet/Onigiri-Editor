@@ -37,6 +37,70 @@ pub struct SearchMatch {
     snippet: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGrepLineMatch {
+    line: usize,
+    col: usize,
+    match_text: String,
+    snippet: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGrepFile {
+    path: String,
+    relative_path: String,
+    name: String,
+    total_matches: usize,
+    matches: Vec<WorkspaceGrepLineMatch>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGrepResult {
+    files: Vec<WorkspaceGrepFile>,
+    total_files: usize,
+    total_matches: usize,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceNoteLinkRef {
+    target: String,
+    kind: String,
+    line: usize,
+    snippet: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceNoteTagRef {
+    tag: String,
+    line: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceNoteIndexEntry {
+    path: String,
+    relative_path: String,
+    name: String,
+    title: String,
+    tags: Vec<WorkspaceNoteTagRef>,
+    outgoing_links: Vec<WorkspaceNoteLinkRef>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchedUrlContent {
+    final_url: String,
+    status: u16,
+    content_type: String,
+    html: String,
+}
+
 fn is_supported_text_file(path: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
         return false;
@@ -92,6 +156,8 @@ fn is_supported_text_file(path: &Path) -> bool {
             | "ini"
             | "conf"
             | "env"
+            | "csv"
+            | "tsv"
     )
 }
 
@@ -592,6 +658,489 @@ async fn search_workspace(root_path: String, query: String) -> Result<Vec<Search
     .map_err(|e| format!("Workspace search task failed: {}", e))?
 }
 
+fn search_workspace_advanced_impl(
+    root_path: &str,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+    max_files: usize,
+) -> Result<WorkspaceGrepResult, String> {
+    if query.trim().is_empty() {
+        return Ok(WorkspaceGrepResult {
+            files: Vec::new(),
+            total_files: 0,
+            total_matches: 0,
+            truncated: false,
+        });
+    }
+    let pattern = if use_regex {
+        query.to_string()
+    } else {
+        regex::escape(query)
+    };
+    let re = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| format!("Invalid regular expression: {}", e))?;
+
+    let root = PathBuf::from(root_path);
+    if !root.exists() || !root.is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+
+    let walker = WalkDir::new(&root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() {
+                !should_skip_dir(&name)
+            } else {
+                is_supported_text_file(e.path())
+            }
+        });
+
+    let mut files = Vec::new();
+    let mut total_matches = 0usize;
+    let mut truncated = false;
+    let file_limit = max_files.clamp(1, 500);
+
+    for entry in walker.flatten() {
+        if entry.file_type().is_dir() || !is_supported_text_file(entry.path()) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.len() > 2 * 1024 * 1024 {
+            continue;
+        }
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(decoded) = decode_bytes_with_encoding(&bytes, None) else {
+            continue;
+        };
+
+        let mut file_matches = Vec::new();
+        let mut file_match_count = 0usize;
+        for (idx, line) in decoded.content.lines().enumerate() {
+            let mut found_on_line = re.find_iter(line).peekable();
+            if found_on_line.peek().is_none() {
+                continue;
+            }
+            let first = found_on_line.next().unwrap();
+            let line_count = 1 + found_on_line.count();
+            file_match_count += line_count;
+
+            if file_matches.len() < 40 {
+                let col = line[..first.start()].chars().count() + 1;
+                let match_text: String = first.as_str().chars().take(80).collect();
+                let snippet: String = line.trim().chars().take(160).collect();
+                file_matches.push(WorkspaceGrepLineMatch {
+                    line: idx + 1,
+                    col,
+                    match_text,
+                    snippet,
+                });
+            }
+        }
+
+        if file_match_count > 0 {
+            if files.len() >= file_limit {
+                truncated = true;
+                break;
+            }
+            let rel = entry
+                .path()
+                .strip_prefix(&root)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let path_str = entry.path().to_string_lossy().to_string();
+            total_matches += file_match_count;
+            files.push(WorkspaceGrepFile {
+                path: path_str,
+                relative_path: rel,
+                name,
+                total_matches: file_match_count,
+                matches: file_matches,
+            });
+        }
+    }
+
+    let total_files = files.len();
+    Ok(WorkspaceGrepResult {
+        files,
+        total_files,
+        total_matches,
+        truncated,
+    })
+}
+
+#[tauri::command]
+async fn search_workspace_advanced(
+    root_path: String,
+    query: String,
+    case_sensitive: bool,
+    use_regex: bool,
+) -> Result<WorkspaceGrepResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        search_workspace_advanced_impl(&root_path, &query, case_sensitive, use_regex, 250)
+    })
+    .await
+    .map_err(|e| format!("Workspace grep task failed: {}", e))?
+}
+
+fn is_markdown_note_file(path: &Path) -> bool {
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "markdown" | "mdown" | "mdx"
+    )
+}
+
+fn strip_inline_code_segments(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut in_code = false;
+    for ch in line.chars() {
+        if ch == '`' {
+            in_code = !in_code;
+            out.push(' ');
+        } else if in_code {
+            out.push(' ');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn is_hex_color_like(tag: &str) -> bool {
+    matches!(tag.len(), 3 | 4 | 6 | 8)
+        && tag.chars().all(|c| c.is_ascii_hexdigit())
+        && tag.chars().any(|c| c.is_ascii_digit())
+}
+
+fn clean_yaml_scalar(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string()
+}
+
+fn index_workspace_notes_impl(root_path: &str) -> Result<Vec<WorkspaceNoteIndexEntry>, String> {
+    let root = PathBuf::from(root_path);
+    if !root.exists() || !root.is_dir() {
+        return Err("Workspace path is not a directory".to_string());
+    }
+
+    let tag_re = regex::Regex::new(
+        r"(?:^|[\s(\[「（])#([A-Za-z\u{3040}-\u{30ff}\u{4e00}-\u{9fff}][\w\-/\u{3040}-\u{30ff}\u{4e00}-\u{9fff}]*)"
+    )
+    .unwrap();
+    let wiki_re = regex::Regex::new(r"\[\[([^\]|#\n]+?)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]").unwrap();
+    let md_link_re = regex::Regex::new(r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)").unwrap();
+
+    let walker = WalkDir::new(&root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            let name = e.file_name().to_string_lossy();
+            if e.file_type().is_dir() {
+                !should_skip_dir(&name)
+            } else {
+                is_markdown_note_file(e.path())
+            }
+        });
+
+    let mut notes = Vec::new();
+    for entry in walker.flatten() {
+        if entry.file_type().is_dir() || !is_markdown_note_file(entry.path()) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.len() > 2 * 1024 * 1024 {
+            continue;
+        }
+        let Ok(bytes) = fs::read(entry.path()) else {
+            continue;
+        };
+        let Ok(decoded) = decode_bytes_with_encoding(&bytes, None) else {
+            continue;
+        };
+
+        let normalized = decoded.content.replace("\r\n", "\n");
+        let lines: Vec<&str> = normalized.lines().collect();
+        let mut line_idx = 0usize;
+        let mut fm_title: Option<String> = None;
+        let mut h1_title: Option<String> = None;
+        let mut tags: Vec<WorkspaceNoteTagRef> = Vec::new();
+        let mut seen_tags: HashSet<String> = HashSet::new();
+        let mut outgoing_links: Vec<WorkspaceNoteLinkRef> = Vec::new();
+
+        // Parse optional YAML frontmatter at top of file
+        if lines.first().map(|l| l.trim()) == Some("---") {
+            let mut end_idx = None;
+            for (i, line) in lines.iter().enumerate().skip(1) {
+                if line.trim() == "---" {
+                    end_idx = Some(i);
+                    break;
+                }
+            }
+            if let Some(end) = end_idx {
+                let mut in_tags_list = false;
+                for (offset, raw_line) in lines[1..end].iter().enumerate() {
+                    let line_no = offset + 2;
+                    let trimmed = raw_line.trim();
+                    if let Some(rest) = trimmed.strip_prefix("title:") {
+                        let cleaned = clean_yaml_scalar(rest);
+                        if !cleaned.is_empty() {
+                            fm_title = Some(cleaned);
+                        }
+                        in_tags_list = false;
+                    } else if let Some(rest) = trimmed.strip_prefix("tags:") {
+                        let rest_trim = rest.trim();
+                        if rest_trim.is_empty() {
+                            in_tags_list = true;
+                        } else {
+                            in_tags_list = false;
+                            let inner = rest_trim.trim_start_matches('[').trim_end_matches(']');
+                            for item in inner.split(',') {
+                                let t = clean_yaml_scalar(item).trim_start_matches('#').to_string();
+                                if !t.is_empty() && seen_tags.insert(t.to_lowercase()) {
+                                    tags.push(WorkspaceNoteTagRef { tag: t, line: line_no });
+                                }
+                            }
+                        }
+                    } else if in_tags_list {
+                        if let Some(item) = trimmed.strip_prefix('-') {
+                            let t = clean_yaml_scalar(item).trim_start_matches('#').to_string();
+                            if !t.is_empty() && seen_tags.insert(t.to_lowercase()) {
+                                tags.push(WorkspaceNoteTagRef { tag: t, line: line_no });
+                            }
+                        } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                            in_tags_list = false;
+                        }
+                    }
+                }
+                line_idx = end + 1;
+            }
+        }
+
+        let mut in_fence = false;
+        let mut fence_char = '\0';
+        for idx in line_idx..lines.len() {
+            let line = lines[idx];
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                let ch = trimmed.chars().next().unwrap_or('`');
+                if !in_fence {
+                    in_fence = true;
+                    fence_char = ch;
+                    continue;
+                } else if ch == fence_char {
+                    in_fence = false;
+                    continue;
+                }
+            }
+            if in_fence {
+                continue;
+            }
+
+            let line_no = idx + 1;
+            if h1_title.is_none() {
+                if let Some(h1) = trimmed.strip_prefix("# ") {
+                    let t = h1.trim();
+                    if !t.is_empty() {
+                        h1_title = Some(t.to_string());
+                    }
+                }
+            }
+
+            let scan_line = strip_inline_code_segments(line);
+            for cap in tag_re.captures_iter(&scan_line) {
+                if let Some(m) = cap.get(1) {
+                    let t = m.as_str().trim_end_matches('/').to_string();
+                    if !t.is_empty() && !is_hex_color_like(&t) && seen_tags.insert(t.to_lowercase()) {
+                        tags.push(WorkspaceNoteTagRef { tag: t, line: line_no });
+                    }
+                }
+            }
+
+            let snippet: String = line.trim().chars().take(140).collect();
+            for cap in wiki_re.captures_iter(&scan_line) {
+                if let Some(m) = cap.get(1) {
+                    let target = m.as_str().trim();
+                    if !target.is_empty() {
+                        outgoing_links.push(WorkspaceNoteLinkRef {
+                            target: target.to_string(),
+                            kind: "wiki".to_string(),
+                            line: line_no,
+                            snippet: snippet.clone(),
+                        });
+                    }
+                }
+            }
+
+            for cap in md_link_re.captures_iter(&scan_line) {
+                if let Some(m) = cap.get(1) {
+                    let raw_target = m.as_str().trim();
+                    let lower = raw_target.to_ascii_lowercase();
+                    if raw_target.is_empty()
+                        || raw_target.starts_with('#')
+                        || lower.starts_with("http://")
+                        || lower.starts_with("https://")
+                        || lower.starts_with("mailto:")
+                        || lower.starts_with("data:")
+                    {
+                        continue;
+                    }
+                    let clean_target = raw_target
+                        .split('#')
+                        .next()
+                        .unwrap_or(raw_target)
+                        .split('?')
+                        .next()
+                        .unwrap_or(raw_target)
+                        .trim();
+                    if !clean_target.is_empty() {
+                        outgoing_links.push(WorkspaceNoteLinkRef {
+                            target: clean_target.to_string(),
+                            kind: "md".to_string(),
+                            line: line_no,
+                            snippet: snippet.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        let rel = entry
+            .path()
+            .strip_prefix(&root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let stem = entry
+            .path()
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&name)
+            .to_string();
+
+        notes.push(WorkspaceNoteIndexEntry {
+            path: entry.path().to_string_lossy().to_string(),
+            relative_path: rel,
+            name,
+            title: fm_title.or(h1_title).unwrap_or(stem),
+            tags,
+            outgoing_links,
+        });
+
+        if notes.len() >= 1500 {
+            break;
+        }
+    }
+
+    notes.sort_by(|a, b| a.relative_path.to_lowercase().cmp(&b.relative_path.to_lowercase()));
+    Ok(notes)
+}
+
+#[tauri::command]
+async fn index_workspace_notes(root_path: String) -> Result<Vec<WorkspaceNoteIndexEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || index_workspace_notes_impl(&root_path))
+        .await
+        .map_err(|e| format!("Workspace note indexing task failed: {}", e))?
+}
+
+#[tauri::command]
+async fn fetch_url_content(url: String) -> Result<FetchedUrlContent, String> {
+    let trimmed = url.trim();
+    let parsed = url::Url::parse(trimmed).map_err(|e| format!("Invalid URL: {}", e))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("Only http:// and https:// URLs are supported".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("Mozilla/5.0 (compatible; OnigiriEditor/1.0)")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let resp = client
+        .get(parsed)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch URL: {}", e))?;
+
+    let status = resp.status().as_u16();
+    if !resp.status().is_success() {
+        return Err(format!("HTTP error {}", status));
+    }
+
+    let final_url = resp.url().to_string();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("text/html")
+        .to_string();
+
+    if let Some(len) = resp.content_length() {
+        if len > 5 * 1024 * 1024 {
+            return Err("Response is larger than 5MB".to_string());
+        }
+    }
+
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err("Response is larger than 5MB".to_string());
+    }
+
+    let charset_label = content_type
+        .split(';')
+        .find_map(|part| {
+            let trimmed = part.trim();
+            trimmed
+                .strip_prefix("charset=")
+                .or_else(|| trimmed.strip_prefix("CHARSET="))
+                .map(|s| s.trim_matches('"').trim_matches('\'').trim())
+        });
+
+    let html = if let Some(label) = charset_label {
+        if let Some(enc) = encoding_rs::Encoding::for_label(label.as_bytes()) {
+            let (cow, _, _) = enc.decode(&bytes);
+            cow.into_owned()
+        } else {
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+    } else {
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+
+    Ok(FetchedUrlContent {
+        final_url,
+        status,
+        content_type,
+        html,
+    })
+}
+
 #[tauri::command]
 fn take_initial_files(state: State<'_, OpenedFilesState>) -> Vec<String> {
     let mut guard = state.0.lock().unwrap();
@@ -636,15 +1185,31 @@ fn read_image_data_url(path: String, base_dir: Option<String>) -> Result<String,
     Ok(format!("data:{};base64,{}", mime, BASE64.encode(&bytes)))
 }
 
-#[tauri::command]
-fn save_image_asset(source_path: String, doc_path: Option<String>) -> Result<String, String> {
-    let src = PathBuf::from(&source_path);
-    if !src.exists() || !src.is_file() {
-        return Err(format!("Image file not found: {}", source_path));
+fn sanitize_asset_folder(raw: Option<&str>) -> Result<(PathBuf, String), String> {
+    let trimmed = raw.unwrap_or("assets").trim().trim_start_matches("./").trim_start_matches(".\\");
+    let effective = if trimmed.is_empty() { "assets" } else { trimmed };
+    let mut rel_buf = PathBuf::new();
+    let mut parts = Vec::new();
+    for seg in effective.split(&['/', '\\'][..]) {
+        let s = seg.trim();
+        if s.is_empty() || s == "." {
+            continue;
+        }
+        if s == ".." || s.contains(':') || s.chars().any(|c| c.is_control()) {
+            return Err("Invalid asset folder path".to_string());
+        }
+        rel_buf.push(s);
+        parts.push(s.to_string());
     }
+    if parts.is_empty() {
+        return Ok((PathBuf::from("assets"), "assets".to_string()));
+    }
+    Ok((rel_buf, parts.join("/")))
+}
 
-    if let Some(doc) = doc_path {
-        let doc_p = PathBuf::from(&doc);
+fn resolve_asset_base_dir(doc_path: Option<&str>, workspace_root: Option<&str>) -> Option<PathBuf> {
+    if let Some(doc) = doc_path.map(str::trim).filter(|s| !s.is_empty()) {
+        let doc_p = PathBuf::from(doc);
         let base_dir = if doc_p.is_dir() {
             doc_p
         } else {
@@ -653,7 +1218,28 @@ fn save_image_asset(source_path: String, doc_path: Option<String>) -> Result<Str
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."))
         };
-        let assets_dir = base_dir.join("assets");
+        return Some(base_dir);
+    }
+    if let Some(ws) = workspace_root.map(str::trim).filter(|s| !s.is_empty()) {
+        return Some(PathBuf::from(ws));
+    }
+    None
+}
+
+fn save_image_asset_impl(
+    source_path: &str,
+    doc_path: Option<&str>,
+    workspace_root: Option<&str>,
+    asset_dir: Option<&str>,
+) -> Result<String, String> {
+    let src = PathBuf::from(source_path);
+    if !src.exists() || !src.is_file() {
+        return Err(format!("Image file not found: {}", source_path));
+    }
+
+    if let Some(base_dir) = resolve_asset_base_dir(doc_path, workspace_root) {
+        let (rel_dir_path, rel_dir_posix) = sanitize_asset_folder(asset_dir)?;
+        let assets_dir = base_dir.join(&rel_dir_path);
         fs::create_dir_all(&assets_dir)
             .map_err(|e| format!("Failed to create assets dir: {}", e))?;
 
@@ -686,22 +1272,38 @@ fn save_image_asset(source_path: String, doc_path: Option<String>) -> Result<Str
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("image.png");
-        return Ok(format!("./assets/{}", final_name));
+        return Ok(format!("./{}/{}", rel_dir_posix, final_name));
     }
 
-    Ok(source_path)
+    Ok(source_path.to_string())
 }
 
 #[tauri::command]
-fn save_pasted_image(
-    base64_data: String,
-    ext: String,
+fn save_image_asset(
+    source_path: String,
     doc_path: Option<String>,
+    workspace_root: Option<String>,
+    asset_dir: Option<String>,
+) -> Result<String, String> {
+    save_image_asset_impl(
+        &source_path,
+        doc_path.as_deref(),
+        workspace_root.as_deref(),
+        asset_dir.as_deref(),
+    )
+}
+
+fn save_pasted_image_impl(
+    base64_data: &str,
+    ext: &str,
+    doc_path: Option<&str>,
+    workspace_root: Option<&str>,
+    asset_dir: Option<&str>,
 ) -> Result<String, String> {
     let raw_b64 = base64_data
         .split_once(',')
         .map(|(_, b)| b)
-        .unwrap_or(&base64_data);
+        .unwrap_or(base64_data);
     let bytes = BASE64
         .decode(raw_b64)
         .map_err(|e| format!("Invalid image base64: {}", e))?;
@@ -720,22 +1322,14 @@ fn save_pasted_image(
         .unwrap_or(0);
     let file_name = format!("pasted-{}.{}", ts, ext_final);
 
-    if let Some(doc) = doc_path {
-        let doc_p = PathBuf::from(&doc);
-        let base_dir = if doc_p.is_dir() {
-            doc_p
-        } else {
-            doc_p
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."))
-        };
-        let assets_dir = base_dir.join("assets");
+    if let Some(base_dir) = resolve_asset_base_dir(doc_path, workspace_root) {
+        let (rel_dir_path, rel_dir_posix) = sanitize_asset_folder(asset_dir)?;
+        let assets_dir = base_dir.join(&rel_dir_path);
         fs::create_dir_all(&assets_dir)
             .map_err(|e| format!("Failed to create assets dir: {}", e))?;
         let dest = assets_dir.join(&file_name);
         fs::write(&dest, &bytes).map_err(|e| format!("Failed to save pasted image: {}", e))?;
-        return Ok(format!("./assets/{}", file_name));
+        return Ok(format!("./{}/{}", rel_dir_posix, file_name));
     }
 
     let tmp_dir = std::env::temp_dir().join("onigiri-markdown-images");
@@ -743,6 +1337,23 @@ fn save_pasted_image(
     let dest = tmp_dir.join(&file_name);
     fs::write(&dest, &bytes).map_err(|e| format!("Failed to save temp image: {}", e))?;
     Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn save_pasted_image(
+    base64_data: String,
+    ext: String,
+    doc_path: Option<String>,
+    workspace_root: Option<String>,
+    asset_dir: Option<String>,
+) -> Result<String, String> {
+    save_pasted_image_impl(
+        &base64_data,
+        &ext,
+        doc_path.as_deref(),
+        workspace_root.as_deref(),
+        asset_dir.as_deref(),
+    )
 }
 
 fn is_readable_workspace_text(path: &Path) -> bool {
@@ -1162,6 +1773,7 @@ fn replace_in_workspace_impl(
     replacement: &str,
     case_sensitive: bool,
     use_regex: bool,
+    included_paths: Option<&[String]>,
 ) -> Result<WorkspaceReplaceResult, String> {
     if query.is_empty() {
         return Err("Search query must not be empty".to_string());
@@ -1186,6 +1798,24 @@ fn replace_in_workspace_impl(
         });
     }
 
+    let allowed_paths: Option<HashSet<PathBuf>> = included_paths.map(|list| {
+        list.iter()
+            .map(|p| {
+                let pb = PathBuf::from(p);
+                pb.canonicalize().unwrap_or(pb)
+            })
+            .collect()
+    });
+    if let Some(ref set) = allowed_paths {
+        if set.is_empty() {
+            return Ok(WorkspaceReplaceResult {
+                files_modified: 0,
+                replacements: 0,
+                modified_paths: Vec::new(),
+            });
+        }
+    }
+
     let mut files_modified = 0usize;
     let mut replacements = 0usize;
     let mut modified_paths = Vec::new();
@@ -1208,6 +1838,15 @@ fn replace_in_workspace_impl(
     for entry in walker.flatten() {
         if entry.depth() == 0 || entry.file_type().is_dir() {
             continue;
+        }
+        if let Some(ref set) = allowed_paths {
+            let entry_canon = entry
+                .path()
+                .canonicalize()
+                .unwrap_or_else(|_| entry.path().to_path_buf());
+            if !set.contains(&entry_canon) {
+                continue;
+            }
         }
         if let Ok(meta) = entry.metadata() {
             if meta.len() > 2 * 1024 * 1024 {
@@ -1261,9 +1900,17 @@ async fn replace_in_workspace(
     replacement: String,
     case_sensitive: bool,
     use_regex: bool,
+    included_paths: Option<Vec<String>>,
 ) -> Result<WorkspaceReplaceResult, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        replace_in_workspace_impl(&root_path, &query, &replacement, case_sensitive, use_regex)
+        replace_in_workspace_impl(
+            &root_path,
+            &query,
+            &replacement,
+            case_sensitive,
+            use_regex,
+            included_paths.as_deref(),
+        )
     })
     .await
     .map_err(|e| format!("Workspace replace task failed: {}", e))?
@@ -1339,6 +1986,222 @@ fn detect_os_locale_impl() -> &'static str {
 #[tauri::command]
 fn get_os_locale() -> String {
     detect_os_locale_impl().to_string()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatusResult {
+    is_repo: bool,
+    branch: Option<String>,
+    entries: std::collections::HashMap<String, String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHeadFileResult {
+    exists_in_head: bool,
+    content: String,
+    branch: Option<String>,
+}
+
+fn run_git_command(dir: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C").arg(dir).args(args);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    cmd.output()
+        .map_err(|e| format!("Failed to execute git: {}", e))
+}
+
+fn normalize_git_code(x: char, y: char) -> String {
+    if x == '?' && y == '?' {
+        return "?".to_string();
+    }
+    if x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D') {
+        return "U".to_string();
+    }
+    if x == 'R' || y == 'R' {
+        return "R".to_string();
+    }
+    if x == 'D' || y == 'D' {
+        return "D".to_string();
+    }
+    if x == 'A' || y == 'A' {
+        return "A".to_string();
+    }
+    if x == 'M' || y == 'M' {
+        return "M".to_string();
+    }
+    format!("{}{}", x, y).trim().to_string()
+}
+
+fn get_git_status_impl(root_path: &str) -> GitStatusResult {
+    let Ok(root_canon) = PathBuf::from(root_path).canonicalize() else {
+        return GitStatusResult {
+            is_repo: false,
+            branch: None,
+            entries: std::collections::HashMap::new(),
+        };
+    };
+
+    let Ok(top_out) = run_git_command(&root_canon, &["rev-parse", "--show-toplevel"]) else {
+        return GitStatusResult {
+            is_repo: false,
+            branch: None,
+            entries: std::collections::HashMap::new(),
+        };
+    };
+    if !top_out.status.success() {
+        return GitStatusResult {
+            is_repo: false,
+            branch: None,
+            entries: std::collections::HashMap::new(),
+        };
+    }
+
+    let top_raw = String::from_utf8_lossy(&top_out.stdout).trim().to_string();
+    let repo_top = PathBuf::from(&top_raw)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(&top_raw));
+
+    let branch = run_git_command(&root_canon, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let mut entries = std::collections::HashMap::new();
+    let Ok(status_out) = run_git_command(
+        &root_canon,
+        &["status", "--porcelain=v1", "-z", "-uall", "."],
+    ) else {
+        return GitStatusResult {
+            is_repo: true,
+            branch,
+            entries,
+        };
+    };
+    if !status_out.status.success() {
+        return GitStatusResult {
+            is_repo: true,
+            branch,
+            entries,
+        };
+    }
+
+    let tokens: Vec<&[u8]> = status_out.stdout.split(|&b| b == 0).collect();
+    let mut i = 0;
+    while i < tokens.len() {
+        let tok = tokens[i];
+        i += 1;
+        if tok.len() < 4 {
+            continue;
+        }
+        let s = String::from_utf8_lossy(tok);
+        let mut chars = s.chars();
+        let Some(x) = chars.next() else { continue };
+        let Some(y) = chars.next() else { continue };
+        let Some(_sp) = chars.next() else { continue };
+        let rel_from_repo: String = chars.collect();
+        if rel_from_repo.is_empty() {
+            continue;
+        }
+        // Renames/copies in -z output have an extra NUL-terminated source path following the new path
+        if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
+            i += 1;
+        }
+
+        let abs_candidate = repo_top.join(rel_from_repo.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let norm_rel = if let Ok(stripped) = abs_candidate.strip_prefix(&root_canon) {
+            stripped.to_string_lossy().replace('\\', "/")
+        } else {
+            continue;
+        };
+        if norm_rel.is_empty() {
+            continue;
+        }
+        entries.insert(norm_rel, normalize_git_code(x, y));
+    }
+
+    GitStatusResult {
+        is_repo: true,
+        branch,
+        entries,
+    }
+}
+
+#[tauri::command]
+fn get_git_status(root_path: String) -> GitStatusResult {
+    get_git_status_impl(&root_path)
+}
+
+fn get_git_head_file_impl(
+    root_path: Option<&str>,
+    file_path: &str,
+) -> Result<GitHeadFileResult, String> {
+    let target = PathBuf::from(file_path)
+        .canonicalize()
+        .map_err(|e| format!("Target file does not exist: {}", e))?;
+
+    if let Some(root) = root_path {
+        let root_canon = PathBuf::from(root)
+            .canonicalize()
+            .map_err(|e| format!("Invalid workspace root: {}", e))?;
+        if !target.starts_with(&root_canon) {
+            return Err("Target path escapes workspace folder".to_string());
+        }
+    }
+
+    let parent_dir = target
+        .parent()
+        .ok_or_else(|| "Invalid file path".to_string())?;
+    let top_out = run_git_command(parent_dir, &["rev-parse", "--show-toplevel"])?;
+    if !top_out.status.success() {
+        return Err("Not inside a Git repository".to_string());
+    }
+    let top_raw = String::from_utf8_lossy(&top_out.stdout).trim().to_string();
+    let repo_top = PathBuf::from(&top_raw)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(&top_raw));
+
+    let rel = target
+        .strip_prefix(&repo_top)
+        .map_err(|_| "File is outside repository root".to_string())?;
+    let rel_posix = rel.to_string_lossy().replace('\\', "/");
+
+    let branch = run_git_command(&repo_top, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let spec = format!("HEAD:{}", rel_posix);
+    let show_out = run_git_command(&repo_top, &["show", &spec])?;
+    if !show_out.status.success() {
+        return Ok(GitHeadFileResult {
+            exists_in_head: false,
+            content: String::new(),
+            branch,
+        });
+    }
+
+    let decoded = decode_bytes_with_encoding(&show_out.stdout, None)?;
+    Ok(GitHeadFileResult {
+        exists_in_head: true,
+        content: decoded.content,
+        branch,
+    })
+}
+
+#[tauri::command]
+fn get_git_head_file(
+    root_path: Option<String>,
+    file_path: String,
+) -> Result<GitHeadFileResult, String> {
+    get_git_head_file_impl(root_path.as_deref(), &file_path)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1424,6 +2287,9 @@ pub fn run() {
             write_clipboard_text,
             scan_workspace,
             search_workspace,
+            search_workspace_advanced,
+            index_workspace_notes,
+            fetch_url_content,
             read_workspace_context,
             check_files_sync,
             read_workspace_file_if_exists,
@@ -1439,6 +2305,8 @@ pub fn run() {
             save_image_asset,
             save_pasted_image,
             get_os_locale,
+            get_git_status,
+            get_git_head_file,
             ai::detect_ai_capabilities,
             ai::list_subscription_models,
             ai::list_local_models,
@@ -1640,16 +2508,164 @@ mod tests {
         let renamed = rename_workspace_entry_impl(&root, &dup, "renamed.md").unwrap();
         assert!(renamed.ends_with("renamed.md"));
 
-        let rep = replace_in_workspace_impl(&root, "hello", "Hi", false, false).unwrap();
+        let rep = replace_in_workspace_impl(&root, "hello", "Hi", false, false, None).unwrap();
         assert_eq!(rep.files_modified, 2);
         assert_eq!(rep.replacements, 4);
 
         let updated = fs::read_to_string(&file_a).unwrap();
         assert_eq!(updated, "Hi world\nHi again\n");
 
+        // Selective replace only updates included_paths
+        let included = vec![file_a.to_string_lossy().to_string()];
+        let grep = search_workspace_advanced_impl(&root, "Hi\\s+(world|again)", false, true, 50).unwrap();
+        assert_eq!(grep.total_files, 2);
+        assert_eq!(grep.total_matches, 4);
+
+        let selective = replace_in_workspace_impl(
+            &root,
+            "Hi",
+            "Hey",
+            true,
+            false,
+            Some(&included),
+        )
+        .unwrap();
+        assert_eq!(selective.files_modified, 1);
+        assert_eq!(fs::read_to_string(&file_a).unwrap(), "Hey world\nHey again\n");
+        assert_eq!(fs::read_to_string(&renamed).unwrap(), "Hi world\nHi again\n");
+
         assert!(rename_workspace_entry_impl(&root, &renamed, "../escape.md").is_err());
         delete_workspace_entry_impl(&root, &renamed).unwrap();
         assert!(!Path::new(&renamed).exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn save_pasted_image_supports_custom_folder_and_workspace_fallback() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_asset_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        // 1x1 transparent PNG base64
+        let png_b64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+        let doc_file = base.join("note.md");
+        fs::write(&doc_file, "# Doc").unwrap();
+
+        let rel = save_pasted_image_impl(
+            png_b64,
+            "png",
+            Some(&doc_file.to_string_lossy()),
+            None,
+            Some("images/screens"),
+        )
+        .unwrap();
+        assert!(rel.starts_with("./images/screens/pasted-"));
+        assert!(base.join(rel.trim_start_matches("./")).exists());
+
+        // Fallback to workspace_root for unsaved tab
+        let ws_rel = save_pasted_image_impl(
+            png_b64,
+            "png",
+            None,
+            Some(&base.to_string_lossy()),
+            Some("assets"),
+        )
+        .unwrap();
+        assert!(ws_rel.starts_with("./assets/pasted-"));
+
+        // Reject path traversal
+        assert!(sanitize_asset_folder(Some("../escape")).is_err());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn index_workspace_notes_extracts_tags_and_links() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_index_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        fs::write(
+            base.join("daily.md"),
+            "---\ntitle: Daily Note\ntags: [journal, dev-log]\n---\n# Heading\nSee [[Architecture]] and [Spec](./spec.md#top) #focus #日本語タグ\n`#ignored-inline`\n```\n#ignored-fence\n```\n",
+        )
+        .unwrap();
+        fs::write(base.join("spec.md"), "# Spec\n#api\n").unwrap();
+
+        let notes = index_workspace_notes_impl(&base.to_string_lossy()).unwrap();
+        assert_eq!(notes.len(), 2);
+        let daily = notes.iter().find(|n| n.name == "daily.md").unwrap();
+        assert_eq!(daily.title, "Daily Note");
+        let tag_names: Vec<&str> = daily.tags.iter().map(|t| t.tag.as_str()).collect();
+        assert!(tag_names.contains(&"journal"));
+        assert!(tag_names.contains(&"dev-log"));
+        assert!(tag_names.contains(&"focus"));
+        assert!(tag_names.contains(&"日本語タグ"));
+        assert!(!tag_names.contains(&"ignored-inline"));
+        assert!(!tag_names.contains(&"ignored-fence"));
+        assert_eq!(daily.outgoing_links.len(), 2);
+        assert_eq!(daily.outgoing_links[0].kind, "wiki");
+        assert_eq!(daily.outgoing_links[0].target, "Architecture");
+        assert_eq!(daily.outgoing_links[1].kind, "md");
+        assert_eq!(daily.outgoing_links[1].target, "./spec.md");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn git_status_and_head_file_work_on_repo_and_non_repo() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_git_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+        let root_str = base.to_string_lossy().to_string();
+
+        // Non-repo returns is_repo = false gracefully
+        let non_repo = get_git_status_impl(&root_str);
+        assert!(!non_repo.is_repo);
+        assert!(non_repo.entries.is_empty());
+
+        // Initialize git repo, commit a file, modify it, add untracked file
+        if std::process::Command::new("git").arg("--version").output().is_ok() {
+            let _ = run_git_command(&base, &["init"]);
+            let _ = run_git_command(&base, &["config", "user.name", "Test"]);
+            let _ = run_git_command(&base, &["config", "user.email", "test@example.com"]);
+            let tracked = base.join("doc.md");
+            fs::write(&tracked, "# Initial\n").unwrap();
+            let _ = run_git_command(&base, &["add", "doc.md"]);
+            let _ = run_git_command(&base, &["commit", "-m", "init"]);
+
+            fs::write(&tracked, "# Updated\n").unwrap();
+            fs::write(base.join("new.md"), "# New\n").unwrap();
+
+            let st = get_git_status_impl(&root_str);
+            assert!(st.is_repo);
+            assert_eq!(st.entries.get("doc.md").map(String::as_str), Some("M"));
+            assert_eq!(st.entries.get("new.md").map(String::as_str), Some("?"));
+
+            let head_tracked =
+                get_git_head_file_impl(Some(&root_str), &tracked.to_string_lossy()).unwrap();
+            assert!(head_tracked.exists_in_head);
+            assert_eq!(head_tracked.content, "# Initial\n");
+
+            let head_untracked =
+                get_git_head_file_impl(Some(&root_str), &base.join("new.md").to_string_lossy())
+                    .unwrap();
+            assert!(!head_untracked.exists_in_head);
+        }
 
         let _ = fs::remove_dir_all(&base);
     }

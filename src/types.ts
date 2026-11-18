@@ -4,8 +4,8 @@ export type RightPaneMode = 'markdown' | 'browser';
 export type ThemeId = 'light' | 'dark' | 'sepia' | 'midnight';
 export type PreviewTheme = 'editorial' | 'github' | 'notion' | 'academic';
 export type Locale = 'ja' | 'en';
-export type SidebarTab = 'files' | 'outline' | 'snippets';
-export type InspectorTab = 'chat' | 'ai' | 'stats' | 'diff' | 'frontmatter' | 'settings';
+export type SidebarTab = 'files' | 'outline' | 'snippets' | 'knowledge';
+export type InspectorTab = 'chat' | 'ai' | 'stats' | 'diff' | 'frontmatter' | 'review' | 'settings';
 
 export type SyntaxPresetId =
   | 'auto'
@@ -123,6 +123,9 @@ export interface DocumentTab {
   dirty: boolean;
   cursorLine: number;
   cursorCol: number;
+  scrollTop?: number;
+  foldedLines?: number[];
+  bookmarks?: number[];
   snapshots: Snapshot[];
   updatedAt: number;
   diskModifiedMs?: number;
@@ -161,6 +164,77 @@ export interface SearchMatch {
   snippet: string;
 }
 
+export interface WorkspaceGrepLineMatch {
+  line: number;
+  col: number;
+  matchText: string;
+  snippet: string;
+}
+
+export interface WorkspaceGrepFile {
+  path: string;
+  relativePath: string;
+  name: string;
+  totalMatches: number;
+  matches: WorkspaceGrepLineMatch[];
+}
+
+export interface WorkspaceGrepResult {
+  files: WorkspaceGrepFile[];
+  totalFiles: number;
+  totalMatches: number;
+  truncated: boolean;
+}
+
+export interface WorkspaceNoteLinkRef {
+  target: string;
+  kind: 'wiki' | 'md';
+  line: number;
+  snippet: string;
+}
+
+export interface WorkspaceNoteTagRef {
+  tag: string;
+  line: number;
+}
+
+export interface WorkspaceNoteIndexEntry {
+  path: string;
+  relativePath: string;
+  name: string;
+  title: string;
+  tags: WorkspaceNoteTagRef[];
+  outgoingLinks: WorkspaceNoteLinkRef[];
+}
+
+export interface BacklinkMatch {
+  sourcePath: string;
+  sourceRelativePath: string;
+  sourceName: string;
+  sourceTitle: string;
+  line: number;
+  snippet: string;
+  kind: 'wiki' | 'md';
+}
+
+export interface FetchedUrlContent {
+  finalUrl: string;
+  status: number;
+  contentType: string;
+  html: string;
+}
+
+export interface DocumentTemplate {
+  id: string;
+  title: string;
+  titleJa?: string;
+  description: string;
+  descriptionJa?: string;
+  fileNamePattern: string;
+  content: string;
+  isBuiltin?: boolean;
+}
+
 export interface EditorSettings {
   fontSize: number;
   editorZoom: number;
@@ -184,7 +258,10 @@ export interface EditorSettings {
   defaultNewFileEol: '\n' | '\r\n';
   syncScroll: boolean;
   typewriterMode: boolean;
+  focusMode: boolean;
   smartPasteHtml: boolean;
+  imageAssetFolder: string;
+  dailyNotesFolder: string;
   showFrontmatterCard: boolean;
   wordGoal: number;
   customCss: string;
@@ -315,4 +392,35 @@ export interface ProjectServerStatus {
   logs: string[];
   error: string | null;
 }
+
+export interface GitStatusResult {
+  isRepo: boolean;
+  branch: string | null;
+  entries: Record<string, string>;
+}
+
+export interface GitHeadFileResult {
+  existsInHead: boolean;
+  content: string;
+  branch: string | null;
+}
+
+export interface InlineAiPresetItem {
+  id: string;
+  label: string;
+  prompt: string;
+  isBuiltin?: boolean;
+}
+
+export interface ReviewFinding {
+  id: string;
+  line: number;
+  severity: 'error' | 'warning' | 'info';
+  category: 'link' | 'consistency' | 'structure' | 'typo' | 'ai';
+  title: string;
+  detail: string;
+  original?: string;
+  replacement?: string;
+}
+
 

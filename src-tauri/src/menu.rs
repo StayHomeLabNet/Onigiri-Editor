@@ -63,6 +63,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
         "New File with Encoding..."
     };
     let open_label = if is_ja { "ファイルを開く…" } else { "Open File..." };
+    let quick_open_label = if is_ja { "クイックオープン…" } else { "Quick Open..." };
     let reopen_encoding_label = if is_ja {
         "文字コードを指定して再読み込み…"
     } else {
@@ -197,6 +198,9 @@ pub fn build_app_menu_with_state<R: Runtime>(
     let file_open = MenuItemBuilder::with_id("open-file", open_label)
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
+    let file_quick_open = MenuItemBuilder::with_id("quick-open", quick_open_label)
+        .accelerator("CmdOrCtrl+P")
+        .build(app)?;
     let file_reopen_encoding =
         MenuItemBuilder::with_id("reopen-with-encoding", reopen_encoding_label).build(app)?;
     let file_open_folder = MenuItemBuilder::with_id("open-folder", open_folder_label)
@@ -330,6 +334,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
         .item(&file_new)
         .item(&file_new_encoding)
         .item(&file_open)
+        .item(&file_quick_open)
         .item(&file_reopen_encoding)
         .item(&file_open_folder)
         .item(&recent_submenu)

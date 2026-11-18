@@ -10,10 +10,12 @@ import {
   EyeOff,
   FileInput,
   FilePenLine,
+  FilePlus2,
   FolderCheck,
   KeyRound,
   LifeBuoy,
   Loader2,
+  MessageSquare,
   Play,
   RefreshCw,
   Send,
@@ -47,15 +49,56 @@ import {
 } from '../utils/platform';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
+const AI_THREADS_STORAGE_KEY = 'onigiri-markdown.ai-threads.v1';
+
+interface AiThreadsStore {
+  mode: 'tab' | 'shared';
+  shared: ChatMessage[];
+  byTab: Record<string, ChatMessage[]>;
+}
+
+function loadAiThreadsStore(): AiThreadsStore {
+  try {
+    const raw = localStorage.getItem(AI_THREADS_STORAGE_KEY);
+    if (!raw) return { mode: 'tab', shared: [], byTab: {} };
+    const parsed = JSON.parse(raw);
+    return {
+      mode: parsed?.mode === 'shared' ? 'shared' : 'tab',
+      shared: Array.isArray(parsed?.shared) ? parsed.shared.slice(-50) : [],
+      byTab:
+        parsed?.byTab && typeof parsed.byTab === 'object'
+          ? Object.fromEntries(
+              Object.entries(parsed.byTab)
+                .filter(([, v]) => Array.isArray(v))
+                .slice(-30)
+                .map(([k, v]) => [k, (v as ChatMessage[]).slice(-50)])
+            )
+          : {},
+    };
+  } catch {
+    return { mode: 'tab', shared: [], byTab: {} };
+  }
+}
+
+function saveAiThreadsStore(store: AiThreadsStore): void {
+  try {
+    localStorage.setItem(AI_THREADS_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // ignore quota errors
+  }
+}
+
 interface AiChatPanelProps {
   t: Translations;
   markdown: string;
   activeDocTitle?: string;
+  activeTabId?: string;
   config: AiProviderConfig;
   onConfigChange: (next: AiProviderConfig) => void;
   onInsertToEditor: (text: string) => void;
   onReplaceDocument: (text: string, createSnapshot?: boolean) => void;
   onCopyReply: (text: string) => void;
+  onSaveChatAsNote?: (title: string, markdown: string) => void;
   workspaceRoot: string | null;
   aiFolderMode: AiFolderMode;
   onAiFolderModeChange?: (mode: AiFolderMode) => void;
@@ -193,11 +236,13 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   t,
   markdown,
   activeDocTitle,
+  activeTabId = 'default',
   config,
   onConfigChange,
   onInsertToEditor,
   onReplaceDocument,
   onCopyReply,
+  onSaveChatAsNote,
   workspaceRoot,
   aiFolderMode,
   onAiFolderModeChange,
@@ -221,7 +266,83 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   );
   const [showSupportCard, setShowSupportCard] = useState(false);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const initialStore = useMemo(() => loadAiThreadsStore(), []);
+  const threadsStoreRef = useRef<AiThreadsStore>(initialStore);
+  const [threadMode, setThreadMode] = useState<'tab' | 'shared'>(initialStore.mode);
+  const [messages, setMessagesState] = useState<ChatMessage[]>(() =>
+    initialStore.mode === 'shared'
+      ? initialStore.shared
+      : initialStore.byTab[activeTabId] || []
+  );
+
+  const activeThreadKeyRef = useRef<{ mode: 'tab' | 'shared'; tabId: string }>({
+    mode: initialStore.mode,
+    tabId: activeTabId,
+  });
+  activeThreadKeyRef.current = { mode: threadMode, tabId: activeTabId };
+
+  const updateMessages = useCallback(
+    (
+      updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
+      overrideKey?: { mode: 'tab' | 'shared'; tabId: string }
+    ) => {
+      const mode = overrideKey?.mode ?? threadMode;
+      const tabId = overrideKey?.tabId ?? activeTabId;
+      const store = threadsStoreRef.current;
+      const prevList =
+        mode === 'shared' ? store.shared : store.byTab[tabId] || [];
+      const nextList =
+        typeof updater === 'function' ? updater(prevList) : updater;
+      const trimmed = nextList.slice(-50);
+      if (mode === 'shared') {
+        store.shared = trimmed;
+      } else {
+        store.byTab[tabId] = trimmed;
+      }
+      store.mode = activeThreadKeyRef.current.mode;
+      saveAiThreadsStore(store);
+      const cur = activeThreadKeyRef.current;
+      const stillViewing =
+        cur.mode === mode && (mode === 'shared' || cur.tabId === tabId);
+      if (stillViewing) {
+        setMessagesState(trimmed);
+      }
+    },
+    [threadMode, activeTabId]
+  );
+
+  const setMessages = useCallback(
+    (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+      updateMessages(updater);
+    },
+    [updateMessages]
+  );
+
+  useEffect(() => {
+    const store = threadsStoreRef.current;
+    store.mode = threadMode;
+    saveAiThreadsStore(store);
+    const list =
+      threadMode === 'shared' ? store.shared : store.byTab[activeTabId] || [];
+    setMessagesState(list);
+  }, [activeTabId, threadMode]);
+
+  const handleSaveChatAsNote = useCallback(() => {
+    if (!onSaveChatAsNote || messages.length === 0) return;
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const docLabel = activeDocTitle || 'Chat';
+    const noteTitle = `AI Chat - ${docLabel} (${dateStr})`;
+    const body = messages
+      .map((m) => {
+        const who = m.role === 'user' ? 'User' : `Assistant${m.model ? ` (${m.model})` : ''}`;
+        return `## ${who}\n\n${m.content.trim()}`;
+      })
+      .join('\n\n---\n\n');
+    const fullMd = `---\ntitle: "${noteTitle.replace(/"/g, '\\"')}"\ndate: ${dateStr}\ntags: [ai-chat]\n---\n\n# ${noteTitle}\n\n${body}\n`;
+    onSaveChatAsNote(noteTitle, fullMd);
+  }, [onSaveChatAsNote, messages, activeDocTitle]);
+
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -705,6 +826,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     const trimmed = promptText.trim();
     if (!trimmed || sending) return;
 
+    const capturedKey = { mode: threadMode, tabId: activeTabId };
     const reqId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     activeRequestIdRef.current = reqId;
     cancellingRef.current = false;
@@ -719,7 +841,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
       timestamp: Date.now(),
     };
     const nextHistory = [...messages, userMsg];
-    setMessages(nextHistory);
+    updateMessages(nextHistory, capturedKey);
     setInput('');
     setSending(true);
 
@@ -786,7 +908,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         model: res.modelUsed,
         timestamp: Date.now(),
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      updateMessages((prev) => [...prev, assistantMsg], capturedKey);
 
       if (workspaceRoot && aiFolderMode === 'cli-direct') {
         onWorkspaceRefresh?.();
@@ -802,7 +924,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           timestamp: Date.now(),
           error: true,
         };
-        setMessages((prev) => [...prev, cancelNote]);
+        updateMessages((prev) => [...prev, cancelNote], capturedKey);
       } else {
         const errorMsg: ChatMessage = {
           id: `msg-${Date.now()}-err`,
@@ -811,7 +933,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           timestamp: Date.now(),
           error: true,
         };
-        setMessages((prev) => [...prev, errorMsg]);
+        updateMessages((prev) => [...prev, errorMsg], capturedKey);
         setShowSupportCard(true);
       }
     } finally {
@@ -1469,6 +1591,37 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             </div>
           </div>
         )}
+
+        <div className="ai-thread-bar">
+          <div className="ai-thread-mode-group">
+            <button
+              type="button"
+              className={`mini-pill-btn ${threadMode === 'tab' ? 'is-active' : ''}`}
+              onClick={() => setThreadMode('tab')}
+            >
+              <MessageSquare size={11} />
+              <span>{t.aiChat.threadModeTab}</span>
+            </button>
+            <button
+              type="button"
+              className={`mini-pill-btn ${threadMode === 'shared' ? 'is-active' : ''}`}
+              onClick={() => setThreadMode('shared')}
+            >
+              <span>{t.aiChat.threadModeShared}</span>
+            </button>
+          </div>
+          {onSaveChatAsNote && messages.length > 0 && (
+            <button
+              type="button"
+              className="mini-pill-btn"
+              onClick={handleSaveChatAsNote}
+              title={t.aiChat.saveAsNoteBtn}
+            >
+              <FilePlus2 size={11} />
+              <span>{t.aiChat.saveAsNoteBtn}</span>
+            </button>
+          )}
+        </div>
 
         {showSettings && (
           <div className="ai-settings-drawer">

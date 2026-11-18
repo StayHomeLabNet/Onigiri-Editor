@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useImperativeHandle, useRef, useState, forwardRef } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef } from 'react';
 import {
   EditorSelection,
   EditorState,
@@ -104,11 +104,15 @@ import {
   foldKeymap,
   foldAll,
   unfoldAll,
+  foldable,
+  foldEffect,
+  unfoldEffect,
+  foldedRanges,
 } from '@codemirror/language';
 import { highlightSelectionMatches, selectNextOccurrence } from '@codemirror/search';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { tags } from '@lezer/highlight';
-import type { EditorSettings, ThemeId } from '../types';
+import type { EditorSettings, Locale, ThemeId } from '../types';
 import type { Translations } from '../i18n/types';
 import type { FindMatch, TextRange } from '../utils/findReplace';
 import type { CmMacroCommandId, MacroStep } from '../utils/macro';
@@ -117,8 +121,19 @@ import {
   resolveEditorLanguageDescription,
   resolveEffectiveFilename,
 } from '../utils/language';
-import { htmlToMarkdown } from '../utils/markdown';
+import { cleanAiMarkdown, htmlToMarkdown, upsertTocInMarkdown } from '../utils/markdown';
+import { buildMarkdownDropLink } from '../utils/paths';
 import { readClipboardText, writeClipboardText } from '../utils/platform';
+import {
+  delimitedToMarkdownTable,
+  formatEnvText,
+  formatJsonText,
+  jsonToYamlText,
+  minifyJsonText,
+  sortJsonKeysText,
+  yamlToJsonText,
+} from '../utils/structuredData';
+import type { CustomSnippetRecord } from '../utils/snippets';
 import {
   convertHalfFullWidth,
   dedupeLines,
@@ -127,6 +142,7 @@ import {
   insertCommentLine,
   insertQuoteLine,
   removeCommentLine,
+  removeEmptyLines,
   removeLineBreaksText,
   removeQuoteLine,
   reverseLines,
@@ -218,6 +234,7 @@ export interface EditorHandle {
   copyAction: () => void;
   pasteAction: () => Promise<void>;
   runMacroStep: (step: MacroStep) => Promise<void>;
+  runContextAction: (action: EditorContextAction) => Promise<void>;
   selectRange: (from: number, to: number, options?: { focus?: boolean }) => void;
   replaceRange: (from: number, to: number, text: string, options?: { selectResult?: boolean }) => void;
   getSelectionRange: () => TextRange | null;
@@ -229,6 +246,11 @@ export interface EditorHandle {
   foldAllLines: () => void;
   unfoldAllLines: () => void;
   selectNextOccurrenceAction: () => void;
+  toggleBookmarkAction: () => void;
+  nextBookmarkAction: () => void;
+  prevBookmarkAction: () => void;
+  clearBookmarksAction: () => void;
+  getBookmarkedLines: () => number[];
 }
 
 export interface LineRange {
@@ -236,24 +258,44 @@ export interface LineRange {
   end: number;
 }
 
+export interface WorkspaceNoteItem {
+  name: string;
+  relPath: string;
+  path: string;
+}
+
 interface EditorPaneProps {
   t: Translations;
+  locale?: Locale;
   docId: string;
   fileName?: string;
+  filePath?: string;
+  workspaceRoot?: string | null;
   languageOverride?: string | null;
   detectedLanguageId?: string | null;
   value: string;
+  initialCursor?: { line: number; col: number };
+  initialScrollTop?: number;
+  initialFoldedLines?: number[];
+  initialBookmarks?: number[];
   onChange: (nextValue: string, sourceDocId?: string) => void;
   onCursorChange: (line: number, col: number) => void;
+  onScrollTopChange?: (scrollTop: number, sourceDocId?: string) => void;
+  onFoldedLinesChange?: (lines: number[], sourceDocId?: string) => void;
+  onBookmarksChange?: (lines: number[], sourceDocId?: string) => void;
   onFocusPane?: () => void;
   onScrollRatio?: (ratio: number) => void;
   onSmartPasteNotify?: () => void;
+  onTablePasteNotify?: () => void;
   onLineCopyNotify?: () => void;
   onStatusNotify?: (msg: string) => void;
   onImagePasteOrDrop?: (file: File) => Promise<void>;
   onFindScopeChange?: (scope: TextRange | null) => void;
   onEditorSelectionChange?: (range: TextRange) => void;
   onAiEditSelection?: () => void;
+  customSnippets?: CustomSnippetRecord[];
+  workspaceNotes?: WorkspaceNoteItem[];
+  onOpenWikiLink?: (target: string) => void;
   syncHighlightRange?: LineRange | null;
   isRecordingMacro?: boolean;
   onRecordMacroStep?: (step: MacroStep) => void;
@@ -263,6 +305,7 @@ interface EditorPaneProps {
 
 const toggleBookmarkEffect = StateEffect.define<number>();
 const clearBookmarksEffect = StateEffect.define<void>();
+const setBookmarksEffect = StateEffect.define<number[]>();
 const bookmarkLineDeco = Decoration.line({ class: 'cm-bookmark-line' });
 
 class BookmarkGutterMarker extends GutterMarker {
@@ -294,6 +337,15 @@ const bookmarkField = StateField.define<number[]>({
     for (const eff of tr.effects) {
       if (eff.is(clearBookmarksEffect)) {
         next = [];
+      } else if (eff.is(setBookmarksEffect)) {
+        const doc = tr.state.doc;
+        const set = new Set<number>();
+        for (const ln of eff.value) {
+          if (ln >= 1 && ln <= doc.lines) {
+            set.add(doc.line(ln).from);
+          }
+        }
+        next = Array.from(set).sort((a, b) => a - b);
       } else if (eff.is(toggleBookmarkEffect)) {
         const lineFrom = tr.state.doc.lineAt(
           Math.max(0, Math.min(eff.value, tr.state.doc.length))
@@ -317,6 +369,73 @@ const bookmarkField = StateField.define<number[]>({
       return builder.finish();
     }),
 });
+
+function extractBookmarkLineNumbers(state: EditorState): number[] {
+  const positions = state.field(bookmarkField, false);
+  if (!positions || positions.length === 0) return [];
+  const doc = state.doc;
+  const lines = new Set<number>();
+  for (const pos of positions) {
+    const safePos = Math.max(0, Math.min(pos, doc.length));
+    lines.add(doc.lineAt(safePos).number);
+  }
+  return Array.from(lines).sort((a, b) => a - b);
+}
+
+const focusDimmedLineDeco = Decoration.line({ class: 'cm-focus-dimmed' });
+
+function buildFocusModeDecorations(view: EditorView): DecorationSet {
+  const doc = view.state.doc;
+  if (doc.lines === 0) return Decoration.none;
+  const head = view.state.selection.main.head;
+  const activeLineNum = doc.lineAt(head).number;
+  let blockStart = activeLineNum;
+  let blockEnd = activeLineNum;
+
+  if (doc.line(activeLineNum).text.trim().length > 0) {
+    while (blockStart > 1 && doc.line(blockStart - 1).text.trim().length > 0) {
+      blockStart -= 1;
+    }
+    while (blockEnd < doc.lines && doc.line(blockEnd + 1).text.trim().length > 0) {
+      blockEnd += 1;
+    }
+  }
+
+  const builder = new RangeSetBuilder<Decoration>();
+  const added = new Set<number>();
+  for (const { from, to } of view.visibleRanges) {
+    let pos = from;
+    while (pos <= to) {
+      const line = doc.lineAt(pos);
+      if (!added.has(line.number)) {
+        added.add(line.number);
+        if (line.number < blockStart || line.number > blockEnd) {
+          builder.add(line.from, line.from, focusDimmedLineDeco);
+        }
+      }
+      if (line.to >= to || line.to >= doc.length) break;
+      pos = line.to + 1;
+    }
+  }
+  return builder.finish();
+}
+
+const focusModePlugin = ViewPlugin.fromClass(
+  class {
+    decorations: DecorationSet;
+    constructor(view: EditorView) {
+      this.decorations = buildFocusModeDecorations(view);
+    }
+    update(update: ViewUpdate) {
+      if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        this.decorations = buildFocusModeDecorations(update.view);
+      }
+    }
+  },
+  {
+    decorations: (v) => v.decorations,
+  }
+);
 
 const bookmarkGutter = gutter({
   class: 'cm-bookmark-gutter',
@@ -891,26 +1010,287 @@ function jumpToBookmark(view: EditorView, direction: 'next' | 'prev'): boolean {
   return false;
 }
 
+function isInsideFencedCodeBlock(doc: EditorState['doc'], targetLineNum: number): boolean {
+  let inFence = false;
+  let fenceChar = '';
+  const limit = Math.min(targetLineNum - 1, doc.lines);
+  for (let ln = 1; ln <= limit; ln += 1) {
+    const line = doc.line(ln).text;
+    const match = line.match(/^\s*(`{3,}|~{3,})/);
+    if (match) {
+      const marker = match[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = marker;
+      } else if (marker === fenceChar) {
+        inFence = false;
+        fenceChar = '';
+      }
+    }
+  }
+  return inFence;
+}
+
+function extractWikiLinkAtCol(lineText: string, colOffset: number): string | null {
+  const re = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(lineText)) !== null) {
+    if (colOffset >= m.index && colOffset <= m.index + m[0].length) {
+      return m[1].trim();
+    }
+  }
+  return null;
+}
+
+interface TableCellSpan {
+  from: number;
+  to: number;
+  lineNum: number;
+}
+
+function getLinePipeOffsets(lineText: string, lineFrom: number): number[] {
+  const offsets: number[] = [];
+  let escaped = false;
+  for (let i = 0; i < lineText.length; i += 1) {
+    const ch = lineText[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '|') {
+      offsets.push(lineFrom + i);
+    }
+  }
+  return offsets;
+}
+
+function tryMarkdownTableTabNav(view: EditorView, direction: 1 | -1): boolean {
+  const { state } = view;
+  if (state.selection.ranges.length > 1) return false;
+  const head = state.selection.main.head;
+  const curLine = state.doc.lineAt(head);
+  const curTrim = curLine.text.trim();
+  if (!curTrim.startsWith('|') || !curTrim.includes('|', 1)) return false;
+  if (isInsideFencedCodeBlock(state.doc, curLine.number)) return false;
+
+  let startLine = curLine.number;
+  while (startLine > 1 && state.doc.line(startLine - 1).text.trim().startsWith('|')) {
+    startLine -= 1;
+  }
+  let endLine = curLine.number;
+  while (endLine < state.doc.lines && state.doc.line(endLine + 1).text.trim().startsWith('|')) {
+    endLine += 1;
+  }
+
+  const editableCells: TableCellSpan[] = [];
+  let colCount = 1;
+  for (let ln = startLine; ln <= endLine; ln += 1) {
+    const lineObj = state.doc.line(ln);
+    const trimmed = lineObj.text.trim();
+    if (/^\|?[\s:|-]+\|[\s:|-]*$/.test(trimmed) && trimmed.includes('-')) {
+      continue;
+    }
+    const pipes = getLinePipeOffsets(lineObj.text, lineObj.from);
+    if (pipes.length < 2) continue;
+    colCount = Math.max(colCount, pipes.length - 1);
+    for (let i = 0; i < pipes.length - 1; i += 1) {
+      const rawFrom = pipes[i] + 1;
+      const rawTo = pipes[i + 1];
+      const rawText = state.sliceDoc(rawFrom, rawTo);
+      const leadSpaces = rawText.match(/^\s*/)?.[0].length ?? 0;
+      const trailSpaces = rawText.match(/\s*$/)?.[0].length ?? 0;
+      const innerFrom = rawFrom + Math.min(leadSpaces, rawText.length);
+      const innerTo = Math.max(innerFrom, rawTo - trailSpaces);
+      editableCells.push({
+        from: innerFrom === innerTo && rawText.length >= 2 ? rawFrom + 1 : innerFrom,
+        to: innerFrom === innerTo && rawText.length >= 2 ? rawFrom + 1 : innerTo,
+        lineNum: ln,
+      });
+    }
+  }
+
+  if (editableCells.length === 0) return false;
+
+  let curIdx = editableCells.findIndex((c) => head >= c.from - 1 && head <= c.to + 1 && c.lineNum === curLine.number);
+  if (curIdx < 0) {
+    curIdx = editableCells.findIndex((c) => c.lineNum === curLine.number && c.to >= head);
+  }
+  if (curIdx < 0) curIdx = 0;
+
+  const targetIdx = curIdx + direction;
+  if (targetIdx < 0) return true;
+
+  if (targetIdx >= editableCells.length) {
+    const lastLineObj = state.doc.line(endLine);
+    const newRow = `\n|${'   |'.repeat(colCount)}`;
+    const insertAt = lastLineObj.to;
+    view.dispatch({
+      changes: { from: insertAt, to: insertAt, insert: newRow },
+      selection: { anchor: insertAt + 3 },
+      effects: EditorView.scrollIntoView(insertAt + 3, { y: 'nearest' }),
+    });
+    return true;
+  }
+
+  const target = editableCells[targetIdx];
+  view.dispatch({
+    selection: { anchor: target.from, head: target.to },
+    effects: EditorView.scrollIntoView(target.from, { y: 'nearest' }),
+  });
+  return true;
+}
+
+interface SlashPopupItem {
+  id: string;
+  label: string;
+  hint: string;
+  keywords: string;
+  insertText?: string;
+  action?: 'toc';
+  isCustom?: boolean;
+}
+
+function buildSlashItems(locale: Locale, customSnippets: CustomSnippetRecord[]): SlashPopupItem[] {
+  const isJa = locale === 'ja';
+  const builtins: SlashPopupItem[] = [
+    {
+      id: 'h1',
+      label: isJa ? '見出し 1 (H1)' : 'Heading 1',
+      hint: '# Heading',
+      keywords: 'h1 heading 1 見出し',
+      insertText: '# ',
+    },
+    {
+      id: 'h2',
+      label: isJa ? '見出し 2 (H2)' : 'Heading 2',
+      hint: '## Heading',
+      keywords: 'h2 heading 2 見出し',
+      insertText: '## ',
+    },
+    {
+      id: 'h3',
+      label: isJa ? '見出し 3 (H3)' : 'Heading 3',
+      hint: '### Heading',
+      keywords: 'h3 heading 3 見出し',
+      insertText: '### ',
+    },
+    {
+      id: 'todo',
+      label: isJa ? 'タスクリスト / チェックボックス' : 'Task Checklist',
+      hint: '- [ ] Task',
+      keywords: 'todo task checklist チェック タスク',
+      insertText: '- [ ] ',
+    },
+    {
+      id: 'table',
+      label: isJa ? 'Markdown テーブル (3列)' : 'Markdown Table (3 cols)',
+      hint: '| Col1 | Col2 | Col3 |',
+      keywords: 'table grid 表 テーブル',
+      insertText: '| Column 1 | Column 2 | Column 3 |\n| :--- | :--- | :--- |\n|  |  |  |\n',
+    },
+    {
+      id: 'code',
+      label: isJa ? 'コードブロック' : 'Code Block',
+      hint: '```lang ... ```',
+      keywords: 'code block fence コード',
+      insertText: '```ts\n\n```\n',
+    },
+    {
+      id: 'mermaid',
+      label: isJa ? 'Mermaid フローチャート図' : 'Mermaid Flowchart',
+      hint: '```mermaid',
+      keywords: 'mermaid diagram chart 図 フロー',
+      insertText: '```mermaid\nflowchart TD\n  Start["Start"] --> End["Done"]\n```\n',
+    },
+    {
+      id: 'math',
+      label: isJa ? 'KaTeX 数式ブロック' : 'KaTeX Math Block',
+      hint: '$$ ... $$',
+      keywords: 'math katex latex 数式',
+      insertText: '$$\n\\sum_{i=1}^{n} x_i\n$$\n',
+    },
+    {
+      id: 'callout',
+      label: isJa ? 'コールアウト [!NOTE]' : 'Callout Block [!NOTE]',
+      hint: '> [!NOTE]',
+      keywords: 'callout note tip warning コールアウト 注記',
+      insertText: '> [!NOTE]\n> ',
+    },
+    {
+      id: 'toc',
+      label: isJa ? '目次 (TOC) を自動挿入 / 更新' : 'Insert / Update Table of Contents (TOC)',
+      hint: '<!-- TOC -->',
+      keywords: 'toc table of contents 目次',
+      action: 'toc',
+    },
+  ];
+  const customs: SlashPopupItem[] = customSnippets.map((cs) => ({
+    id: `custom:${cs.id}`,
+    label: cs.title,
+    hint: cs.description || 'Custom',
+    keywords: `${cs.title} ${cs.description} custom スニペット`,
+    insertText: cs.content,
+    isCustom: true,
+  }));
+  return [...customs, ...builtins];
+}
+
+type InlinePopupState =
+  | {
+      kind: 'slash';
+      from: number;
+      to: number;
+      query: string;
+      left: number;
+      top: number;
+    }
+  | {
+      kind: 'wiki';
+      from: number;
+      to: number;
+      query: string;
+      left: number;
+      top: number;
+    };
+
 export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
   (
     {
       t,
+      locale = 'ja',
       docId,
       fileName,
+      filePath,
+      workspaceRoot,
       languageOverride,
       detectedLanguageId,
       value,
+      initialCursor,
+      initialScrollTop,
+      initialFoldedLines,
+      initialBookmarks,
       onChange,
       onCursorChange,
+      onScrollTopChange,
+      onFoldedLinesChange,
+      onBookmarksChange,
       onFocusPane,
       onScrollRatio,
       onSmartPasteNotify,
+      onTablePasteNotify,
       onLineCopyNotify,
       onStatusNotify,
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
       onAiEditSelection,
+      customSnippets = [],
+      workspaceNotes = [],
+      onOpenWikiLink,
       syncHighlightRange,
       isRecordingMacro = false,
       onRecordMacroStep,
@@ -932,6 +1312,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     const foldComp = useRef(new Compartment());
     const selectionMatchComp = useRef(new Compartment());
     const closeBracketsComp = useRef(new Compartment());
+    const focusModeComp = useRef(new Compartment());
 
     const [rulerVersion, setRulerVersion] = useState(0);
     const [rectMode, setRectMode] = useState(false);
@@ -939,43 +1320,81 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     rectModeRef.current = rectMode;
 
     const [contextMenu, setContextMenu] = useState<EditorContextMenuState | null>(null);
+    const [inlinePopup, setInlinePopup] = useState<InlinePopupState | null>(null);
+    const [popupActiveIndex, setPopupActiveIndex] = useState(0);
+    const inlinePopupRef = useRef<InlinePopupState | null>(null);
+    inlinePopupRef.current = inlinePopup;
+    const popupKeyHandlerRef = useRef<(key: string) => boolean>(() => false);
+
+    const restoreStateRef = useRef({
+      initialCursor,
+      initialScrollTop,
+      initialFoldedLines,
+      initialBookmarks,
+    });
+    restoreStateRef.current = {
+      initialCursor,
+      initialScrollTop,
+      initialFoldedLines,
+      initialBookmarks,
+    };
 
     const callbacksRef = useRef({
       t,
+      locale,
       fileName,
+      filePath,
+      workspaceRoot,
       languageOverride,
       detectedLanguageId,
       onChange,
       onCursorChange,
+      onScrollTopChange,
+      onFoldedLinesChange,
+      onBookmarksChange,
       onFocusPane,
       onScrollRatio,
       onSmartPasteNotify,
+      onTablePasteNotify,
       onLineCopyNotify,
       onStatusNotify,
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
       onAiEditSelection,
+      customSnippets,
+      workspaceNotes,
+      onOpenWikiLink,
       isRecordingMacro,
       onRecordMacroStep,
       settings,
     });
     callbacksRef.current = {
       t,
+      locale,
       fileName,
+      filePath,
+      workspaceRoot,
       languageOverride,
       detectedLanguageId,
       onChange,
       onCursorChange,
+      onScrollTopChange,
+      onFoldedLinesChange,
+      onBookmarksChange,
       onFocusPane,
       onScrollRatio,
       onSmartPasteNotify,
+      onTablePasteNotify,
       onLineCopyNotify,
       onStatusNotify,
       onImagePasteOrDrop,
       onFindScopeChange,
       onEditorSelectionChange,
       onAiEditSelection,
+      customSnippets,
+      workspaceNotes,
+      onOpenWikiLink,
       isRecordingMacro,
       onRecordMacroStep,
       settings,
@@ -988,7 +1407,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     const composingBaseRef = useRef<{ prefix: string; suffix: string } | null>(null);
     const currentDocIdRef = useRef(docId);
     currentDocIdRef.current = docId;
-    const lastDocIdRef = useRef(docId);
+    const lastDocIdRef = useRef<string | null>(null);
 
     const recordMacroStep = useCallback((step: MacroStep) => {
       if (
@@ -1125,6 +1544,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
               settings.showWhitespaceSymbols ? [highlightWhitespace(), ideographicSpacePlugin] : []
             ),
             eolSymbolComp.current.of(settings.showNewlineSymbols ? newlineSymbolPlugin : []),
+            focusModeComp.current.of(settings.focusMode ? focusModePlugin : []),
             highlightActiveLine(),
             highlightActiveLineGutter(),
             bookmarkField,
@@ -1133,6 +1553,15 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             findScopeField,
             findHighlightField,
             langComp.current.of(markdown({ base: markdownLanguage, codeLanguages: languages })),
+            Prec.highest(
+              keymap.of([
+                { key: 'ArrowDown', run: () => popupKeyHandlerRef.current('ArrowDown') },
+                { key: 'ArrowUp', run: () => popupKeyHandlerRef.current('ArrowUp') },
+                { key: 'Enter', run: () => popupKeyHandlerRef.current('Enter') },
+                { key: 'Tab', run: () => popupKeyHandlerRef.current('Tab') },
+                { key: 'Escape', run: () => popupKeyHandlerRef.current('Escape') },
+              ])
+            ),
             Prec.high(
               keymap.of([
                 {
@@ -1248,7 +1677,25 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 { key: 'Mod-Home', run: recordCmd('cursorDocStart'), shift: recordCmd('selectDocStart') },
                 { key: 'Mod-End', run: recordCmd('cursorDocEnd'), shift: recordCmd('selectDocEnd') },
                 { key: 'Enter', run: recordCmd('insertNewlineAndIndent'), shift: recordCmd('insertNewlineAndIndent') },
-                { key: 'Tab', run: recordCmd('indentMore'), shift: recordCmd('indentLess') },
+                {
+                  key: 'Tab',
+                  run: (editorView) => {
+                    const isMd = isMarkdownFilename(
+                      callbacksRef.current.fileName,
+                      callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
+                    );
+                    if (isMd && tryMarkdownTableTabNav(editorView, 1)) return true;
+                    return recordCmd('indentMore')(editorView);
+                  },
+                  shift: (editorView) => {
+                    const isMd = isMarkdownFilename(
+                      callbacksRef.current.fileName,
+                      callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
+                    );
+                    if (isMd && tryMarkdownTableTabNav(editorView, -1)) return true;
+                    return recordCmd('indentLess')(editorView);
+                  },
+                },
                 { key: 'Backspace', run: recordCmd('deleteCharBackward') },
                 { key: 'Delete', run: recordCmd('deleteCharForward') },
                 { mac: 'Alt-Backspace', win: 'Ctrl-Backspace', linux: 'Ctrl-Backspace', run: recordCmd('deleteGroupBackward') },
@@ -1287,6 +1734,21 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             EditorView.domEventHandlers({
               focus() {
                 callbacksRef.current.onFocusPane?.();
+                return false;
+              },
+              mousedown(event, editorView) {
+                if ((event.metaKey || event.ctrlKey) && event.button === 0 && callbacksRef.current.onOpenWikiLink) {
+                  const pos = editorView.posAtCoords({ x: event.clientX, y: event.clientY });
+                  if (pos !== null) {
+                    const lineObj = editorView.state.doc.lineAt(pos);
+                    const target = extractWikiLinkAtCol(lineObj.text, pos - lineObj.from);
+                    if (target) {
+                      event.preventDefault();
+                      callbacksRef.current.onOpenWikiLink(target);
+                      return true;
+                    }
+                  }
+                }
                 return false;
               },
               compositionstart(_event, editorView) {
@@ -1378,7 +1840,40 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 recordMacroStep({ type: 'clipboard', action: 'copy' });
                 return true;
               },
-              drop(event) {
+              drop(event, editorView) {
+                const rawEntry = event.dataTransfer?.getData('application/x-onigiri-workspace-entry');
+                if (rawEntry) {
+                  try {
+                    const entry = JSON.parse(rawEntry) as {
+                      path: string;
+                      name: string;
+                      relPath?: string;
+                      isDir?: boolean;
+                    };
+                    if (entry && entry.path && entry.name && !entry.isDir) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      const snippet = buildMarkdownDropLink({
+                        targetPath: entry.path,
+                        targetName: entry.name,
+                        relativePathFromRoot: entry.relPath,
+                        activeDocPath: callbacksRef.current.filePath,
+                        workspaceRoot: callbacksRef.current.workspaceRoot,
+                      });
+                      const dropPos =
+                        editorView.posAtCoords({ x: event.clientX, y: event.clientY }) ??
+                        editorView.state.selection.main.head;
+                      editorView.dispatch({
+                        changes: { from: dropPos, to: dropPos, insert: snippet },
+                        selection: { anchor: dropPos + snippet.length },
+                      });
+                      editorView.focus();
+                      return true;
+                    }
+                  } catch {
+                    // ignore invalid drag payload
+                  }
+                }
                 const files = Array.from(event.dataTransfer?.files || []);
                 const imgFile = files.find((f) => f.type.startsWith('image/'));
                 if (imgFile && callbacksRef.current.onImagePasteOrDrop) {
@@ -1403,9 +1898,33 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 recordMacroStep({ type: 'clipboard', action: 'paste' });
 
                 const { settings: curSettings, onSmartPasteNotify: notify } = callbacksRef.current;
-                if (!curSettings.smartPasteHtml) return false;
                 const html = event.clipboardData?.getData('text/html');
                 const plain = event.clipboardData?.getData('text/plain') || '';
+                const isMd = isMarkdownFilename(
+                  callbacksRef.current.fileName,
+                  callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
+                );
+
+                // TSV/CSV spreadsheet paste -> auto Markdown table
+                if (isMd && plain) {
+                  const head = editorView.state.selection.main.head;
+                  const lineNum = editorView.state.doc.lineAt(head).number;
+                  if (!isInsideFencedCodeBlock(editorView.state.doc, lineNum)) {
+                    const mdTable = delimitedToMarkdownTable(plain);
+                    if (mdTable) {
+                      event.preventDefault();
+                      const { from, to } = editorView.state.selection.main;
+                      editorView.dispatch({
+                        changes: { from, to, insert: mdTable },
+                        selection: { anchor: from + mdTable.length },
+                      });
+                      (callbacksRef.current.onTablePasteNotify || notify)?.();
+                      return true;
+                    }
+                  }
+                }
+
+                if (!curSettings.smartPasteHtml) return false;
                 // Only auto-convert if clipboard contains structured HTML tags (tables/headings/lists/links)
                 // and plain text isn't already rich markdown
                 if (
@@ -1430,6 +1949,41 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
               if (update.docChanged && !suppressingExternalRef.current) {
                 const next = update.state.doc.toString();
                 callbacksRef.current.onChange(next, currentDocIdRef.current);
+              }
+              if (
+                !suppressingExternalRef.current &&
+                update.transactions.some((tr) =>
+                  tr.effects.some((e) => e.is(foldEffect) || e.is(unfoldEffect))
+                )
+              ) {
+                const lines: number[] = [];
+                const doc = update.state.doc;
+                foldedRanges(update.state).between(0, doc.length, (from) => {
+                  const ln = doc.lineAt(from).number;
+                  if (!lines.includes(ln)) lines.push(ln);
+                });
+                callbacksRef.current.onFoldedLinesChange?.(lines, currentDocIdRef.current);
+              }
+              if (!suppressingExternalRef.current && callbacksRef.current.onBookmarksChange) {
+                const prevBm = update.startState.field(bookmarkField);
+                const nextBm = update.state.field(bookmarkField);
+                const bmChanged =
+                  prevBm.length !== nextBm.length ||
+                  prevBm.some((pos, i) => nextBm[i] !== pos) ||
+                  update.transactions.some((tr) =>
+                    tr.effects.some(
+                      (e) =>
+                        e.is(toggleBookmarkEffect) ||
+                        e.is(clearBookmarksEffect) ||
+                        e.is(setBookmarksEffect)
+                    )
+                  );
+                if (bmChanged) {
+                  callbacksRef.current.onBookmarksChange(
+                    extractBookmarkLineNumbers(update.state),
+                    currentDocIdRef.current
+                  );
+                }
               }
               if (
                 update.docChanged &&
@@ -1477,6 +2031,56 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                   setRulerVersion((v) => v + 1);
                 }
 
+                // Inline Slash Commands (/) & Wiki-links ([[) in Markdown
+                const sel = update.state.selection.main;
+                const isMd = isMarkdownFilename(
+                  callbacksRef.current.fileName,
+                  callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
+                );
+                if (
+                  isMd &&
+                  sel.empty &&
+                  !update.view.composing &&
+                  !isInsideFencedCodeBlock(update.state.doc, lineObj.number)
+                ) {
+                  const beforeCursor = lineObj.text.slice(0, head - lineObj.from);
+                  const wikiMatch = beforeCursor.match(/\[\[([^\]|[\]]*)$/);
+                  const slashMatch = !wikiMatch ? beforeCursor.match(/^\s*\/([^\s/]*)$/) : null;
+                  if (wikiMatch || slashMatch) {
+                    const coords = update.view.coordsAtPos(head);
+                    const hostRect = hostRef.current?.getBoundingClientRect();
+                    if (coords && hostRect) {
+                      const left = Math.max(8, Math.min(coords.left - hostRect.left, hostRect.width - 280));
+                      const top = Math.max(8, Math.min(coords.bottom - hostRect.top + 4, hostRect.height - 220));
+                      if (wikiMatch) {
+                        setInlinePopup({
+                          kind: 'wiki',
+                          from: head - wikiMatch[0].length,
+                          to: head,
+                          query: wikiMatch[1],
+                          left,
+                          top,
+                        });
+                        setPopupActiveIndex(0);
+                      } else if (slashMatch) {
+                        setInlinePopup({
+                          kind: 'slash',
+                          from: head - slashMatch[1].length - 1,
+                          to: head,
+                          query: slashMatch[1],
+                          left,
+                          top,
+                        });
+                        setPopupActiveIndex(0);
+                      }
+                    }
+                  } else if (inlinePopupRef.current) {
+                    setInlinePopup(null);
+                  }
+                } else if (inlinePopupRef.current) {
+                  setInlinePopup(null);
+                }
+
                 // Typewriter mode: keep active line vertically centered on typing/selection
                 if (callbacksRef.current.settings.typewriterMode && (update.docChanged || update.selectionSet)) {
                   requestAnimationFrame(() => {
@@ -1508,6 +2112,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         const max = scroller.scrollHeight - scroller.clientHeight;
         const ratio = max > 0 ? scroller.scrollTop / max : 0;
         callbacksRef.current.onScrollRatio?.(ratio);
+        callbacksRef.current.onScrollTopChange?.(scroller.scrollTop, currentDocIdRef.current);
       };
       scroller.addEventListener('scroll', handleScroll, { passive: true });
       viewRef.current = view;
@@ -1548,6 +2153,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             settings.showWhitespaceSymbols ? [highlightWhitespace(), ideographicSpacePlugin] : []
           ),
           eolSymbolComp.current.reconfigure(settings.showNewlineSymbols ? newlineSymbolPlugin : []),
+          focusModeComp.current.reconfigure(settings.focusMode ? focusModePlugin : []),
         ],
       });
       if (settings.showRuler) {
@@ -1610,26 +2216,79 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       if (tabChanged) {
         lastDocIdRef.current = docId;
         composingBaseRef.current = null;
+        setInlinePopup(null);
       }
+
+      const applyTabRestore = () => {
+        const {
+          initialCursor: cur,
+          initialScrollTop: st,
+          initialFoldedLines: folds,
+          initialBookmarks: bms,
+        } = restoreStateRef.current;
+
+        if (cur && cur.line >= 1) {
+          const clampedLine = Math.max(1, Math.min(cur.line, view.state.doc.lines));
+          const lineObj = view.state.doc.line(clampedLine);
+          const colOffset = Math.max(0, Math.min((cur.col || 1) - 1, lineObj.length));
+          const anchor = lineObj.from + colOffset;
+          suppressingSelectionNotifyRef.current = true;
+          view.dispatch({ selection: { anchor } });
+          suppressingSelectionNotifyRef.current = false;
+        }
+
+        const prevFolded: StateEffect<unknown>[] = [];
+        foldedRanges(view.state).between(0, view.state.doc.length, (from, to) => {
+          prevFolded.push(unfoldEffect.of({ from, to }));
+        });
+        const foldEffects: StateEffect<unknown>[] = [...prevFolded];
+        if (Array.isArray(folds) && folds.length > 0) {
+          for (const ln of folds) {
+            if (ln >= 1 && ln <= view.state.doc.lines) {
+              const lineObj = view.state.doc.line(ln);
+              const range = foldable(view.state, lineObj.from, lineObj.to);
+              if (range) {
+                foldEffects.push(foldEffect.of(range));
+              }
+            }
+          }
+        }
+        foldEffects.push(setBookmarksEffect.of(Array.isArray(bms) ? bms : []));
+        if (foldEffects.length > 0) {
+          view.dispatch({ effects: foldEffects });
+        }
+
+        const targetScroll = Math.max(0, st ?? 0);
+        view.scrollDOM.scrollTop = targetScroll;
+        requestAnimationFrame(() => {
+          if (viewRef.current === view) {
+            view.scrollDOM.scrollTop = targetScroll;
+          }
+        });
+      };
+
       if (current === value) {
         if (tabChanged) {
+          suppressingExternalRef.current = true;
           view.dispatch({
             effects: [setFindScopeEffect.of(null), setFindHighlightsEffect.of(null)],
           });
+          applyTabRestore();
           callbacksRef.current.onFindScopeChange?.(null);
+          suppressingExternalRef.current = false;
         }
         return;
       }
 
       suppressingExternalRef.current = true;
       if (tabChanged) {
-        // Reset history/scope on tab switch
+        // Reset scope & restore cursor/folds/scroll on tab switch
         view.dispatch({
           changes: { from: 0, to: current.length, insert: value },
           selection: { anchor: 0 },
           effects: [setFindScopeEffect.of(null), setFindHighlightsEffect.of(null)],
         });
-        view.scrollDOM.scrollTop = 0;
+        applyTabRestore();
         callbacksRef.current.onFindScopeChange?.(null);
       } else {
         const prevScrollTop = view.scrollDOM.scrollTop;
@@ -1669,6 +2328,278 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       }
       suppressingExternalRef.current = false;
     }, [docId, value]);
+
+    const applyDocOrSelectionTransform = (
+      view: EditorView,
+      transformFn: (input: string) => string
+    ) => {
+      try {
+        const sel = view.state.selection.main;
+        if (!sel.empty) {
+          const orig = view.state.sliceDoc(sel.from, sel.to);
+          const next = transformFn(orig);
+          if (next !== orig) {
+            view.dispatch({
+              changes: { from: sel.from, to: sel.to, insert: next },
+              selection: { anchor: sel.from, head: sel.from + next.length },
+            });
+          }
+        } else {
+          const orig = view.state.doc.toString();
+          const next = transformFn(orig);
+          if (next !== orig) {
+            view.dispatch({
+              changes: { from: 0, to: orig.length, insert: next },
+              selection: { anchor: Math.min(sel.head, next.length) },
+            });
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        callbacksRef.current.onStatusNotify?.(`${callbacksRef.current.t.toasts.errorPrefix}: ${msg}`);
+      }
+    };
+
+    const executeContextAction = useCallback(
+      async (action: EditorContextAction, shouldRecord: boolean) => {
+        const view = viewRef.current;
+        if (!view) return;
+
+        switch (action) {
+          case 'undo':
+            if (undo(view) && shouldRecord) {
+              recordMacroStep({ type: 'cmCommand', command: 'undo' });
+            }
+            break;
+          case 'redo':
+            if (redo(view) && shouldRecord) {
+              recordMacroStep({ type: 'cmCommand', command: 'redo' });
+            }
+            break;
+          case 'cut':
+            performCut(view);
+            if (shouldRecord) {
+              recordMacroStep({ type: 'clipboard', action: 'cut' });
+            }
+            break;
+          case 'copy':
+            performCopy(view);
+            if (shouldRecord) {
+              recordMacroStep({ type: 'clipboard', action: 'copy' });
+            }
+            break;
+          case 'paste':
+            if (shouldRecord) {
+              recordMacroStep({ type: 'clipboard', action: 'paste' });
+            }
+            await performPaste();
+            return;
+          case 'delete':
+            if (view.state.selection.ranges.some((r) => !r.empty)) {
+              view.dispatch(view.state.replaceSelection(''));
+            }
+            if (shouldRecord) {
+              recordMacroStep({ type: 'contextAction', action: 'delete' });
+            }
+            break;
+          case 'selectAll':
+            selectAll(view);
+            if (shouldRecord) {
+              recordMacroStep({ type: 'cmCommand', command: 'selectAll' });
+            }
+            break;
+          case 'aiEditSelection':
+            callbacksRef.current.onAiEditSelection?.();
+            return;
+          case 'rectangularSelection': {
+            const next = !rectModeRef.current;
+            if (next && view.state.selection.ranges.length === 1 && !view.state.selection.main.empty) {
+              convertSelectionToRectangle(view);
+            }
+            setRectMode(next);
+            callbacksRef.current.onStatusNotify?.(
+              next
+                ? callbacksRef.current.t.contextMenu.rectModeOnToast
+                : callbacksRef.current.t.contextMenu.rectModeOffToast
+            );
+            break;
+          }
+          case 'indentTab':
+            applyPerLineTransform(view, indentLineTab);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'unindentTab':
+            applyPerLineTransform(view, unindentLineTab);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'indentSpace':
+            applyPerLineTransform(view, indentLineSpaces);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'unindentSpace':
+            applyPerLineTransform(view, unindentLineSpaces);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'insertComment': {
+            const effName = resolveEffectiveFilename(
+              callbacksRef.current.fileName,
+              callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
+            );
+            applyPerLineTransform(view, (line) => insertCommentLine(line, effName));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          }
+          case 'removeComment': {
+            const effName = resolveEffectiveFilename(
+              callbacksRef.current.fileName,
+              callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
+            );
+            applyPerLineTransform(view, (line) => removeCommentLine(line, effName));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          }
+          case 'spacesToTabs':
+            applySelectionOrLineTransform(view, (s) => spacesToTabsText(s, 4));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'tabsToSpaces':
+            applySelectionOrLineTransform(view, (s) => tabsToSpacesText(s, 4));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'toLowerCase':
+            applySelectionOrLineTransform(view, (s) => s.toLowerCase());
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'toUpperCase':
+            applySelectionOrLineTransform(view, (s) => s.toUpperCase());
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'reverseLines':
+            applyLineBlockTransform(view, reverseLines);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'sortLinesAsc':
+            applyLineBlockTransform(view, sortLinesAsc);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'sortLinesDesc':
+            applyLineBlockTransform(view, sortLinesDesc);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'dedupeLines':
+            applyLineBlockTransform(view, dedupeLines);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'removeEmptyLines':
+            applyLineBlockTransform(view, removeEmptyLines);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'trimLeading':
+            applyPerLineTransform(view, trimLeadingLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'trimTrailing':
+            applyPerLineTransform(view, trimTrailingLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'insertQuote':
+            applyPerLineTransform(view, insertQuoteLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'removeQuote':
+            applyPerLineTransform(view, removeQuoteLine);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'insertWrapLineBreaks':
+            insertWrapLineBreaks(view);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'removeLineBreaks':
+            removeLineBreaks(view);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'formatMarkdownTables':
+            applyLineBlockTransform(view, (lines) => {
+              const raw = lines.join('\n');
+              const hadTrailingEmpty = lines.length > 0 && lines[lines.length - 1] === '';
+              const cleaned = cleanAiMarkdown(raw, {
+                removeZeroWidth: false,
+                trimTrailingSpaces: false,
+                collapseBlankLines: false,
+                formatTables: true,
+                normalizeBullets: false,
+                fixHeadingSpacing: false,
+                normalizeQuotes: false,
+              }).replace(/\n$/, '');
+              const outLines = cleaned.split('\n');
+              if (hadTrailingEmpty && outLines[outLines.length - 1] !== '') {
+                outLines.push('');
+              }
+              return outLines;
+            });
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'formatJson':
+            applyDocOrSelectionTransform(view, formatJsonText);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'minifyJson':
+            applyDocOrSelectionTransform(view, minifyJsonText);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'sortJsonKeys':
+            applyDocOrSelectionTransform(view, sortJsonKeysText);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'jsonToYaml':
+            applyDocOrSelectionTransform(view, jsonToYamlText);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'yamlToJson':
+            applyDocOrSelectionTransform(view, yamlToJsonText);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'formatEnv':
+            applyDocOrSelectionTransform(view, formatEnvText);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'to-full':
+          case 'to-full-kana':
+          case 'to-full-alnum':
+          case 'to-half':
+          case 'to-half-kana':
+          case 'to-half-alnum':
+            applySelectionOrLineTransform(view, (s) => convertHalfFullWidth(s, action));
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'toggleBookmark':
+            toggleBookmarkAtCursor(view);
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'nextBookmark':
+            jumpToBookmark(view, 'next');
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'prevBookmark':
+            jumpToBookmark(view, 'prev');
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+          case 'clearBookmarks':
+            view.dispatch({ effects: clearBookmarksEffect.of(undefined) });
+            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
+            break;
+        }
+        view.focus();
+      },
+      [recordMacroStep]
+    );
+
+    const handleContextAction = useCallback(
+      (action: EditorContextAction) => {
+        void executeContextAction(action, true);
+      },
+      [executeContextAction]
+    );
 
     useImperativeHandle(ref, () => ({
       focus: () => viewRef.current?.focus(),
@@ -1808,6 +2739,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           suppressingMacroRecordRef.current = false;
         }
       },
+      runContextAction: (action: EditorContextAction) => executeContextAction(action, false),
       selectRange: (from: number, to: number, options?: { focus?: boolean }) => {
         const view = viewRef.current;
         if (!view) return;
@@ -1897,199 +2829,156 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         selectNextOccurrence(view);
         view.focus();
       },
-    }));
-
-    const executeContextAction = useCallback(
-      async (action: EditorContextAction, shouldRecord: boolean) => {
+      toggleBookmarkAction: () => {
         const view = viewRef.current;
         if (!view) return;
-
-        switch (action) {
-          case 'undo':
-            if (undo(view) && shouldRecord) {
-              recordMacroStep({ type: 'cmCommand', command: 'undo' });
-            }
-            break;
-          case 'redo':
-            if (redo(view) && shouldRecord) {
-              recordMacroStep({ type: 'cmCommand', command: 'redo' });
-            }
-            break;
-          case 'cut':
-            performCut(view);
-            if (shouldRecord) {
-              recordMacroStep({ type: 'clipboard', action: 'cut' });
-            }
-            break;
-          case 'copy':
-            performCopy(view);
-            if (shouldRecord) {
-              recordMacroStep({ type: 'clipboard', action: 'copy' });
-            }
-            break;
-          case 'paste':
-            if (shouldRecord) {
-              recordMacroStep({ type: 'clipboard', action: 'paste' });
-            }
-            await performPaste();
-            return;
-          case 'delete':
-            if (view.state.selection.ranges.some((r) => !r.empty)) {
-              view.dispatch(view.state.replaceSelection(''));
-            }
-            if (shouldRecord) {
-              recordMacroStep({ type: 'contextAction', action: 'delete' });
-            }
-            break;
-          case 'selectAll':
-            selectAll(view);
-            if (shouldRecord) {
-              recordMacroStep({ type: 'cmCommand', command: 'selectAll' });
-            }
-            break;
-          case 'aiEditSelection':
-            callbacksRef.current.onAiEditSelection?.();
-            return;
-          case 'rectangularSelection': {
-            const next = !rectModeRef.current;
-            if (next && view.state.selection.ranges.length === 1 && !view.state.selection.main.empty) {
-              convertSelectionToRectangle(view);
-            }
-            setRectMode(next);
-            callbacksRef.current.onStatusNotify?.(
-              next
-                ? callbacksRef.current.t.contextMenu.rectModeOnToast
-                : callbacksRef.current.t.contextMenu.rectModeOffToast
-            );
-            break;
-          }
-          case 'indentTab':
-            applyPerLineTransform(view, indentLineTab);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'unindentTab':
-            applyPerLineTransform(view, unindentLineTab);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'indentSpace':
-            applyPerLineTransform(view, indentLineSpaces);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'unindentSpace':
-            applyPerLineTransform(view, unindentLineSpaces);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'insertComment': {
-            const effName = resolveEffectiveFilename(
-              callbacksRef.current.fileName,
-              callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
-            );
-            applyPerLineTransform(view, (line) => insertCommentLine(line, effName));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          }
-          case 'removeComment': {
-            const effName = resolveEffectiveFilename(
-              callbacksRef.current.fileName,
-              callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
-            );
-            applyPerLineTransform(view, (line) => removeCommentLine(line, effName));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          }
-          case 'spacesToTabs':
-            applySelectionOrLineTransform(view, (s) => spacesToTabsText(s, 4));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'tabsToSpaces':
-            applySelectionOrLineTransform(view, (s) => tabsToSpacesText(s, 4));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'toLowerCase':
-            applySelectionOrLineTransform(view, (s) => s.toLowerCase());
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'toUpperCase':
-            applySelectionOrLineTransform(view, (s) => s.toUpperCase());
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'reverseLines':
-            applyLineBlockTransform(view, reverseLines);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'sortLinesAsc':
-            applyLineBlockTransform(view, sortLinesAsc);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'sortLinesDesc':
-            applyLineBlockTransform(view, sortLinesDesc);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'dedupeLines':
-            applyLineBlockTransform(view, dedupeLines);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'trimLeading':
-            applyPerLineTransform(view, trimLeadingLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'trimTrailing':
-            applyPerLineTransform(view, trimTrailingLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'insertQuote':
-            applyPerLineTransform(view, insertQuoteLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'removeQuote':
-            applyPerLineTransform(view, removeQuoteLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'insertWrapLineBreaks':
-            insertWrapLineBreaks(view);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'removeLineBreaks':
-            removeLineBreaks(view);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'to-full':
-          case 'to-full-kana':
-          case 'to-full-alnum':
-          case 'to-half':
-          case 'to-half-kana':
-          case 'to-half-alnum':
-            applySelectionOrLineTransform(view, (s) => convertHalfFullWidth(s, action));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'toggleBookmark':
-            toggleBookmarkAtCursor(view);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'nextBookmark':
-            jumpToBookmark(view, 'next');
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'prevBookmark':
-            jumpToBookmark(view, 'prev');
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'clearBookmarks':
-            view.dispatch({ effects: clearBookmarksEffect.of(undefined) });
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-        }
+        toggleBookmarkAtCursor(view);
         view.focus();
       },
-      [recordMacroStep]
+      nextBookmarkAction: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        jumpToBookmark(view, 'next');
+        view.focus();
+      },
+      prevBookmarkAction: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        jumpToBookmark(view, 'prev');
+        view.focus();
+      },
+      clearBookmarksAction: () => {
+        const view = viewRef.current;
+        if (!view) return;
+        view.dispatch({ effects: clearBookmarksEffect.of(undefined) });
+        view.focus();
+      },
+      getBookmarkedLines: () => {
+        const view = viewRef.current;
+        if (!view) return [];
+        return extractBookmarkLineNumbers(view.state);
+      },
+    }));
+
+    type InlinePopupItem =
+      | { kind: 'slash'; item: SlashPopupItem }
+      | { kind: 'wiki'; item: WorkspaceNoteItem };
+
+    const slashCandidates = useMemo(
+      () => buildSlashItems(locale, customSnippets),
+      [locale, customSnippets]
     );
 
-    const handleContextAction = useCallback(
-      (action: EditorContextAction) => {
-        void executeContextAction(action, true);
-      },
-      [executeContextAction]
-    );
+    const popupItems = useMemo<InlinePopupItem[]>(() => {
+      if (!inlinePopup) return [];
+      const q = inlinePopup.query.trim().toLowerCase();
+      if (inlinePopup.kind === 'slash') {
+        return slashCandidates
+          .filter((item) => {
+            if (!q) return true;
+            return (
+              item.label.toLowerCase().includes(q) ||
+              item.keywords.toLowerCase().includes(q) ||
+              item.hint.toLowerCase().includes(q)
+            );
+          })
+          .map((item) => ({ kind: 'slash' as const, item }));
+      }
+      return workspaceNotes
+        .filter((note) => {
+          if (!q) return true;
+          return (
+            note.name.toLowerCase().includes(q) ||
+            note.relPath.toLowerCase().includes(q)
+          );
+        })
+        .slice(0, 20)
+        .map((item) => ({ kind: 'wiki' as const, item }));
+    }, [inlinePopup, slashCandidates, workspaceNotes]);
+
+    const applyInlinePopupItem = useCallback((entry: InlinePopupItem) => {
+      const popup = inlinePopupRef.current;
+      const view = viewRef.current;
+      if (!popup || !view) return;
+      setInlinePopup(null);
+
+      if (entry.kind === 'wiki') {
+        const afterSlice = view.state.sliceDoc(popup.to, popup.to + 2);
+        const replaceTo = afterSlice === ']]'
+          ? popup.to + 2
+          : afterSlice.startsWith(']')
+          ? popup.to + 1
+          : popup.to;
+        const inserted = `[[${entry.item.name}]]`;
+        view.dispatch({
+          changes: { from: popup.from, to: replaceTo, insert: inserted },
+          selection: { anchor: popup.from + inserted.length },
+        });
+        view.focus();
+        return;
+      }
+
+      if (entry.item.action === 'toc') {
+        const docWithoutSlash =
+          view.state.sliceDoc(0, popup.from) + view.state.sliceDoc(popup.to);
+        const { nextMarkdown } = upsertTocInMarkdown(docWithoutSlash, popup.from);
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: nextMarkdown },
+          selection: { anchor: Math.min(popup.from, nextMarkdown.length) },
+        });
+        view.focus();
+        return;
+      }
+
+      const textToInsert = entry.item.insertText ?? '';
+      const nextCursor =
+        entry.item.id === 'code'
+          ? popup.from + '```ts\n'.length
+          : popup.from + textToInsert.length;
+      view.dispatch({
+        changes: { from: popup.from, to: popup.to, insert: textToInsert },
+        selection: { anchor: nextCursor },
+      });
+      view.focus();
+    }, []);
+
+    popupKeyHandlerRef.current = (key: string) => {
+      if (!inlinePopupRef.current) return false;
+      if (key === 'Escape') {
+        setInlinePopup(null);
+        return true;
+      }
+      if (popupItems.length === 0) return false;
+      if (key === 'ArrowDown') {
+        setPopupActiveIndex((prev) => (prev + 1) % popupItems.length);
+        return true;
+      }
+      if (key === 'ArrowUp') {
+        setPopupActiveIndex((prev) => (prev - 1 + popupItems.length) % popupItems.length);
+        return true;
+      }
+      if (key === 'Enter' || key === 'Tab') {
+        const idx = Math.max(0, Math.min(popupActiveIndex, popupItems.length - 1));
+        const target = popupItems[idx];
+        if (target) {
+          applyInlinePopupItem(target);
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const popupRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+      if (!inlinePopup) return;
+      const handleOutside = (e: MouseEvent) => {
+        if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+          setInlinePopup(null);
+        }
+      };
+      window.addEventListener('mousedown', handleOutside);
+      return () => window.removeEventListener('mousedown', handleOutside);
+    }, [inlinePopup]);
 
     const effectiveWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
 
@@ -2108,6 +2997,56 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           />
         )}
         <div ref={hostRef} className="editor-codemirror-host" />
+        {inlinePopup && popupItems.length > 0 && (
+          <div
+            ref={popupRef}
+            className="editor-inline-popup"
+            style={{ left: inlinePopup.left, top: inlinePopup.top }}
+            onMouseDown={(e) => e.preventDefault()}
+          >
+            <div className="editor-inline-popup-header">
+              {inlinePopup.kind === 'slash'
+                ? locale === 'ja'
+                  ? 'スラッシュコマンド'
+                  : 'Slash Commands'
+                : locale === 'ja'
+                ? 'Wiki リンク (ノート)'
+                : 'Wiki Link Note'}
+            </div>
+            <div className="editor-inline-popup-list">
+              {popupItems.map((entry, idx) => {
+                const isActive = idx === popupActiveIndex;
+                const key =
+                  entry.kind === 'slash' ? `slash:${entry.item.id}` : `wiki:${entry.item.path}`;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`editor-inline-popup-item ${isActive ? 'is-active' : ''}`}
+                    onMouseEnter={() => setPopupActiveIndex(idx)}
+                    onClick={() => applyInlinePopupItem(entry)}
+                  >
+                    <span className="editor-inline-popup-title">
+                      {entry.kind === 'slash' ? (
+                        <>
+                          {entry.item.isCustom && (
+                            <span className="editor-inline-popup-badge">★</span>
+                          )}
+                          {entry.item.label}
+                        </>
+                      ) : (
+                        entry.item.name
+                      )}
+                    </span>
+                    <span className="editor-inline-popup-hint">
+                      {entry.kind === 'slash' ? entry.item.hint : entry.item.relPath}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <EditorContextMenu
           t={t}
           menu={contextMenu}

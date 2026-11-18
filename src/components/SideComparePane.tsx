@@ -1,13 +1,22 @@
 import React, { useMemo } from 'react';
 import { diffLines } from 'diff';
 import { ArrowLeftRight, Columns2, GitCompare, X } from 'lucide-react';
-import type { DocumentTab, EditorSettings, ThemeId } from '../types';
+import type { DocumentTab, EditorSettings, Locale, ThemeId } from '../types';
 import type { Translations } from '../i18n/types';
 import { resolveEffectiveLanguageId } from '../utils/language';
-import { EditorPane } from './EditorPane';
+import { EditorPane, type EditorHandle, type WorkspaceNoteItem } from './EditorPane';
+
+export interface GitHeadComparisonState {
+  tabId: string;
+  title: string;
+  branch: string | null;
+  existsInHead: boolean;
+  headContent: string;
+}
 
 interface SideComparePaneProps {
   t: Translations;
+  locale?: Locale;
   mode: 'edit' | 'diff';
   onChangeMode: (mode: 'edit' | 'diff') => void;
   tabs: DocumentTab[];
@@ -18,6 +27,15 @@ interface SideComparePaneProps {
   onClose: () => void;
   onChangeTabContent: (tabId: string, nextContent: string) => void;
   onStatusNotify?: (message: string) => void;
+  gitHeadComparison?: GitHeadComparisonState | null;
+  onClearGitHeadComparison?: () => void;
+  sideEditorRef?: React.Ref<EditorHandle>;
+  focusedPane?: 'main' | 'side';
+  onFocusSidePane?: () => void;
+  workspaceRoot?: string | null;
+  workspaceNotes?: WorkspaceNoteItem[];
+  onOpenWikiLink?: (target: string) => void;
+  onBookmarksChange?: (tabId: string, lines: number[]) => void;
   theme: ThemeId;
   settings: EditorSettings;
 }
@@ -31,6 +49,7 @@ interface DiffDisplayLine {
 
 export const SideComparePane: React.FC<SideComparePaneProps> = ({
   t,
+  locale = 'ja',
   mode,
   onChangeMode,
   tabs,
@@ -41,6 +60,15 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
   onClose,
   onChangeTabContent,
   onStatusNotify,
+  gitHeadComparison,
+  onClearGitHeadComparison,
+  sideEditorRef,
+  focusedPane = 'main',
+  onFocusSidePane,
+  workspaceRoot,
+  workspaceNotes,
+  onOpenWikiLink,
+  onBookmarksChange,
   theme,
   settings,
 }) => {
@@ -55,11 +83,19 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
     [sideTab.title, sideTab.filePath, sideTab.content, sideTab.languageOverride]
   );
 
+  const isGitHeadDiff = Boolean(mode === 'diff' && gitHeadComparison);
+  const workingTabForGitHead = useMemo(() => {
+    if (!gitHeadComparison) return activeTab;
+    return tabs.find((tb) => tb.id === gitHeadComparison.tabId) || activeTab;
+  }, [gitHeadComparison, tabs, activeTab]);
+
   const diffData = useMemo(() => {
     if (mode !== 'diff') {
       return { lines: [] as DiffDisplayLine[], additions: 0, deletions: 0 };
     }
-    const parts = diffLines(activeTab.content, sideTab.content);
+    const leftText = gitHeadComparison ? gitHeadComparison.headContent : activeTab.content;
+    const rightText = gitHeadComparison ? workingTabForGitHead.content : sideTab.content;
+    const parts = diffLines(leftText, rightText);
     const lines: DiffDisplayLine[] = [];
     let additions = 0;
     let deletions = 0;
@@ -88,17 +124,30 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
     }
 
     return { lines, additions, deletions };
-  }, [mode, activeTab.content, sideTab.content]);
+  }, [mode, gitHeadComparison, activeTab.content, workingTabForGitHead.content, sideTab.content]);
+
+  const leftLabel = isGitHeadDiff
+    ? `HEAD${gitHeadComparison?.branch ? ` (${gitHeadComparison.branch})` : ''}: ${gitHeadComparison?.title}${gitHeadComparison?.existsInHead ? '' : ' [untracked]'}`
+    : activeTab.title;
+  const rightLabel = isGitHeadDiff ? workingTabForGitHead.title : sideTab.title;
 
   return (
-    <div className="side-compare-pane">
+    <div
+      className={`side-compare-pane ${mode === 'edit' && focusedPane === 'side' ? 'is-focused' : ''}`}
+      onMouseDown={() => {
+        if (mode === 'edit') onFocusSidePane?.();
+      }}
+    >
       <div className="side-compare-header">
         <div className="side-compare-title-group">
           <div className="segmented-control">
             <button
               type="button"
               className={`seg-btn ${mode === 'edit' ? 'is-active' : ''}`}
-              onClick={() => onChangeMode('edit')}
+              onClick={() => {
+                onClearGitHeadComparison?.();
+                onChangeMode('edit');
+              }}
               title={t.sideSplit.title}
             >
               <Columns2 size={13} />
@@ -115,32 +164,54 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
             </button>
           </div>
 
-          <select
-            className="side-compare-select"
-            value={sideTab.id}
-            onChange={(e) => onSelectSideTab(e.target.value)}
-            aria-label={t.sideSplit.selectTabPlaceholder}
-          >
-            {tabs.map((tb) => (
-              <option key={tb.id} value={tb.id}>
-                {tb.dirty ? '● ' : ''}
-                {tb.title}
-              </option>
-            ))}
-          </select>
+          {isGitHeadDiff ? (
+            <div className="side-compare-git-pill">
+              <span className="git-head-badge">
+                Git HEAD{gitHeadComparison?.branch ? ` (${gitHeadComparison.branch})` : ''}
+              </span>
+              {tabs.length > 1 && onClearGitHeadComparison && (
+                <button
+                  type="button"
+                  className="mini-pill-btn"
+                  onClick={onClearGitHeadComparison}
+                >
+                  {t.sideSplit.compareTitle}
+                </button>
+              )}
+            </div>
+          ) : (
+            <select
+              className="side-compare-select"
+              value={sideTab.id}
+              onChange={(e) => {
+                onClearGitHeadComparison?.();
+                onSelectSideTab(e.target.value);
+              }}
+              aria-label={t.sideSplit.selectTabPlaceholder}
+            >
+              {tabs.map((tb) => (
+                <option key={tb.id} value={tb.id}>
+                  {tb.dirty ? '● ' : ''}
+                  {tb.title}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="side-compare-actions">
-          <button
-            type="button"
-            className="mini-pill-btn"
-            onClick={onSwapTabs}
-            disabled={activeTab.id === sideTab.id}
-            title={t.sideSplit.swapBtn}
-          >
-            <ArrowLeftRight size={12} />
-            <span>{t.sideSplit.swapBtn}</span>
-          </button>
+          {!isGitHeadDiff && (
+            <button
+              type="button"
+              className="mini-pill-btn"
+              onClick={onSwapTabs}
+              disabled={activeTab.id === sideTab.id}
+              title={t.sideSplit.swapBtn}
+            >
+              <ArrowLeftRight size={12} />
+              <span>{t.sideSplit.swapBtn}</span>
+            </button>
+          )}
           <button
             type="button"
             className="icon-btn"
@@ -156,15 +227,27 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
       {mode === 'edit' ? (
         <div className="side-compare-editor-host">
           <EditorPane
+            ref={sideEditorRef}
             t={t}
+            locale={locale}
             docId={`side:${sideTab.id}`}
             fileName={sideTab.title}
+            filePath={sideTab.filePath}
+            workspaceRoot={workspaceRoot}
             languageOverride={sideTab.languageOverride}
             detectedLanguageId={sideDetectedLanguageId}
             value={sideTab.content}
+            initialCursor={{ line: sideTab.cursorLine, col: sideTab.cursorCol }}
+            initialScrollTop={sideTab.scrollTop}
+            initialFoldedLines={sideTab.foldedLines}
+            initialBookmarks={sideTab.bookmarks}
             onChange={(nextContent) => onChangeTabContent(sideTab.id, nextContent)}
+            onBookmarksChange={(lines) => onBookmarksChange?.(sideTab.id, lines)}
             onCursorChange={() => {}}
+            onFocusPane={onFocusSidePane}
             onStatusNotify={onStatusNotify}
+            workspaceNotes={workspaceNotes}
+            onOpenWikiLink={onOpenWikiLink}
             theme={theme}
             settings={settings}
           />
@@ -173,8 +256,8 @@ export const SideComparePane: React.FC<SideComparePaneProps> = ({
         <div className="side-compare-diff-host">
           <div className="side-compare-diff-meta">
             <div className="ai-diff-legend side-compare-legend">
-              <span className="ai-diff-legend-old">− {activeTab.title}</span>
-              <span className="ai-diff-legend-new">+ {sideTab.title}</span>
+              <span className="ai-diff-legend-old">− {leftLabel}</span>
+              <span className="ai-diff-legend-new">+ {rightLabel}</span>
             </div>
             <div className="diff-summary">
               <span className="diff-add">

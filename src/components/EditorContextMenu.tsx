@@ -26,12 +26,20 @@ export type EditorContextAction =
   | 'sortLinesAsc'
   | 'sortLinesDesc'
   | 'dedupeLines'
+  | 'removeEmptyLines'
   | 'trimLeading'
   | 'trimTrailing'
   | 'insertQuote'
   | 'removeQuote'
   | 'insertWrapLineBreaks'
   | 'removeLineBreaks'
+  | 'formatMarkdownTables'
+  | 'formatJson'
+  | 'minifyJson'
+  | 'sortJsonKeys'
+  | 'jsonToYaml'
+  | 'yamlToJson'
+  | 'formatEnv'
   | 'to-full'
   | 'to-full-kana'
   | 'to-full-alnum'
@@ -62,7 +70,7 @@ interface EditorContextMenuProps {
   onAction: (action: EditorContextAction) => void;
 }
 
-type SubmenuId = 'advanced' | 'width' | 'bookmarks' | null;
+type SubmenuId = 'advanced' | 'width' | 'bookmarks' | 'data' | null;
 
 export const EditorContextMenu: React.FC<EditorContextMenuProps> = ({
   t,
@@ -298,6 +306,17 @@ export const EditorContextMenu: React.FC<EditorContextMenuProps> = ({
           <span className="editor-ctx-label">{cm.bookmarks}</span>
           <ChevronRight size={13} className="editor-ctx-arrow" />
         </div>
+
+        <div
+          className={`editor-ctx-item has-sub ${openSub === 'data' ? 'is-open' : ''}`}
+          onMouseEnter={(e) => handleOpenSub('data', e.currentTarget)}
+          onMouseLeave={scheduleCloseSub}
+          onClick={(e) => handleOpenSub('data', e.currentTarget)}
+        >
+          <span className="editor-ctx-check" />
+          <span className="editor-ctx-label">JSON / YAML / Table</span>
+          <ChevronRight size={13} className="editor-ctx-arrow" />
+        </div>
       </div>
 
       {openSub && (
@@ -334,6 +353,7 @@ export const EditorContextMenu: React.FC<EditorContextMenuProps> = ({
               {renderItem(cm.sortLinesAsc, 'sortLinesAsc')}
               {renderItem(cm.sortLinesDesc, 'sortLinesDesc')}
               {renderItem(cm.dedupeLines, 'dedupeLines')}
+              {renderItem(cm.removeEmptyLines, 'removeEmptyLines')}
               <div className="editor-ctx-sep" />
               {renderItem(cm.trimLeading, 'trimLeading', {
                 shortcut: formatShortcut('⌘+⇧+Space'),
@@ -378,6 +398,21 @@ export const EditorContextMenu: React.FC<EditorContextMenuProps> = ({
               {renderItem(cm.clearBookmarks, 'clearBookmarks', {
                 disabled: !menu.hasBookmarks,
               })}
+            </>
+          )}
+
+          {openSub === 'data' && (
+            <>
+              {renderItem(t.actions.formatMarkdownTables, 'formatMarkdownTables')}
+              <div className="editor-ctx-sep" />
+              {renderItem(t.actions.formatJson, 'formatJson')}
+              {renderItem(t.actions.minifyJson, 'minifyJson')}
+              {renderItem(t.actions.sortJsonKeys, 'sortJsonKeys')}
+              <div className="editor-ctx-sep" />
+              {renderItem(t.actions.jsonToYaml, 'jsonToYaml')}
+              {renderItem(t.actions.yamlToJson, 'yamlToJson')}
+              <div className="editor-ctx-sep" />
+              {renderItem(t.actions.formatEnv, 'formatEnv')}
             </>
           )}
         </div>

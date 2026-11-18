@@ -14,6 +14,12 @@ import {
   Trash2,
   Plus,
   Settings,
+  ListChecks,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 import { diffLines } from 'diff';
 import type {
@@ -23,7 +29,9 @@ import type {
   DocumentStats,
   EditorSettings,
   InspectorTab,
+  Locale,
   PreviewTheme,
+  ReviewFinding,
   Snapshot,
   SyntaxPresetId,
   TextEncodingId,
@@ -32,16 +40,20 @@ import type {
 import type { Translations } from '../i18n/types';
 import { extractFrontmatter, updateFrontmatter } from '../utils/markdown';
 import { TEXT_ENCODINGS } from '../utils/encodings';
-import { formatShortcut } from '../utils/platform';
+import { formatShortcut, sendAiChat } from '../utils/platform';
+import { parseAiReviewFindings, runLocalDocumentReview } from '../utils/documentReview';
 import { AiChatPanel } from './AiChatPanel';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
 interface InspectorDrawerProps {
   t: Translations;
+  locale?: Locale;
   activeTab: InspectorTab;
   onTabChange: (tab: InspectorTab) => void;
   markdown: string;
   activeDocTitle?: string;
+  activeFilePath?: string;
+  activeTabId?: string;
   savedContent: string;
   stats: DocumentStats;
   snapshots: Snapshot[];
@@ -62,20 +74,27 @@ interface InspectorDrawerProps {
   onInsertToEditor: (text: string) => void;
   onReplaceDocument: (text: string, createSnapshot?: boolean) => void;
   onCopyAiReply: (text: string) => void;
+  onSaveChatAsNote?: (title: string, markdown: string) => void;
   workspaceRoot: string | null;
+  workspaceFilePaths?: string[];
   onWorkspaceRefresh?: () => void;
   onFileWritten?: (relativePath: string) => void;
   onCliTurnComplete?: () => void;
   onRequestDiffPreview?: (req: DiffPreviewRequest) => void;
+  onJumpToLine?: (line: number) => void;
+  onApplyReviewFix?: (finding: ReviewFinding) => void;
   onOpenFullSettings: () => void;
 }
 
 export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   t,
+  locale = 'ja',
   activeTab,
   onTabChange,
   markdown,
   activeDocTitle,
+  activeFilePath,
+  activeTabId,
   savedContent,
   stats,
   snapshots,
@@ -96,17 +115,81 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   onInsertToEditor,
   onReplaceDocument,
   onCopyAiReply,
+  onSaveChatAsNote,
   workspaceRoot,
+  workspaceFilePaths,
   onWorkspaceRefresh,
   onFileWritten,
   onCliTurnComplete,
   onRequestDiffPreview,
+  onJumpToLine,
+  onApplyReviewFix,
   onOpenFullSettings,
 }) => {
   const [snapLabel, setSnapLabel] = useState('');
   const [compareId, setCompareId] = useState<string>('saved');
   const [newFmKey, setNewFmKey] = useState('');
   const [newFmVal, setNewFmVal] = useState('');
+  const [reviewRefreshTick, setReviewRefreshTick] = useState(0);
+  const [aiFindings, setAiFindings] = useState<ReviewFinding[]>([]);
+  const [aiReviewBusy, setAiReviewBusy] = useState(false);
+  const [aiReviewError, setAiReviewError] = useState<string | null>(null);
+
+  const localFindings = useMemo(() => {
+    if (activeTab !== 'review') return [];
+    void reviewRefreshTick;
+    return runLocalDocumentReview({
+      markdown,
+      filePath: activeFilePath,
+      workspaceRoot,
+      workspaceFilePaths,
+      locale,
+    });
+  }, [activeTab, markdown, activeFilePath, workspaceRoot, workspaceFilePaths, locale, reviewRefreshTick]);
+
+  const combinedFindings = useMemo(
+    () => [...localFindings, ...aiFindings].sort((a, b) => a.line - b.line),
+    [localFindings, aiFindings]
+  );
+
+  const handleRunAiReview = async () => {
+    if (aiReviewBusy) return;
+    setAiReviewBusy(true);
+    setAiReviewError(null);
+    const numberedDoc = markdown
+      .split(/\r?\n/)
+      .slice(0, 400)
+      .map((line, i) => `${i + 1}: ${line}`)
+      .join('\n');
+    const systemPrompt =
+      locale === 'ja'
+        ? 'あなたは技術ドキュメント・文章の校正レビュアーです。誤字脱字、文法誤り、用語の不統一、曖昧な表現、論理の飛躍を見つけ、必ずJSON配列のみを返してください。各要素は {"line": 行番号(整数), "severity": "error"|"warning"|"info", "category": "typo"|"consistency"|"structure"|"ai", "title": "短い指摘タイトル", "detail": "具体的な改善提案", "original": "置換元の文字列(任意)", "replacement": "置換後の文字列(任意)"} の形式にしてください。問題がなければ [] を返してください。'
+        : 'You are a meticulous technical proofreader. Identify typos, grammar errors, inconsistent terminology, or unclear phrasing. Return ONLY a JSON array of objects: [{"line": number, "severity": "error"|"warning"|"info", "category": "typo"|"consistency"|"structure"|"ai", "title": string, "detail": string, "original"?: string, "replacement"?: string}]. Return [] if none.';
+    try {
+      const res = await sendAiChat({
+        requestId: `doc-review-${Date.now()}`,
+        provider: aiConfig.provider,
+        model: aiConfig.model.trim() || undefined,
+        apiKey: aiConfig.apiKeys[aiConfig.provider],
+        baseUrl: aiConfig.baseUrls[aiConfig.provider] || undefined,
+        customCliCmd: aiConfig.customCliCmd,
+        systemPrompt,
+        messages: [
+          {
+            role: 'user',
+            content: `Document (${activeDocTitle || 'Untitled'}):\n\n${numberedDoc}`,
+          },
+        ],
+        workspaceDir: workspaceRoot,
+        allowWorkspaceWrite: false,
+      });
+      setAiFindings(parseAiReviewFindings(res.content));
+    } catch (err) {
+      setAiReviewError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAiReviewBusy(false);
+    }
+  };
 
   const frontmatter = useMemo(() => extractFrontmatter(markdown), [markdown]);
 
@@ -213,6 +296,15 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
         </button>
         <button
           type="button"
+          className={`ins-tab-btn ${activeTab === 'review' ? 'is-active' : ''}`}
+          onClick={() => onTabChange('review')}
+          title={t.inspector.review}
+        >
+          <ListChecks size={14} />
+          <span>{t.inspector.review}</span>
+        </button>
+        <button
+          type="button"
           className={`ins-tab-btn ${activeTab === 'settings' ? 'is-active' : ''}`}
           onClick={() => onTabChange('settings')}
           title={t.inspector.settings}
@@ -228,11 +320,13 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             t={t}
             markdown={markdown}
             activeDocTitle={activeDocTitle}
+            activeTabId={activeTabId}
             config={aiConfig}
             onConfigChange={onAiConfigChange}
             onInsertToEditor={onInsertToEditor}
             onReplaceDocument={onReplaceDocument}
             onCopyReply={onCopyAiReply}
+            onSaveChatAsNote={onSaveChatAsNote}
             workspaceRoot={workspaceRoot}
             aiFolderMode={settings.aiFolderMode}
             onAiFolderModeChange={(nextMode) =>
@@ -547,6 +641,99 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
           </div>
         )}
 
+        {activeTab === 'review' && (
+          <div className="ins-panel">
+            <h4 className="ins-title">{t.reviewPanel.title}</h4>
+            <p className="ins-desc">{t.reviewPanel.desc}</p>
+
+            <div className="review-actions-row">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => setReviewRefreshTick((v) => v + 1)}
+              >
+                <ListChecks size={14} />
+                <span>{t.reviewPanel.runLocalBtn}</span>
+              </button>
+              <button
+                type="button"
+                className="primary-btn"
+                disabled={aiReviewBusy}
+                onClick={handleRunAiReview}
+              >
+                {aiReviewBusy ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+                <span>{aiReviewBusy ? t.reviewPanel.runningAiBtn : t.reviewPanel.runAiBtn}</span>
+              </button>
+            </div>
+
+            {aiReviewError && <div className="error-box">{aiReviewError}</div>}
+
+            <div className="review-summary-row">
+              <span className="sub-label">
+                {t.reviewPanel.countSummary.replace('{count}', String(combinedFindings.length))}
+              </span>
+              {aiFindings.length > 0 && (
+                <button
+                  type="button"
+                  className="mini-pill-btn"
+                  onClick={() => setAiFindings([])}
+                >
+                  AI Clear
+                </button>
+              )}
+            </div>
+
+            {combinedFindings.length === 0 ? (
+              <div className="review-empty-state">
+                <CheckCircle2 size={20} />
+                <span>{t.reviewPanel.noFindings}</span>
+              </div>
+            ) : (
+              <div className="review-findings-list">
+                {combinedFindings.map((finding) => {
+                  const SevIcon =
+                    finding.severity === 'error'
+                      ? AlertCircle
+                      : finding.severity === 'warning'
+                        ? AlertTriangle
+                        : Info;
+                  return (
+                    <div key={finding.id} className={`review-finding-card is-${finding.severity}`}>
+                      <div
+                        className="review-finding-head"
+                        onClick={() => onJumpToLine?.(finding.line)}
+                        title={t.reviewPanel.jumpToLineTitle}
+                      >
+                        <SevIcon size={14} className={`review-sev-icon is-${finding.severity}`} />
+                        <span className="review-finding-title">{finding.title}</span>
+                        <span className="review-finding-line">L{finding.line}</span>
+                      </div>
+                      {finding.detail && <div className="review-finding-detail">{finding.detail}</div>}
+                      <div className="review-finding-footer">
+                        <span className="review-cat-pill">{finding.category}</span>
+                        {finding.original && finding.replacement !== undefined && onApplyReviewFix && (
+                          <button
+                            type="button"
+                            className="mini-pill-btn is-active"
+                            onClick={() => {
+                              onApplyReviewFix(finding);
+                              if (finding.id.startsWith('ai-rev-')) {
+                                setAiFindings((prev) => prev.filter((f) => f.id !== finding.id));
+                              }
+                            }}
+                          >
+                            {t.reviewPanel.applyFixBtn}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'settings' && (
           <div className="ins-panel">
             <div className="field-row">
@@ -643,6 +830,32 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                 onChange={(e) =>
                   onSettingsChange({ ...settings, wordGoal: Math.max(0, Number(e.target.value)) })
                 }
+              />
+            </div>
+
+            <div className="field-row">
+              <label>{t.inspector.settingsLabels.imageAssetFolder}</label>
+              <input
+                type="text"
+                className="text-input"
+                value={settings.imageAssetFolder ?? 'assets'}
+                onChange={(e) =>
+                  onSettingsChange({ ...settings, imageAssetFolder: e.target.value })
+                }
+                placeholder="assets"
+              />
+            </div>
+
+            <div className="field-row">
+              <label>{t.inspector.settingsLabels.dailyNotesFolder}</label>
+              <input
+                type="text"
+                className="text-input"
+                value={settings.dailyNotesFolder ?? ''}
+                onChange={(e) =>
+                  onSettingsChange({ ...settings, dailyNotesFolder: e.target.value })
+                }
+                placeholder="daily"
               />
             </div>
 
@@ -836,6 +1049,16 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                   }
                 />
                 <span>{t.inspector.settingsLabels.typewriterMode}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.focusMode ?? false}
+                  onChange={(e) =>
+                    onSettingsChange({ ...settings, focusMode: e.target.checked })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.focusMode}</span>
               </label>
               <label className="check-row">
                 <input
