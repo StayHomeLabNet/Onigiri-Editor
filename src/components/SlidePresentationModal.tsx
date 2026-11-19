@@ -8,7 +8,6 @@ import {
   Presentation,
   X,
 } from 'lucide-react';
-import mermaid from 'mermaid';
 import type { ThemeId } from '../types';
 import type { Translations } from '../i18n/types';
 import { renderMarkdownToHtml, splitMarkdownSlides } from '../utils/markdown';
@@ -95,29 +94,36 @@ export const SlidePresentationModal: React.FC<SlidePresentationModalProps> = ({
 
     const mermaidBlocks = Array.from(container.querySelectorAll('pre > code.language-mermaid'));
     if (mermaidBlocks.length > 0) {
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: 'strict',
-        theme: isDark ? 'dark' : 'default',
-      });
-      mermaidBlocks.forEach((codeEl, idx) => {
-        const pre = codeEl.parentElement;
-        if (!pre) return;
-        const code = codeEl.textContent || '';
-        const id = `slide-mermaid-${++slideMermaidSeq}-${idx}`;
-        mermaid
-          .render(id, code)
-          .then(({ svg }) => {
-            if (cancelled || !pre.parentElement) return;
-            const wrapper = document.createElement('div');
-            wrapper.className = 'slide-mermaid-wrap';
-            wrapper.innerHTML = svg;
-            pre.replaceWith(wrapper);
-          })
-          .catch(() => {
-            // keep code fallback
+      import('mermaid')
+        .then(({ default: mermaid }) => {
+          if (cancelled) return;
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            theme: isDark ? 'dark' : 'default',
           });
-      });
+          mermaidBlocks.forEach((codeEl, idx) => {
+            const pre = codeEl.parentElement;
+            if (!pre) return;
+            const code = codeEl.textContent || '';
+            const id = `slide-mermaid-${++slideMermaidSeq}-${idx}`;
+            mermaid
+              .render(id, code)
+              .then(({ svg }) => {
+                if (cancelled || !pre.parentElement) return;
+                const wrapper = document.createElement('div');
+                wrapper.className = 'slide-mermaid-wrap';
+                wrapper.innerHTML = svg;
+                pre.replaceWith(wrapper);
+              })
+              .catch(() => {
+                // keep code fallback
+              });
+          });
+        })
+        .catch(() => {
+          // keep code fallback
+        });
     }
 
     return () => {

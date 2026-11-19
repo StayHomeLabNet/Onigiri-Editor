@@ -246,72 +246,46 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
     setNewFmVal('');
   };
 
+  const tabStyle = settings.inspectorTabStyle ?? 'icons';
+  const inspectorTabDefs: Array<{
+    key: InspectorTab;
+    label: string;
+    icon: React.ReactNode;
+  }> = [
+    { key: 'chat', label: t.inspector.chat, icon: <Bot size={15} /> },
+    { key: 'ai', label: t.inspector.ai, icon: <Sparkles size={15} /> },
+    { key: 'stats', label: t.inspector.stats, icon: <BarChart3 size={15} /> },
+    { key: 'diff', label: t.inspector.diff, icon: <GitCompare size={15} /> },
+    { key: 'frontmatter', label: t.inspector.frontmatter, icon: <Tags size={15} /> },
+    { key: 'review', label: t.inspector.review, icon: <ListChecks size={15} /> },
+    { key: 'settings', label: t.inspector.settings, icon: <SlidersHorizontal size={15} /> },
+  ];
+
   return (
     <aside className="inspector">
-      <div className="inspector-tabs">
-        <button
-          type="button"
-          className={`ins-tab-btn ${activeTab === 'chat' ? 'is-active' : ''}`}
-          onClick={() => onTabChange('chat')}
-          title={t.inspector.chat}
-        >
-          <Bot size={14} />
-          <span>{t.inspector.chat}</span>
-        </button>
-        <button
-          type="button"
-          className={`ins-tab-btn ${activeTab === 'ai' ? 'is-active' : ''}`}
-          onClick={() => onTabChange('ai')}
-          title={t.inspector.ai}
-        >
-          <Sparkles size={14} />
-          <span>{t.inspector.ai}</span>
-        </button>
-        <button
-          type="button"
-          className={`ins-tab-btn ${activeTab === 'stats' ? 'is-active' : ''}`}
-          onClick={() => onTabChange('stats')}
-          title={t.inspector.stats}
-        >
-          <BarChart3 size={14} />
-          <span>{t.inspector.stats}</span>
-        </button>
-        <button
-          type="button"
-          className={`ins-tab-btn ${activeTab === 'diff' ? 'is-active' : ''}`}
-          onClick={() => onTabChange('diff')}
-          title={t.inspector.diff}
-        >
-          <GitCompare size={14} />
-          <span>{t.inspector.diff}</span>
-        </button>
-        <button
-          type="button"
-          className={`ins-tab-btn ${activeTab === 'frontmatter' ? 'is-active' : ''}`}
-          onClick={() => onTabChange('frontmatter')}
-          title={t.inspector.frontmatter}
-        >
-          <Tags size={14} />
-          <span>{t.inspector.frontmatter}</span>
-        </button>
-        <button
-          type="button"
-          className={`ins-tab-btn ${activeTab === 'review' ? 'is-active' : ''}`}
-          onClick={() => onTabChange('review')}
-          title={t.inspector.review}
-        >
-          <ListChecks size={14} />
-          <span>{t.inspector.review}</span>
-        </button>
-        <button
-          type="button"
-          className={`ins-tab-btn ${activeTab === 'settings' ? 'is-active' : ''}`}
-          onClick={() => onTabChange('settings')}
-          title={t.inspector.settings}
-        >
-          <SlidersHorizontal size={14} />
-          <span>{t.inspector.settings}</span>
-        </button>
+      <div className={`inspector-tabs is-style-${tabStyle}`} role="tablist">
+        {inspectorTabDefs.map((tab) => {
+          const isActive = activeTab === tab.key;
+          const showLabel =
+            tabStyle === 'labels' || (tabStyle === 'active-label' && isActive);
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              aria-label={tab.label}
+              className={`ins-tab-btn ${isActive ? 'is-active' : ''} ${
+                showLabel ? 'has-label' : 'is-icon-only'
+              }`}
+              onClick={() => onTabChange(tab.key)}
+              title={tab.label}
+            >
+              {tab.icon}
+              {showLabel && <span className="ins-tab-label">{tab.label}</span>}
+            </button>
+          );
+        })}
       </div>
 
       <div className={`inspector-body ${activeTab === 'chat' ? 'is-chat' : ''}`}>

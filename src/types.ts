@@ -6,6 +6,7 @@ export type PreviewTheme = 'editorial' | 'github' | 'notion' | 'academic';
 export type Locale = 'ja' | 'en';
 export type SidebarTab = 'files' | 'outline' | 'snippets' | 'knowledge' | 'git';
 export type InspectorTab = 'chat' | 'ai' | 'stats' | 'diff' | 'frontmatter' | 'review' | 'settings';
+export type InspectorTabStyle = 'icons' | 'active-label' | 'labels';
 
 export type SyntaxPresetId =
   | 'auto'
@@ -284,6 +285,9 @@ export interface EditorSettings {
   showFormatToolbar: boolean;
   showFormatToolbarInSimpleMode: boolean;
   autoTitleOnUrlPaste?: boolean;
+  embedImagesOnHtmlExport?: boolean;
+  inspectorTabStyle?: InspectorTabStyle;
+  checkUpdatesOnStartup?: boolean;
 }
 
 export interface DocumentStats {
@@ -504,3 +508,26 @@ export interface ProjectConfigBundle {
   editorconfigs: EditorConfigFileEntry[];
 }
 
+export interface ImageAssetPayload {
+  unchanged: boolean;
+  modifiedMs: number;
+  dataUrl: string | null;
+  byteLen: number;
+}
+
+export interface MigrateTempImagesResult {
+  content: string;
+  migratedCount: number;
+  migratedFiles: string[];
+}
+
+export interface AppUpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  releaseUrl: string;
+  releaseName: string;
+  publishedAt: string | null;
+  notes: string;
+  downloadUrl: string | null;
+}

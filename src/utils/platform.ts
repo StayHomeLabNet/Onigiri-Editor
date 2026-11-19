@@ -1,12 +1,15 @@
 import type {
   AiCapabilities,
   AiProviderId,
+  AppUpdateInfo,
   ClearAppCacheResult,
   FetchedUrlContent,
   FileSyncInfo,
   GitHeadFileResult,
   GitPanelState,
   GitStatusResult,
+  ImageAssetPayload,
+  MigrateTempImagesResult,
   ProjectConfigBundle,
   ProjectInfo,
   ProjectServerStatus,
@@ -23,6 +26,7 @@ import {
   encodeTextBrowser,
   normalizeTextEncoding,
 } from './encodings';
+import { ImageLruCache } from './imageCache';
 
 export function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -173,7 +177,15 @@ export async function openImageFileDialog(): Promise<{ path: string; name: strin
   });
 }
 
-const imageDataUrlCache = new Map<string, string>();
+const imageDataUrlCache = new ImageLruCache();
+
+export function clearImageSrcCache(): void {
+  imageDataUrlCache.clear();
+}
+
+export function getImageSrcCacheStats(): { count: number; bytes: number } {
+  return { count: imageDataUrlCache.size, bytes: imageDataUrlCache.bytes };
+}
 
 export async function resolveImageSrc(src: string, baseDir?: string | null): Promise<string> {
   let trimmed = (src || '').trim();
@@ -192,22 +204,54 @@ export async function resolveImageSrc(src: string, baseDir?: string | null): Pro
 
   const cacheKey = `${baseDir || ''}::${trimmed}`;
   const cached = imageDataUrlCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached && imageDataUrlCache.isFresh(cached)) {
+    return cached.dataUrl;
+  }
 
   if (isTauri()) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const dataUrl = await invoke<string>('read_image_data_url', {
+      const payload = await invoke<ImageAssetPayload>('read_image_asset_with_meta', {
         path: trimmed,
         baseDir: baseDir || null,
+        cachedModifiedMs: cached ? cached.modifiedMs : null,
       });
-      imageDataUrlCache.set(cacheKey, dataUrl);
-      return dataUrl;
+      if (payload.unchanged && cached) {
+        imageDataUrlCache.touchChecked(cacheKey);
+        return cached.dataUrl;
+      }
+      if (payload.dataUrl) {
+        imageDataUrlCache.set(cacheKey, {
+          dataUrl: payload.dataUrl,
+          modifiedMs: payload.modifiedMs,
+          byteLen: payload.byteLen || payload.dataUrl.length,
+          checkedAt: Date.now(),
+        });
+        return payload.dataUrl;
+      }
+      return trimmed;
     } catch {
+      imageDataUrlCache.delete(cacheKey);
       return trimmed;
     }
   }
   return trimmed;
+}
+
+export async function migrateTempImagesOnSave(
+  content: string,
+  docPath: string,
+  assetDir?: string | null
+): Promise<MigrateTempImagesResult> {
+  if (!isTauri() || !docPath || !content.includes('onigiri-markdown-images')) {
+    return { content, migratedCount: 0, migratedFiles: [] };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<MigrateTempImagesResult>('migrate_temp_images_on_save', {
+    content,
+    docPath,
+    assetDir: assetDir || null,
+  });
 }
 
 export async function saveImageAsset(
@@ -1024,6 +1068,7 @@ export async function getGitHeadFile(
 }
 
 export async function clearAppCaches(): Promise<import('../types').ClearAppCacheResult> {
+  clearImageSrcCache();
   if (!isTauri()) {
     return { removedFiles: 0, removedBytes: 0 };
   }
@@ -1190,4 +1235,12 @@ export async function readProjectConfigBundle(
     workspaceRoot: workspaceRoot || null,
     targetPath: targetPath || null,
   });
+}
+
+export async function checkAppUpdates(): Promise<AppUpdateInfo> {
+  if (!isTauri()) {
+    throw new Error('Update check requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<AppUpdateInfo>('check_app_updates');
 }

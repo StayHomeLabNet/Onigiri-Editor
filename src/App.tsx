@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'katex/dist/katex.min.css';
 import {
   AlertTriangle,
   Copy,
+  Download,
   Eye,
   ExternalLink,
   GitCompare,
@@ -10,11 +11,13 @@ import {
   RefreshCw,
   Save,
   Square,
+  X,
 } from 'lucide-react';
 import type {
   AiCleanOptions,
   AiProviderConfig,
   AppMode,
+  AppUpdateInfo,
   ClearAppCacheResult,
   DocumentTab,
   EditorSettings,
@@ -80,7 +83,7 @@ import {
   type MacroStep,
 } from './utils/macro';
 import { buildRichClipboardPayload } from './utils/richTextCopy';
-import { exportMarkdownToDocxBytes } from './utils/docxExport';
+import { inlineLocalImagesInHtml } from './utils/exportHelpers';
 import {
   appendFootnoteDefinition,
   fetchUrlMetadata,
@@ -110,6 +113,7 @@ import {
   browserClose,
   browserNavAction,
   browserSetBounds,
+  checkAppUpdates,
   checkFilesSync,
   clearAppCaches,
   createFileInDir,
@@ -133,6 +137,7 @@ import {
   inspectProjectForPath,
   inspectWorkspaceProject,
   isTauri,
+  migrateTempImagesOnSave,
   openFolderDialog,
   openInExternalBrowser,
   openMarkdownFileDialog,
@@ -161,6 +166,27 @@ import {
   writeClipboardText,
   writeFileSilently,
 } from './utils/platform';
+import {
+  buildInitialSessionState,
+  computeTabDirty,
+  hydrateTabRecord,
+  INLINE_AI_PRESETS_KEY,
+  loadJson,
+  loadStringList,
+  loadWorkspaceSessionsMap,
+  makeTab,
+  MAX_RECENT_FILES,
+  MAX_RECENT_FOLDERS,
+  normalizeWorkspaceKey,
+  RECENT_FILES_KEY,
+  RECENT_FOLDERS_KEY,
+  saveWorkspaceSessionEntry,
+  serializeTabRecord,
+  SESSION_STORAGE_KEY,
+  WORKSPACE_SESSIONS_KEY,
+  type PersistedSession,
+  type PersistedTabRecord,
+} from './utils/session';
 import { TopBar } from './components/TopBar';
 import { FormatToolbar } from './components/FormatToolbar';
 import { TabBar } from './components/TabBar';
@@ -184,102 +210,73 @@ import {
   FIND_OPTS_STORAGE_KEY,
   type FindReplaceBarHandle,
 } from './components/FindReplaceBar';
-import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
-import { QuickOpenModal } from './components/QuickOpenModal';
 import { StatusBar } from './components/StatusBar';
-import { AboutModal } from './components/AboutModal';
-import { ImageModal } from './components/ImageModal';
-import { SettingsModal, type SettingsTab } from './components/SettingsModal';
-import { EncodingModal, type EncodingModalMode } from './components/EncodingModal';
-import { GoToLineModal } from './components/GoToLineModal';
-import {
-  InlineAiEditModal,
-  INLINE_AI_PRESETS_KEY,
-} from './components/InlineAiEditModal';
 import {
   AI_THREADS_STORAGE_KEY,
   countSavedAiThreadEntries,
 } from './components/AiChatPanel';
-import {
-  FolderSwitchGuardModal,
-  type FolderSwitchGuardMode,
-} from './components/FolderSwitchGuardModal';
-import { WorkspaceImageModal } from './components/WorkspaceImageModal';
-import {
-  AiDiffPreviewModal,
-  type DiffPreviewRequest,
-} from './components/AiDiffPreviewModal';
-import { SlidePresentationModal } from './components/SlidePresentationModal';
-import { WorkspaceGrepModal } from './components/WorkspaceGrepModal';
-import { TemplatePickerModal } from './components/TemplatePickerModal';
-import { WebClipModal } from './components/WebClipModal';
-import { UnusedAssetsModal } from './components/UnusedAssetsModal';
-import { CitationModal } from './components/CitationModal';
-import { KnowledgeGraphModal } from './components/KnowledgeGraphModal';
+import type { PaletteCommand } from './components/CommandPalette';
+import type { SettingsTab } from './components/SettingsModal';
+import type { EncodingModalMode } from './components/EncodingModal';
+import type { FolderSwitchGuardMode } from './components/FolderSwitchGuardModal';
+import type { DiffPreviewRequest } from './components/AiDiffPreviewModal';
 
-const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
-const WORKSPACE_SESSIONS_KEY = 'onigiri-markdown.workspace-sessions.v1';
-const RECENT_FILES_KEY = 'onigiri-markdown.recentFiles.v1';
-const RECENT_FOLDERS_KEY = 'onigiri-markdown.recentFolders.v1';
-const MAX_RECENT_FILES = 12;
-const MAX_RECENT_FOLDERS = 10;
-const MAX_WORKSPACE_SESSIONS = 15;
-const ONLINE_MANUAL_URL_EN =
-  'https://github.com/StayHomeLabNet/Onigiri-Editor/blob/main/doc/README.md';
-const ONLINE_MANUAL_URL_JA =
-  'https://github.com/StayHomeLabNet/Onigiri-Editor/blob/main/doc/README.ja.md';
+const CommandPalette = lazy(() =>
+  import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette }))
+);
+const QuickOpenModal = lazy(() =>
+  import('./components/QuickOpenModal').then((m) => ({ default: m.QuickOpenModal }))
+);
+const AboutModal = lazy(() =>
+  import('./components/AboutModal').then((m) => ({ default: m.AboutModal }))
+);
+const ImageModal = lazy(() =>
+  import('./components/ImageModal').then((m) => ({ default: m.ImageModal }))
+);
+const SettingsModal = lazy(() =>
+  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
+);
+const EncodingModal = lazy(() =>
+  import('./components/EncodingModal').then((m) => ({ default: m.EncodingModal }))
+);
+const GoToLineModal = lazy(() =>
+  import('./components/GoToLineModal').then((m) => ({ default: m.GoToLineModal }))
+);
+const InlineAiEditModal = lazy(() =>
+  import('./components/InlineAiEditModal').then((m) => ({ default: m.InlineAiEditModal }))
+);
+const FolderSwitchGuardModal = lazy(() =>
+  import('./components/FolderSwitchGuardModal').then((m) => ({ default: m.FolderSwitchGuardModal }))
+);
+const WorkspaceImageModal = lazy(() =>
+  import('./components/WorkspaceImageModal').then((m) => ({ default: m.WorkspaceImageModal }))
+);
+const AiDiffPreviewModal = lazy(() =>
+  import('./components/AiDiffPreviewModal').then((m) => ({ default: m.AiDiffPreviewModal }))
+);
+const SlidePresentationModal = lazy(() =>
+  import('./components/SlidePresentationModal').then((m) => ({ default: m.SlidePresentationModal }))
+);
+const WorkspaceGrepModal = lazy(() =>
+  import('./components/WorkspaceGrepModal').then((m) => ({ default: m.WorkspaceGrepModal }))
+);
+const TemplatePickerModal = lazy(() =>
+  import('./components/TemplatePickerModal').then((m) => ({ default: m.TemplatePickerModal }))
+);
+const WebClipModal = lazy(() =>
+  import('./components/WebClipModal').then((m) => ({ default: m.WebClipModal }))
+);
+const UnusedAssetsModal = lazy(() =>
+  import('./components/UnusedAssetsModal').then((m) => ({ default: m.UnusedAssetsModal }))
+);
+const CitationModal = lazy(() =>
+  import('./components/CitationModal').then((m) => ({ default: m.CitationModal }))
+);
+const KnowledgeGraphModal = lazy(() =>
+  import('./components/KnowledgeGraphModal').then((m) => ({ default: m.KnowledgeGraphModal }))
+);
 
-function loadStringList(key: string, maxItems: number): string[] {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-      .slice(0, maxItems);
-  } catch {
-    return [];
-  }
-}
-
-interface PersistedTabRecord {
-  id: string;
-  title: string;
-  filePath?: string;
-  eol?: '\n' | '\r\n';
-  savedEol?: '\n' | '\r\n';
-  encoding?: TextEncodingId;
-  savedEncoding?: TextEncodingId;
-  languageOverride?: string | null;
-  pinned?: boolean;
-  dirty: boolean;
-  content?: string;
-  savedContent?: string;
-  cursorLine: number;
-  cursorCol: number;
-  scrollTop?: number;
-  foldedLines?: number[];
-  bookmarks?: number[];
-  snapshots?: Snapshot[];
-  updatedAt: number;
-  diskModifiedMs?: number;
-}
-
-interface PersistedSession {
-  version: 1;
-  activeTabId: string;
-  sideTabId?: string | null;
-  workspaceRoot: string | null;
-  tabs: PersistedTabRecord[];
-}
-
-interface WorkspaceSessionEntry {
-  activeTabId: string;
-  sideTabId?: string | null;
-  tabs: PersistedTabRecord[];
-  updatedAt: number;
-}
+const ONLINE_MANUAL_URL = 'https://stayhomelab.net/help/onigiri-editor/';
 
 const DEFAULT_SETTINGS: EditorSettings = {
   fontSize: 15,
@@ -307,6 +304,9 @@ const DEFAULT_SETTINGS: EditorSettings = {
   focusMode: false,
   smartPasteHtml: true,
   autoTitleOnUrlPaste: true,
+  embedImagesOnHtmlExport: true,
+  inspectorTabStyle: 'icons',
+  checkUpdatesOnStartup: true,
   showFrontmatterCard: true,
   imageAssetFolder: 'assets',
   dailyNotesFolder: '',
@@ -351,240 +351,6 @@ const DEFAULT_AI_CONFIG: AiProviderConfig = {
   includeDocContext: true,
   includeFolderContext: true,
 };
-
-function loadJson<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return { ...fallback, ...JSON.parse(raw) };
-  } catch {
-    return fallback;
-  }
-}
-
-function computeTabDirty(
-  tab: Pick<DocumentTab, 'filePath' | 'savedContent' | 'savedEncoding' | 'savedEol'>,
-  content: string,
-  encoding: TextEncodingId,
-  eol: '\n' | '\r\n'
-): boolean {
-  if (content !== tab.savedContent) return true;
-  if (!tab.filePath) return false;
-  return (
-    encoding !== (tab.savedEncoding ?? 'utf-8') ||
-    eol !== (tab.savedEol ?? '\n')
-  );
-}
-
-function makeTab(
-  title: string,
-  rawContent: string,
-  filePath?: string,
-  diskModifiedMs?: number,
-  options?: { encoding?: TextEncodingId; eol?: '\n' | '\r\n' }
-): DocumentTab {
-  const eol: '\n' | '\r\n' = options?.eol ?? (rawContent.includes('\r\n') ? '\r\n' : '\n');
-  const encoding: TextEncodingId = options?.encoding ?? 'utf-8';
-  const content = rawContent.includes('\r\n') ? rawContent.replace(/\r\n/g, '\n') : rawContent;
-  return {
-    id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    title,
-    filePath,
-    content,
-    savedContent: content,
-    eol,
-    savedEol: eol,
-    encoding,
-    savedEncoding: encoding,
-    dirty: false,
-    cursorLine: 1,
-    cursorCol: 1,
-    snapshots: [],
-    updatedAt: Date.now(),
-    diskModifiedMs,
-    externalStatus: null,
-  };
-}
-
-function serializeTabRecord(tb: DocumentTab): PersistedTabRecord {
-  const storeBody = tb.dirty || !tb.filePath || !isTauri();
-  const maxLen = 400_000;
-  const trimmedContent =
-    storeBody && tb.content.length <= maxLen
-      ? tb.content
-      : storeBody
-      ? tb.content.slice(0, maxLen)
-      : undefined;
-  const trimmedSaved =
-    storeBody && tb.savedContent.length <= maxLen
-      ? tb.savedContent
-      : storeBody
-      ? tb.savedContent.slice(0, maxLen)
-      : undefined;
-  return {
-    id: tb.id,
-    title: tb.title,
-    filePath: tb.filePath,
-    eol: tb.eol,
-    savedEol: tb.savedEol,
-    encoding: tb.encoding,
-    savedEncoding: tb.savedEncoding,
-    languageOverride: tb.languageOverride ?? null,
-    pinned: Boolean(tb.pinned),
-    dirty: tb.dirty,
-    content: trimmedContent,
-    savedContent: trimmedSaved,
-    cursorLine: tb.cursorLine,
-    cursorCol: tb.cursorCol,
-    scrollTop: typeof tb.scrollTop === 'number' ? tb.scrollTop : undefined,
-    foldedLines: Array.isArray(tb.foldedLines) && tb.foldedLines.length > 0 ? tb.foldedLines : undefined,
-    bookmarks: Array.isArray(tb.bookmarks) && tb.bookmarks.length > 0 ? tb.bookmarks : undefined,
-    snapshots: tb.snapshots.slice(0, 3),
-    updatedAt: tb.updatedAt,
-    diskModifiedMs: tb.diskModifiedMs,
-  };
-}
-
-function hydrateTabRecord(rec: PersistedTabRecord, fallbackTitle: string): {
-  tab: DocumentTab;
-  needsDiskLoad: boolean;
-} {
-  const desktop = isTauri();
-  const needsDiskLoad = desktop && Boolean(rec.filePath) && !rec.dirty && rec.content === undefined;
-  const content = rec.content ?? '';
-  const savedContent = rec.savedContent ?? content;
-  const eol = rec.eol || '\n';
-  const encoding = rec.encoding || 'utf-8';
-  return {
-    needsDiskLoad,
-    tab: {
-      id: rec.id || `tab-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      title: rec.title || fallbackTitle,
-      filePath: rec.filePath,
-      eol,
-      savedEol: rec.savedEol || eol,
-      encoding,
-      savedEncoding: rec.savedEncoding || encoding,
-      languageOverride: rec.languageOverride ?? null,
-      pinned: Boolean(rec.pinned),
-      content,
-      savedContent,
-      dirty: Boolean(rec.dirty),
-      cursorLine: rec.cursorLine || 1,
-      cursorCol: rec.cursorCol || 1,
-      scrollTop: typeof rec.scrollTop === 'number' ? rec.scrollTop : undefined,
-      foldedLines: Array.isArray(rec.foldedLines)
-        ? rec.foldedLines.filter((n): n is number => typeof n === 'number' && n >= 1)
-        : undefined,
-      bookmarks: Array.isArray(rec.bookmarks)
-        ? rec.bookmarks.filter((n): n is number => typeof n === 'number' && n >= 1)
-        : undefined,
-      snapshots: Array.isArray(rec.snapshots) ? rec.snapshots : [],
-      updatedAt: rec.updatedAt || Date.now(),
-      diskModifiedMs: rec.diskModifiedMs,
-      externalStatus: null,
-    },
-  };
-}
-
-function loadWorkspaceSessionsMap(): Record<string, WorkspaceSessionEntry> {
-  try {
-    const raw = localStorage.getItem(WORKSPACE_SESSIONS_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, WorkspaceSessionEntry>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function normalizeWorkspaceKey(root: string): string {
-  return root.replace(/\\/g, '/').replace(/\/+$/, '');
-}
-
-function saveWorkspaceSessionEntry(
-  root: string | null | undefined,
-  tabs: DocumentTab[],
-  activeTabId: string,
-  sideTabId: string | null
-) {
-  if (!root || tabs.length === 0) return;
-  const key = normalizeWorkspaceKey(root);
-  if (!key) return;
-  try {
-    const map = loadWorkspaceSessionsMap();
-    map[key] = {
-      activeTabId,
-      sideTabId,
-      tabs: tabs.map(serializeTabRecord),
-      updatedAt: Date.now(),
-    };
-    const entries = Object.entries(map).sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
-    const trimmed = Object.fromEntries(entries.slice(0, MAX_WORKSPACE_SESSIONS));
-    localStorage.setItem(WORKSPACE_SESSIONS_KEY, JSON.stringify(trimmed));
-  } catch {
-    // ignore quota errors
-  }
-}
-
-function buildInitialSessionState(
-  restoreEnabled: boolean,
-  welcomeTitle: string,
-  welcomeContent: string
-): {
-  tabs: DocumentTab[];
-  activeTabId: string;
-  sideTabId: string | null;
-  workspaceRoot: string | null;
-  pendingHydrationIds: string[];
-  restoredSession: boolean;
-} {
-  try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as PersistedSession;
-      if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
-        const desktop = isTauri();
-        const candidateRecords = restoreEnabled
-          ? parsed.tabs
-          : parsed.tabs.filter((tb) => tb.dirty);
-
-        if (candidateRecords.length > 0) {
-          const pendingHydrationIds: string[] = [];
-          const restoredTabs: DocumentTab[] = candidateRecords.map((rec) => {
-            const { tab, needsDiskLoad } = hydrateTabRecord(rec, welcomeTitle);
-            if (needsDiskLoad) pendingHydrationIds.push(tab.id);
-            return tab;
-          });
-          const activeExists = restoredTabs.some((tb) => tb.id === parsed.activeTabId);
-          const sideExists =
-            parsed.sideTabId && restoredTabs.some((tb) => tb.id === parsed.sideTabId)
-              ? parsed.sideTabId
-              : null;
-          return {
-            tabs: restoredTabs,
-            activeTabId: activeExists ? parsed.activeTabId : restoredTabs[0].id,
-            sideTabId: sideExists,
-            workspaceRoot: restoreEnabled && desktop ? parsed.workspaceRoot || null : null,
-            pendingHydrationIds,
-            restoredSession: true,
-          };
-        }
-      }
-    }
-  } catch {
-    // ignore corrupt session storage
-  }
-  const fallback = makeTab(welcomeTitle, welcomeContent);
-  return {
-    tabs: [fallback],
-    activeTabId: fallback.id,
-    sideTabId: null,
-    workspaceRoot: null,
-    pendingHydrationIds: [],
-    restoredSession: false,
-  };
-}
 
 export function App() {
   const hasSavedLocaleOnStartRef = useRef<boolean>(hasSavedLocalePreference());
@@ -705,6 +471,9 @@ export function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
+  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
   const [dataSummaryTick, setDataSummaryTick] = useState(0);
@@ -2174,7 +1943,7 @@ export function App() {
   const handleSave = useCallback(
     async (forceSaveAs = false) => {
       const targetTab = isSideEditorActive() && sideTab ? sideTab : activeTab;
-      const savedSnapshot = applyProjectSaveTransforms(targetTab.content, resolvedProjectConfig);
+      let savedSnapshot = applyProjectSaveTransforms(targetTab.content, resolvedProjectConfig);
       const prevPath = targetTab.filePath;
       const targetEncoding: TextEncodingId = targetTab.encoding ?? 'utf-8';
       const targetEol: '\n' | '\r\n' = targetTab.eol ?? '\n';
@@ -2182,11 +1951,25 @@ export function App() {
         savingPathsRef.current.add(prevPath);
       }
       try {
+        const needsDialog = forceSaveAs || !targetTab.filePath;
+        let migratedCount = 0;
+
+        if (!needsDialog && prevPath && isTauri()) {
+          const mig = await migrateTempImagesOnSave(
+            savedSnapshot,
+            prevPath,
+            effectiveSettings.imageAssetFolder
+          ).catch(() => null);
+          if (mig && mig.migratedCount > 0) {
+            savedSnapshot = mig.content;
+            migratedCount = mig.migratedCount;
+          }
+        }
+
         const contentToWrite =
           targetEol === '\r\n'
             ? savedSnapshot.replace(/\n/g, '\r\n')
             : savedSnapshot;
-        const needsDialog = forceSaveAs || !targetTab.filePath;
         const res = needsDialog
           ? await runWithHiddenNativeBrowser(() =>
               saveMarkdownFile(
@@ -2204,6 +1987,24 @@ export function App() {
             );
         if (!res) return;
         savingPathsRef.current.add(res.path);
+
+        if (needsDialog && isTauri()) {
+          const mig = await migrateTempImagesOnSave(
+            savedSnapshot,
+            res.path,
+            effectiveSettings.imageAssetFolder
+          ).catch(() => null);
+          if (mig && mig.migratedCount > 0) {
+            savedSnapshot = mig.content;
+            migratedCount = mig.migratedCount;
+            const migratedWrite =
+              targetEol === '\r\n'
+                ? savedSnapshot.replace(/\n/g, '\r\n')
+                : savedSnapshot;
+            await writeFileSilently(res.path, migratedWrite, targetEncoding);
+          }
+        }
+
         const syncRes = await checkFilesSync([res.path]).catch(() => []);
         const newMtime = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
         setTabs((prev) =>
@@ -2236,6 +2037,9 @@ export function App() {
         pushRecentFile(res.path);
         if (workspaceRootRef.current) {
           void refreshGitStatus(workspaceRootRef.current);
+          if (migratedCount > 0) {
+            void refreshWorkspaceRef.current(workspaceRootRef.current);
+          }
           if (isTauri()) {
             indexWorkspaceNotes(workspaceRootRef.current)
               .then(setWorkspaceNoteIndex)
@@ -2247,7 +2051,11 @@ export function App() {
             .then(setProjectConfigBundle)
             .catch(() => {});
         }
-        notify(t.toasts.savedSuccess);
+        if (migratedCount > 0) {
+          notify(t.toasts.tempImagesMigrated.replace('{count}', String(migratedCount)));
+        } else {
+          notify(t.toasts.savedSuccess);
+        }
         if (
           isTauri() &&
           settings.builtinBrowserEnabled &&
@@ -2282,12 +2090,14 @@ export function App() {
       sideTab,
       isSideEditorActive,
       resolvedProjectConfig,
+      effectiveSettings.imageAssetFolder,
       runWithHiddenNativeBrowser,
       pushRecentFile,
       refreshGitStatus,
       notify,
       t.toasts.errorPrefix,
       t.toasts.savedSuccess,
+      t.toasts.tempImagesMigrated,
       settings.builtinBrowserEnabled,
       rightPaneMode,
       projectServer?.running,
@@ -3643,7 +3453,12 @@ export function App() {
   }, [notify, t.toasts.htmlPasted, t.toasts.noClipboardHtml]);
 
   const handleExportHtml = useCallback(async () => {
-    const htmlBody = await renderMarkdownToHtml(activeTab.content);
+    const rawHtmlBody = await renderMarkdownToHtml(activeTab.content);
+    const docBaseDir = activeTab.filePath || workspaceRoot || undefined;
+    const htmlBody =
+      effectiveSettings.embedImagesOnHtmlExport !== false
+        ? await inlineLocalImagesInHtml(rawHtmlBody, docBaseDir)
+        : rawHtmlBody;
     const full = exportStandaloneHtml(activeTab.title, htmlBody, theme, settings.customCss);
     const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '');
     const ok = await runWithHiddenNativeBrowser(() =>
@@ -3653,6 +3468,9 @@ export function App() {
   }, [
     activeTab.content,
     activeTab.title,
+    activeTab.filePath,
+    workspaceRoot,
+    effectiveSettings.embedImagesOnHtmlExport,
     theme,
     settings.customCss,
     runWithHiddenNativeBrowser,
@@ -3662,7 +3480,9 @@ export function App() {
 
   const handleExportDocx = useCallback(async () => {
     try {
-      const bytes = await exportMarkdownToDocxBytes(activeTab.content);
+      const { exportMarkdownToDocxBytes } = await import('./utils/docxExport');
+      const docBaseDir = activeTab.filePath || workspaceRoot || undefined;
+      const bytes = await exportMarkdownToDocxBytes(activeTab.content, { baseDir: docBaseDir });
       const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '') || 'document';
       const ok = await runWithHiddenNativeBrowser(() =>
         saveBinaryExportFile(
@@ -3680,6 +3500,8 @@ export function App() {
   }, [
     activeTab.content,
     activeTab.title,
+    activeTab.filePath,
+    workspaceRoot,
     runWithHiddenNativeBrowser,
     notify,
     t.toasts.exportedSuccess,
@@ -5227,11 +5049,48 @@ export function App() {
   );
 
   const handleOpenOnlineManual = useCallback(() => {
-    const manualUrl = locale === 'ja' ? ONLINE_MANUAL_URL_JA : ONLINE_MANUAL_URL_EN;
-    void openInExternalBrowser(manualUrl).catch((err) => {
+    void openInExternalBrowser(ONLINE_MANUAL_URL).catch((err) => {
       notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
     });
-  }, [locale, notify, t.toasts.errorPrefix]);
+  }, [notify, t.toasts.errorPrefix]);
+
+  const handleCheckUpdates = useCallback(
+    async (silent = false) => {
+      if (!isTauri()) return;
+      setCheckingUpdates(true);
+      try {
+        const info = await checkAppUpdates();
+        setUpdateInfo(info);
+        if (info.hasUpdate) {
+          setUpdateBannerDismissed(false);
+          if (!silent) {
+            notify(t.toasts.updateAvailable.replace('{version}', info.latestVersion));
+          }
+        } else if (!silent) {
+          notify(t.toasts.upToDate.replace('{version}', info.currentVersion));
+        }
+      } catch (err) {
+        if (!silent) {
+          const msg = err instanceof Error ? err.message : String(err || '');
+          notify(msg ? `${t.toasts.updateCheckFailed}: ${msg}` : t.toasts.updateCheckFailed);
+        }
+      } finally {
+        setCheckingUpdates(false);
+      }
+    },
+    [notify, t.toasts.upToDate, t.toasts.updateAvailable, t.toasts.updateCheckFailed]
+  );
+
+  const startupUpdateCheckedRef = useRef(false);
+  useEffect(() => {
+    if (!isTauri() || startupUpdateCheckedRef.current) return;
+    if (settings.checkUpdatesOnStartup === false) return;
+    startupUpdateCheckedRef.current = true;
+    const timer = window.setTimeout(() => {
+      void handleCheckUpdates(true);
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [handleCheckUpdates, settings.checkUpdatesOnStartup]);
 
   const openSettingsModal = useCallback((tab: SettingsTab = 'general') => {
     setSettingsInitialTab(tab);
@@ -5619,6 +5478,7 @@ export function App() {
   menuActionsRef.current = {
     'open-about': () => setShowAbout(true),
     'open-online-manual': handleOpenOnlineManual,
+    'check-updates': () => void handleCheckUpdates(false),
     'open-settings': () => openSettingsModal('general'),
     'new-file': () => handleNewFile(),
     'new-file-with-encoding': () => setEncodingModalMode('new'),
@@ -6327,6 +6187,16 @@ export function App() {
         label: t.actions.onlineManual,
         action: handleOpenOnlineManual,
       },
+      ...(isTauri()
+        ? [
+            {
+              id: 'check-updates',
+              category: 'Help',
+              label: t.actions.checkUpdates,
+              action: () => void handleCheckUpdates(false),
+            },
+          ]
+        : []),
       {
         id: 'lang-toggle',
         category: 'UI',
@@ -6400,6 +6270,7 @@ export function App() {
     handleToggleEditorSplit,
     handleFocusOtherSplitPane,
     handleOpenOnlineManual,
+    handleCheckUpdates,
     handleToggleExternalPreview,
     handleNewFile,
     handleOpenFile,
@@ -6602,6 +6473,45 @@ export function App() {
               hasMacro={macroSteps.length > 0}
               macroStepCount={macroSteps.length}
             />
+          )}
+          {updateInfo?.hasUpdate && !updateBannerDismissed && (
+            <div className="update-banner" role="status">
+              <div className="update-banner-left">
+                <Download size={14} />
+                <span>
+                  {t.updates.availableBannerTitle.replace('{version}', updateInfo.latestVersion)}
+                </span>
+              </div>
+              <div className="update-banner-actions">
+                <button
+                  type="button"
+                  className="primary-btn compact-btn"
+                  onClick={() =>
+                    void openInExternalBrowser(updateInfo.downloadUrl || updateInfo.releaseUrl)
+                  }
+                >
+                  <Download size={12} />
+                  <span>{t.updates.downloadBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => void openInExternalBrowser(updateInfo.releaseUrl)}
+                >
+                  <ExternalLink size={12} />
+                  <span>{t.updates.releaseNotesBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title={t.updates.dismissBtn}
+                  aria-label={t.updates.dismissBtn}
+                  onClick={() => setUpdateBannerDismissed(true)}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            </div>
           )}
         </>
       )}
@@ -7424,212 +7334,226 @@ export function App() {
         />
       )}
 
-      <QuickOpenModal
-        t={t}
-        open={showQuickOpen}
-        onClose={() => setShowQuickOpen(false)}
-        tabs={tabs}
-        activeTabId={activeTab.id}
-        workspaceEntries={workspaceEntries}
-        recentFiles={recentFiles}
-        headings={headings}
-        onSelectTab={setActiveTabId}
-        onOpenFilePath={(fp) => void openPathInTab(fp)}
-        onJumpToLine={(ln) => handleGoToLine(ln)}
-      />
+      <Suspense fallback={null}>
+        <QuickOpenModal
+          t={t}
+          open={showQuickOpen}
+          onClose={() => setShowQuickOpen(false)}
+          tabs={tabs}
+          activeTabId={activeTab.id}
+          workspaceEntries={workspaceEntries}
+          recentFiles={recentFiles}
+          headings={headings}
+          onSelectTab={setActiveTabId}
+          onOpenFilePath={(fp) => void openPathInTab(fp)}
+          onJumpToLine={(ln) => handleGoToLine(ln)}
+        />
 
-      <CommandPalette
-        t={t}
-        open={showPalette}
-        onClose={() => setShowPalette(false)}
-        commands={paletteCommands}
-      />
+        <CommandPalette
+          t={t}
+          open={showPalette}
+          onClose={() => setShowPalette(false)}
+          commands={paletteCommands}
+        />
 
-      <AboutModal t={t} open={showAbout} onClose={() => setShowAbout(false)} />
+        <AboutModal
+          t={t}
+          open={showAbout}
+          onClose={() => setShowAbout(false)}
+          updateInfo={updateInfo}
+          checkingUpdates={checkingUpdates}
+          onCheckUpdates={() => void handleCheckUpdates(false)}
+          onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
+        />
 
-      <SettingsModal
-        t={t}
-        open={showSettings}
-        initialTab={settingsInitialTab}
-        onClose={() => setShowSettings(false)}
-        locale={locale}
-        onLocaleChange={setLocale}
-        theme={theme}
-        onThemeChange={setTheme}
-        settings={settings}
-        onSettingsChange={setSettings}
-        externalPreviewUrl={externalPreviewUrl}
-        externalPreviewLanUrls={externalPreviewLanUrls}
-        onToggleExternalPreview={handleToggleExternalPreview}
-        onCopyLanUrl={handleCopyLanUrl}
-        dataSummary={storedDataSummary}
-        onResetSelectedSettings={handleResetSelectedSettings}
-        onClearSelectedUserData={handleClearSelectedUserData}
-        customKeybindings={customKeybindings}
-        onCustomKeybindingsChange={setCustomKeybindings}
-        onExportBackupJson={handleExportBackupJson}
-        onReadBackupJsonFile={handleReadBackupJsonFile}
-        onApplyBackupImport={handleApplyBackupImport}
-        backupCounts={backupCounts}
-        workspaceRoot={workspaceRoot}
-        projectConfigInfo={projectConfigInfo}
-        onCreateOnigiriJson={handleCreateOnigiriJson}
-        onOpenProjectConfigFile={(p) => void openPathInTab(p)}
-      />
+        <SettingsModal
+          t={t}
+          open={showSettings}
+          initialTab={settingsInitialTab}
+          onClose={() => setShowSettings(false)}
+          locale={locale}
+          onLocaleChange={setLocale}
+          theme={theme}
+          onThemeChange={setTheme}
+          settings={settings}
+          onSettingsChange={setSettings}
+          externalPreviewUrl={externalPreviewUrl}
+          externalPreviewLanUrls={externalPreviewLanUrls}
+          onToggleExternalPreview={handleToggleExternalPreview}
+          onCopyLanUrl={handleCopyLanUrl}
+          dataSummary={storedDataSummary}
+          onResetSelectedSettings={handleResetSelectedSettings}
+          onClearSelectedUserData={handleClearSelectedUserData}
+          customKeybindings={customKeybindings}
+          onCustomKeybindingsChange={setCustomKeybindings}
+          onExportBackupJson={handleExportBackupJson}
+          onReadBackupJsonFile={handleReadBackupJsonFile}
+          onApplyBackupImport={handleApplyBackupImport}
+          backupCounts={backupCounts}
+          workspaceRoot={workspaceRoot}
+          projectConfigInfo={projectConfigInfo}
+          onCreateOnigiriJson={handleCreateOnigiriJson}
+          onOpenProjectConfigFile={(p) => void openPathInTab(p)}
+          updateInfo={updateInfo}
+          checkingUpdates={checkingUpdates}
+          onCheckUpdates={() => void handleCheckUpdates(false)}
+          onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
+        />
 
-      <ImageModal
-        t={t}
-        open={showImageModal}
-        docPath={activeTab.filePath}
-        workspaceRoot={workspaceRoot}
-        imageAssetFolder={effectiveSettings.imageAssetFolder}
-        onClose={() => setShowImageModal(false)}
-        onInsert={(src, alt) => insertImageIntoActivePane(src, alt)}
-      />
+        <ImageModal
+          t={t}
+          open={showImageModal}
+          docPath={activeTab.filePath}
+          workspaceRoot={workspaceRoot}
+          imageAssetFolder={effectiveSettings.imageAssetFolder}
+          onClose={() => setShowImageModal(false)}
+          onInsert={(src, alt) => insertImageIntoActivePane(src, alt)}
+        />
 
-      <AiDiffPreviewModal
-        t={t}
-        request={diffPreview}
-        onClose={() => setDiffPreview(null)}
-      />
+        <AiDiffPreviewModal
+          t={t}
+          request={diffPreview}
+          onClose={() => setDiffPreview(null)}
+        />
 
-      <EncodingModal
-        t={t}
-        locale={locale}
-        mode={encodingModalMode}
-        currentEncoding={activeTab.encoding ?? 'utf-8'}
-        currentEol={activeTab.eol ?? '\n'}
-        onClose={() => setEncodingModalMode(null)}
-        onCreateNewWithEncoding={(encoding, eol) => handleNewFile({ encoding, eol })}
-        onReopenWithEncoding={handleReopenWithEncoding}
-        onChangeSaveEncoding={handleChangeSaveEncoding}
-      />
+        <EncodingModal
+          t={t}
+          locale={locale}
+          mode={encodingModalMode}
+          currentEncoding={activeTab.encoding ?? 'utf-8'}
+          currentEol={activeTab.eol ?? '\n'}
+          onClose={() => setEncodingModalMode(null)}
+          onCreateNewWithEncoding={(encoding, eol) => handleNewFile({ encoding, eol })}
+          onReopenWithEncoding={handleReopenWithEncoding}
+          onChangeSaveEncoding={handleChangeSaveEncoding}
+        />
 
-      <GoToLineModal
-        t={t}
-        open={showGoToLine}
-        currentLine={activeTab.cursorLine}
-        totalLines={stats.lines}
-        onClose={() => setShowGoToLine(false)}
-        onJump={handleGoToLine}
-      />
+        <GoToLineModal
+          t={t}
+          open={showGoToLine}
+          currentLine={activeTab.cursorLine}
+          totalLines={stats.lines}
+          onClose={() => setShowGoToLine(false)}
+          onJump={handleGoToLine}
+        />
 
-      <InlineAiEditModal
-        t={t}
-        open={Boolean(inlineAiState)}
-        selectedText={inlineAiState?.selectedText ?? ''}
-        fileName={activeTab.title}
-        languageLabel={languageLabel}
-        aiConfig={aiConfig}
-        workspaceRoot={workspaceRoot}
-        onClose={() => setInlineAiState(null)}
-        onResultReady={handleInlineAiResultReady}
-      />
+        <InlineAiEditModal
+          t={t}
+          open={Boolean(inlineAiState)}
+          selectedText={inlineAiState?.selectedText ?? ''}
+          fileName={activeTab.title}
+          languageLabel={languageLabel}
+          aiConfig={aiConfig}
+          workspaceRoot={workspaceRoot}
+          onClose={() => setInlineAiState(null)}
+          onResultReady={handleInlineAiResultReady}
+        />
 
-      <FolderSwitchGuardModal
-        t={t}
-        mode={folderSwitchGuardMode}
-        externalServer={Boolean(projectServer?.external)}
-        commandLabel={projectInfo?.devCommandLabel || projectServer?.kind || null}
-        serverUrl={projectServer?.url || null}
-        rootPath={projectServer?.rootPath || workspaceRoot || null}
-        stopping={stoppingServerForSwitch}
-        onClose={() => {
-          if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
-        }}
-        onConfirmStopAndSwitch={handleConfirmStopAndSwitchFolder}
-      />
+        <FolderSwitchGuardModal
+          t={t}
+          mode={folderSwitchGuardMode}
+          externalServer={Boolean(projectServer?.external)}
+          commandLabel={projectInfo?.devCommandLabel || projectServer?.kind || null}
+          serverUrl={projectServer?.url || null}
+          rootPath={projectServer?.rootPath || workspaceRoot || null}
+          stopping={stoppingServerForSwitch}
+          onClose={() => {
+            if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
+          }}
+          onConfirmStopAndSwitch={handleConfirmStopAndSwitchFolder}
+        />
 
-      <WorkspaceImageModal
-        t={t}
-        imagePath={previewWorkspaceImagePath}
-        workspaceRoot={workspaceRoot}
-        entries={workspaceEntries}
-        activeDocPath={activeTab.filePath}
-        onSelectImagePath={setPreviewWorkspaceImagePath}
-        onClose={() => setPreviewWorkspaceImagePath(null)}
-        onInsertToEditor={(src, alt) => insertImageIntoActivePane(src, alt)}
-      />
+        <WorkspaceImageModal
+          t={t}
+          imagePath={previewWorkspaceImagePath}
+          workspaceRoot={workspaceRoot}
+          entries={workspaceEntries}
+          activeDocPath={activeTab.filePath}
+          onSelectImagePath={setPreviewWorkspaceImagePath}
+          onClose={() => setPreviewWorkspaceImagePath(null)}
+          onInsertToEditor={(src, alt) => insertImageIntoActivePane(src, alt)}
+        />
 
-      <SlidePresentationModal
-        t={t}
-        open={showSlideModal}
-        title={activeTab.title}
-        markdown={activeTab.content}
-        docPath={activeTab.filePath}
-        workspaceRoot={workspaceRoot}
-        theme={theme}
-        onClose={() => setShowSlideModal(false)}
-      />
+        <SlidePresentationModal
+          t={t}
+          open={showSlideModal}
+          title={activeTab.title}
+          markdown={activeTab.content}
+          docPath={activeTab.filePath}
+          workspaceRoot={workspaceRoot}
+          theme={theme}
+          onClose={() => setShowSlideModal(false)}
+        />
 
-      <WorkspaceGrepModal
-        t={t}
-        open={showWorkspaceGrep}
-        workspaceRoot={workspaceRoot}
-        onClose={() => setShowWorkspaceGrep(false)}
-        onOpenFileAtLine={(fp, ln) => void handleOpenFileAtLine(fp, ln)}
-        onAfterReplace={(paths, count) => void handleAfterWorkspaceGrepReplace(paths, count)}
-      />
+        <WorkspaceGrepModal
+          t={t}
+          open={showWorkspaceGrep}
+          workspaceRoot={workspaceRoot}
+          onClose={() => setShowWorkspaceGrep(false)}
+          onOpenFileAtLine={(fp, ln) => void handleOpenFileAtLine(fp, ln)}
+          onAfterReplace={(paths, count) => void handleAfterWorkspaceGrepReplace(paths, count)}
+        />
 
-      <TemplatePickerModal
-        t={t}
-        locale={locale}
-        open={showTemplateModal}
-        onClose={() => setShowTemplateModal(false)}
-        onOpenDailyNote={() => void handleOpenDailyNote()}
-        onCreateFromTemplate={(payload) => void handleCreateFromTemplate(payload)}
-      />
+        <TemplatePickerModal
+          t={t}
+          locale={locale}
+          open={showTemplateModal}
+          onClose={() => setShowTemplateModal(false)}
+          onOpenDailyNote={() => void handleOpenDailyNote()}
+          onCreateFromTemplate={(payload) => void handleCreateFromTemplate(payload)}
+        />
 
-      <WebClipModal
-        t={t}
-        open={showWebClipModal}
-        onClose={() => setShowWebClipModal(false)}
-        onOpenClippedNote={handleOpenClippedNote}
-      />
+        <WebClipModal
+          t={t}
+          open={showWebClipModal}
+          onClose={() => setShowWebClipModal(false)}
+          onOpenClippedNote={handleOpenClippedNote}
+        />
 
-      <UnusedAssetsModal
-        t={t}
-        open={showUnusedAssetsModal}
-        workspaceRoot={workspaceRoot}
-        extraContents={unusedAssetExtraContents}
-        onClose={() => setShowUnusedAssetsModal(false)}
-        onDeleted={(count) => {
-          notify(t.unusedAssetsModal.deletedToast.replace('{count}', String(count)));
-          if (workspaceRoot) void refreshWorkspace(workspaceRoot);
-        }}
-      />
+        <UnusedAssetsModal
+          t={t}
+          open={showUnusedAssetsModal}
+          workspaceRoot={workspaceRoot}
+          extraContents={unusedAssetExtraContents}
+          onClose={() => setShowUnusedAssetsModal(false)}
+          onDeleted={(count) => {
+            notify(t.unusedAssetsModal.deletedToast.replace('{count}', String(count)));
+            if (workspaceRoot) void refreshWorkspace(workspaceRoot);
+          }}
+        />
 
-      <CitationModal
-        t={t}
-        open={showCitationModal}
-        currentMarkdown={activeTab.content}
-        selectedText={citationSelectedText}
-        onClose={() => setShowCitationModal(false)}
-        onInsertInline={(text) => {
-          const ed = getActiveEditorTarget();
-          if (ed) {
-            ed.insertText(text);
-          } else {
-            updateActiveContent(activeTab.content + text);
-          }
-        }}
-        onInsertFootnote={handleInsertFootnote}
-      />
+        <CitationModal
+          t={t}
+          open={showCitationModal}
+          currentMarkdown={activeTab.content}
+          selectedText={citationSelectedText}
+          onClose={() => setShowCitationModal(false)}
+          onInsertInline={(text) => {
+            const ed = getActiveEditorTarget();
+            if (ed) {
+              ed.insertText(text);
+            } else {
+              updateActiveContent(activeTab.content + text);
+            }
+          }}
+          onInsertFootnote={handleInsertFootnote}
+        />
 
-      <KnowledgeGraphModal
-        t={t}
-        open={showKnowledgeGraphModal}
-        report={workspaceKnowledgeReport}
-        activeFilePath={activeTab.filePath}
-        onOpenFile={(fp, ln) => {
-          if (ln) {
-            void handleOpenFileAtLine(fp, ln);
-          } else {
-            void openPathInTab(fp);
-          }
-        }}
-        onClose={() => setShowKnowledgeGraphModal(false)}
-      />
+        <KnowledgeGraphModal
+          t={t}
+          open={showKnowledgeGraphModal}
+          report={workspaceKnowledgeReport}
+          activeFilePath={activeTab.filePath}
+          onOpenFile={(fp, ln) => {
+            if (ln) {
+              void handleOpenFileAtLine(fp, ln);
+            } else {
+              void openPathInTab(fp);
+            }
+          }}
+          onClose={() => setShowKnowledgeGraphModal(false)}
+        />
+      </Suspense>
 
       {isDraggingFile && (
         <div className="drop-overlay">

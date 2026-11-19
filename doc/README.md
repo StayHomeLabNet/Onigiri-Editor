@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.2.1)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.0)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -34,7 +34,7 @@
 
 - On first launch, Onigiri Editor detects your OS language automatically: Japanese OS environments start with the **Japanese UI and native menu bar**, while all other OS languages start in **English**.
 - You can switch languages anytime from the top-right **Language button** (`EN` / `日本語`), **Settings (`⌘,` / `Ctrl+,`) → General & View**, or the **Command Palette (`⌘K` / `Ctrl+K`)**.
-- Selecting **Help → Online Manual** (or **Online Manual** in the Command Palette) opens the manual matching your current UI language: **this English manual (`doc/README.md`) in English UI, or the Japanese manual (`doc/README.ja.md`) in Japanese UI**.
+- Selecting **Help → Online Manual** (or **Online Manual** in the Command Palette) opens the online manual (`https://stayhomelab.net/help/onigiri-editor/`) in your external browser.
 
 ---
 
@@ -89,6 +89,7 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 - **Edit & Display Zoom**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
 - **Images & Clipboard Auto-Save**:
   - Paste screenshots (`⌘V` / `Ctrl+V`) or drag & drop image files directly onto the editor or visual preview to auto-save PNG/image assets to your configured **Image Asset Folder** (default `assets`, falls back to workspace root for unsaved tabs) and insert `![image](assets/...)`.
+  - When pasting images into an unsaved tab without an open workspace folder, images are staged safely in a temporary cache (`onigiri-markdown-images`) and **automatically moved into `./assets/`** (with Markdown links rewritten) the first time you save or Save As the document.
   - When dropping images into an unsaved tab without an open workspace folder, Onigiri Editor automatically formats local/Windows paths with forward slashes and angle brackets (`<C:/.../my image.png>`) and resolves spaces, parentheses, Japanese/Unicode folders, and `file:///` URIs cleanly in Markdown Preview and Slide Mode.
   - Drag files or images from the left **Sidebar tree** into either the code editor or visual preview to automatically compute and insert a relative Markdown link or image tag.
 - **Extended Blocks & SVG / PNG Export**:
@@ -237,15 +238,15 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 
 ## 10. Export (`.docx` / HTML / PDF), Themes, Keybindings & Backup Settings
 
-- **Exports & Rich Copy**: **Export Word (`.docx`)**, **Export HTML**, **Print / Export PDF** (Markdown preview or Source Code), **Export Plain Text**, **Mermaid & KaTeX SVG / PNG Export**, **Copy as Rich Text** (selection or full document via Inspector, right-click menu, Command Palette, or custom shortcut), and **Copy Markdown / HTML**.
+- **Exports & Rich Copy**: **Export Word (`.docx`)** (embeds local & `data:` PNG/JPEG/GIF/BMP/SVG/WebP images cleanly inside `word/media/`), **Export HTML** (optionally inlines local images as Base64 data URIs for single-file portability via **Embed Local Images on HTML Export**), **Print / Export PDF** (Markdown preview or Source Code), **Export Plain Text**, **Mermaid & KaTeX SVG / PNG Export**, **Copy as Rich Text** (selection or full document via Inspector, right-click menu, Command Palette, or custom shortcut), and **Copy Markdown / HTML**.
 - **Themes & Preview Styles**: `Light`, `Dark`, `Sepia`, `Midnight` + `Editorial`, `GitHub`, `Notion`, `Academic` + **Custom Preview CSS**.
 - **Settings Tabs (`⌘,` / `Ctrl+,`)**:
-  - **General & View**: Language, Theme, Preview Style, Font Size, Line Height, Preview Width, Editor Font, Bar visibility toggles, Focus Mode, Session Restore, Auto-Save, Writing Goal, **Daily Notes Folder**, **Image Asset Folder**, Custom CSS.
+  - **General & View**: Language, Theme, Preview Style, Font Size, Line Height, Preview Width, Editor Font, Bar visibility toggles, **Inspector Tab Style** (`Icons only`, `Active label`, or `Always show labels`), Focus Mode, Session Restore, Auto-Save, Writing Goal, **Daily Notes Folder**, **Image Asset Folder**, **Embed Local Images on HTML Export**, **Check for App Updates on Startup** (+ manual **Check for Updates** & release download button), Custom CSS.
   - **Editor & Line Copy**: Line Numbers, Word Wrap & Column Width, Column Ruler, Visible Symbols, Matching Brackets, Auto-Close Brackets, Default Encoding/EOL, Active Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, **Auto-fetch webpage title on URL paste (`autoTitleOnUrlPaste`)**, Smart Line Copy, and **Project Config (`.editorconfig` / `.onigiri.json`)** status & quick creation.
   - **Syntax Colors**: 7 presets + 10 per-token color pickers.
   - **Keybindings**: Interactive shortcut editor for 27 commands with search filter, conflict detection, clear, individual reset, and Reset All (dynamically reflected in Command Palette badges).
   - **AI & Browser**: AI Folder Access, Built-in Browser toggle & default URL, External Live Preview toggle, port, and LAN sharing.
-  - **Reset & Data**: **Export / Import JSON Backup** (selectively save/restore App & Editor settings, AI config & presets with optional API key exclusion, Custom Snippets, Templates, and Keybindings with merge/replace), **Reset Settings to Defaults**, and **Clear User Data & Caches**.
+  - **Reset & Data**: **Export / Import JSON Backup** (selectively save/restore App & Editor settings, AI config & presets with optional API key exclusion, Custom Snippets, Templates, and Keybindings with merge/replace), **Reset Settings to Defaults**, and **Clear User Data & Caches** (also clears the LRU in-memory image cache).
 
 ---
 
@@ -289,4 +290,4 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 - **Edit**: Undo, Redo, Cut, Copy, Paste, Select All, Find & Replace, Go to Line..., Macro Record/Play
 - **View**: Simple Mode, Basic Mode, Advanced Mode, Show Header Bar, Show Format Toolbar, Command Palette, Options / AI Chat, Live Preview in External Browser, Zen Mode
 - **Window**: Minimize, Close Window
-- **Help**: **Online Manual**, About Onigiri Editor *(on macOS, Settings is in the **Onigiri Editor** app menu)*
+- **Help**: **Online Manual**, **Check for Updates...**, About Onigiri Editor *(on macOS, Settings is in the **Onigiri Editor** app menu)*

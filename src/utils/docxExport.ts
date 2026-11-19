@@ -1,4 +1,11 @@
 import { renderMarkdownToHtml, splitFrontmatter } from './markdown';
+import { resolveImageSrc } from './platform';
+import type { ImageSrcResolver } from './exportHelpers';
+
+export interface DocxExportOptions {
+  baseDir?: string | null;
+  imageResolver?: ImageSrcResolver;
+}
 
 /* ---------------------------- Minimal ZIP Builder ---------------------------- */
 
@@ -131,9 +138,28 @@ interface InlineRunStyle {
   linkHref?: string;
 }
 
+interface DocxEmbeddedImage {
+  rId: string;
+  target: string; // e.g. media/image1.png
+  ext: string;
+  mime: string;
+  data: Uint8Array;
+  cx: number; // EMUs
+  cy: number; // EMUs
+  docPrId: number;
+  name: string;
+}
+
 interface DocxContext {
   hyperlinks: Array<{ id: string; url: string }>;
+  images: Map<HTMLElement, DocxEmbeddedImage>;
+  mediaList: DocxEmbeddedImage[];
   nextRelNum: number;
+}
+
+function renderDrawingRunXml(img: DocxEmbeddedImage): string {
+  const safeName = xmlEscape(img.name || 'Image');
+  return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:extent cx="${img.cx}" cy="${img.cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:docPr id="${img.docPrId}" name="${safeName}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${img.docPrId}" name="${safeName}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${img.rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${img.cx}" cy="${img.cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`;
 }
 
 function renderRunXml(text: string, style: InlineRunStyle): string {
@@ -174,6 +200,14 @@ function collectInlineRuns(node: Node, style: InlineRunStyle, ctx: DocxContext):
 
   if (tag === 'br') {
     return '<w:r><w:br/></w:r>';
+  }
+  if (tag === 'img') {
+    const embedded = ctx.images.get(el);
+    if (embedded) {
+      return renderDrawingRunXml(embedded);
+    }
+    const alt = el.getAttribute('alt') || el.getAttribute('src') || 'image';
+    return renderRunXml(`[Image: ${alt}]`, style);
   }
   if (tag === 'input' && (el as HTMLInputElement).type === 'checkbox') {
     const checked = (el as HTMLInputElement).checked || el.hasAttribute('checked');
@@ -445,7 +479,186 @@ const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   </w:style>
 </w:styles>`;
 
-export async function exportMarkdownToDocxBytes(markdown: string): Promise<Uint8Array> {
+function decodeDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array } | null {
+  const m = dataUrl.match(/^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,(.*)$/is);
+  if (!m) return null;
+  const mime = (m[1] || 'application/octet-stream').toLowerCase();
+  const isB64 = Boolean(m[2]);
+  const payload = m[3] || '';
+  try {
+    if (isB64) {
+      const bin = atob(payload.replace(/\s+/g, ''));
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return { mime, bytes: out };
+    }
+    const decoded = decodeURIComponent(payload);
+    return { mime, bytes: new TextEncoder().encode(decoded) };
+  } catch {
+    return null;
+  }
+}
+
+function readImageDimensionsFromBytes(
+  mime: string,
+  bytes: Uint8Array
+): { width: number; height: number } | null {
+  // PNG IHDR
+  if (
+    mime === 'image/png' &&
+    bytes.length >= 24 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16, false);
+    const height = view.getUint32(20, false);
+    if (width > 0 && height > 0) return { width, height };
+  }
+  // GIF87a / GIF89a
+  if (mime === 'image/gif' && bytes.length >= 10 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint16(6, true);
+    const height = view.getUint16(8, true);
+    if (width > 0 && height > 0) return { width, height };
+  }
+  // JPEG SOF0/SOF1/SOF2
+  if (mime === 'image/jpeg' && bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < bytes.length) {
+      if (bytes[i] !== 0xff) break;
+      const marker = bytes[i + 1];
+      if (marker === 0xd9 || marker === 0xda) break;
+      const len = (bytes[i + 2] << 8) | bytes[i + 3];
+      if (len < 2 || i + 2 + len > bytes.length) break;
+      if (marker >= 0xc0 && marker <= 0xc3) {
+        const height = (bytes[i + 5] << 8) | bytes[i + 6];
+        const width = (bytes[i + 7] << 8) | bytes[i + 8];
+        if (width > 0 && height > 0) return { width, height };
+      }
+      i += 2 + len;
+    }
+  }
+  return null;
+}
+
+async function loadImageDimensionsAndMaybePng(
+  dataUrl: string,
+  mime: string,
+  rawBytes: Uint8Array
+): Promise<{ ext: string; mime: string; bytes: Uint8Array; width: number; height: number } | null> {
+  const nativeExtMap: Record<string, string> = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/gif': 'gif',
+    'image/bmp': 'bmp',
+  };
+
+  const nativeExt = nativeExtMap[mime];
+  const headerDims = nativeExt ? readImageDimensionsFromBytes(mime === 'image/jpg' ? 'image/jpeg' : mime, rawBytes) : null;
+
+  // For formats Word doesn't universally support natively (svg/webp/avif), convert via canvas when available
+  const needsCanvasConvert = !nativeExt;
+  if (typeof Image !== 'undefined' && (needsCanvasConvert || !headerDims)) {
+    const imgResult = await new Promise<{ width: number; height: number; pngBytes?: Uint8Array } | null>((resolve) => {
+      const img = new Image();
+      const timer = setTimeout(() => resolve(null), 1500);
+      img.onload = () => {
+        clearTimeout(timer);
+        const w = img.naturalWidth || 480;
+        const h = img.naturalHeight || 320;
+        if (!needsCanvasConvert) {
+          resolve({ width: w, height: h });
+          return;
+        }
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
+          ctx.drawImage(img, 0, 0, w, h);
+          const pngUrl = canvas.toDataURL('image/png');
+          const decoded = decodeDataUrl(pngUrl);
+          if (!decoded) {
+            resolve(null);
+            return;
+          }
+          resolve({ width: w, height: h, pngBytes: decoded.bytes });
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => {
+        clearTimeout(timer);
+        resolve(null);
+      };
+      img.src = dataUrl;
+    });
+
+    if (imgResult) {
+      if (needsCanvasConvert && imgResult.pngBytes) {
+        return {
+          ext: 'png',
+          mime: 'image/png',
+          bytes: imgResult.pngBytes,
+          width: imgResult.width,
+          height: imgResult.height,
+        };
+      }
+      if (nativeExt) {
+        return {
+          ext: nativeExt,
+          mime: mime === 'image/jpg' ? 'image/jpeg' : mime,
+          bytes: rawBytes,
+          width: imgResult.width,
+          height: imgResult.height,
+        };
+      }
+    }
+  }
+
+  if (nativeExt) {
+    return {
+      ext: nativeExt,
+      mime: mime === 'image/jpg' ? 'image/jpeg' : mime,
+      bytes: rawBytes,
+      width: headerDims?.width ?? 480,
+      height: headerDims?.height ?? 320,
+    };
+  }
+  return null;
+}
+
+function buildContentTypesXml(mediaList: DocxEmbeddedImage[]): string {
+  const seenExts = new Map<string, string>();
+  for (const m of mediaList) {
+    if (!seenExts.has(m.ext)) {
+      seenExts.set(m.ext, m.mime);
+    }
+  }
+  const mediaDefaults = Array.from(seenExts.entries())
+    .map(([ext, mime]) => `  <Default Extension="${ext}" ContentType="${mime}"/>`)
+    .join('\n');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>${mediaDefaults ? `\n${mediaDefaults}` : ''}
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`;
+}
+
+export async function exportMarkdownToDocxBytes(
+  markdown: string,
+  options?: DocxExportOptions
+): Promise<Uint8Array> {
   const { body } = splitFrontmatter(markdown || '');
   const html = await renderMarkdownToHtml(body);
   const container = document.createElement('div');
@@ -453,8 +666,58 @@ export async function exportMarkdownToDocxBytes(markdown: string): Promise<Uint8
 
   const ctx: DocxContext = {
     hyperlinks: [],
+    images: new Map(),
+    mediaList: [],
     nextRelNum: 2, // rId1 reserved for styles.xml
   };
+
+  const resolver = options?.imageResolver ?? resolveImageSrc;
+  const imgElements = Array.from(container.querySelectorAll('img'));
+  const maxWidthEmu = 5486400; // ~576px (6.0 in) inside A4 margins
+  const resolvedCache = new Map<string, string>();
+  let docPrCounter = 1;
+
+  for (const imgEl of imgElements) {
+    const rawSrc = (imgEl.getAttribute('src') || '').trim();
+    if (!rawSrc) continue;
+    let dataUrl = resolvedCache.get(rawSrc);
+    if (dataUrl === undefined) {
+      dataUrl = rawSrc.startsWith('data:')
+        ? rawSrc
+        : await resolver(rawSrc, options?.baseDir);
+      resolvedCache.set(rawSrc, dataUrl);
+    }
+    if (!dataUrl.startsWith('data:')) continue;
+    const decoded = decodeDataUrl(dataUrl);
+    if (!decoded) continue;
+    const prepared = await loadImageDimensionsAndMaybePng(dataUrl, decoded.mime, decoded.bytes);
+    if (!prepared) continue;
+
+    let cx = Math.max(1, Math.round(prepared.width * 9525));
+    let cy = Math.max(1, Math.round(prepared.height * 9525));
+    if (cx > maxWidthEmu) {
+      const ratio = maxWidthEmu / cx;
+      cx = maxWidthEmu;
+      cy = Math.max(1, Math.round(cy * ratio));
+    }
+
+    const rId = `rId${ctx.nextRelNum++}`;
+    const idx = ctx.mediaList.length + 1;
+    const target = `media/image${idx}.${prepared.ext}`;
+    const embedded: DocxEmbeddedImage = {
+      rId,
+      target,
+      ext: prepared.ext,
+      mime: prepared.mime,
+      data: prepared.bytes,
+      cx,
+      cy,
+      docPrId: docPrCounter++,
+      name: imgEl.getAttribute('alt') || `image${idx}.${prepared.ext}`,
+    };
+    ctx.mediaList.push(embedded);
+    ctx.images.set(imgEl, embedded);
+  }
 
   const blocks: string[] = [];
   for (const child of Array.from(container.children)) {
@@ -465,7 +728,7 @@ export async function exportMarkdownToDocxBytes(markdown: string): Promise<Uint8
   }
 
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <w:body>
     ${blocks.join('\n    ')}
     <w:sectPr>
@@ -475,23 +738,34 @@ export async function exportMarkdownToDocxBytes(markdown: string): Promise<Uint8
   </w:body>
 </w:document>`;
 
-  const docRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-  ${ctx.hyperlinks
-    .map(
+  const relEntries: string[] = [
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
+    ...ctx.hyperlinks.map(
       (h) =>
         `<Relationship Id="${h.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(h.url)}" TargetMode="External"/>`
-    )
-    .join('\n  ')}
+    ),
+    ...ctx.mediaList.map(
+      (m) =>
+        `<Relationship Id="${m.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${m.target}"/>`
+    ),
+  ];
+
+  const docRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${relEntries.join('\n  ')}
 </Relationships>`;
 
   const encoder = new TextEncoder();
-  return buildStoredZip([
-    { name: '[Content_Types].xml', data: encoder.encode(CONTENT_TYPES_XML) },
+  const contentTypesXml = ctx.mediaList.length > 0 ? buildContentTypesXml(ctx.mediaList) : CONTENT_TYPES_XML;
+  const zipEntries: ZipEntryInput[] = [
+    { name: '[Content_Types].xml', data: encoder.encode(contentTypesXml) },
     { name: '_rels/.rels', data: encoder.encode(ROOT_RELS_XML) },
     { name: 'word/styles.xml', data: encoder.encode(STYLES_XML) },
     { name: 'word/_rels/document.xml.rels', data: encoder.encode(docRelsXml) },
     { name: 'word/document.xml', data: encoder.encode(documentXml) },
-  ]);
+    ...ctx.mediaList.map((m) => ({ name: `word/${m.target}`, data: m.data })),
+  ];
+
+  return buildStoredZip(zipEntries);
 }
+

@@ -1,0 +1,116 @@
+/* Inspector icon-only / active-label tab variants */
+.inspector-tabs {
+  gap: 3px;
+  padding: 5px 6px;
+}
+
+.inspector-tabs.is-style-icons .ins-tab-btn {
+  padding: 6px 4px;
+  min-height: 30px;
+}
+
+.inspector-tabs.is-style-active-label .ins-tab-btn {
+  flex: 0 0 auto;
+  min-width: 30px;
+  padding: 6px 6px;
+}
+
+.inspector-tabs.is-style-active-label .ins-tab-btn.is-active {
+  flex: 1 1 auto;
+  flex-direction: row;
+  gap: 5px;
+  padding: 6px 8px;
+}
+
+.ins-tab-btn:hover:not(.is-active) {
+  background: var(--bg-subtle);
+  color: var(--fg);
+}
+
+.ins-tab-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Update notification banner & About/Settings controls */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-panel));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.update-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.about-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+
+.about-update-status {
+  font-size: 12px;
+  min-width: 0;
+}
+
+.about-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.update-badge-new {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.about-update-ok {
+  color: var(--fg-secondary);
+}
+
+.compact-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.spin {
+  animation: onigiri-spin 0.9s linear infinite;
+}
+
+@keyframes onigiri-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

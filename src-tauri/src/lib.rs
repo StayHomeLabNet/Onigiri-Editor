@@ -1,8 +1,10 @@
 mod ai;
 mod browser;
+mod images;
 mod live_preview;
 mod menu;
 mod project;
+mod updates;
 mod window_state;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -166,7 +168,7 @@ fn is_supported_text_file(path: &Path) -> bool {
     )
 }
 
-fn is_supported_image_file(path: &Path) -> bool {
+pub(crate) fn is_supported_image_file(path: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
         return false;
     };
@@ -180,7 +182,7 @@ fn is_workspace_visible_file(path: &Path) -> bool {
     is_supported_text_file(path) || is_supported_image_file(path)
 }
 
-fn should_skip_dir(name: &str) -> bool {
+pub(crate) fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
         "node_modules"
@@ -252,7 +254,7 @@ fn detect_eol(text: &str) -> &'static str {
     }
 }
 
-fn decode_bytes_with_encoding(
+pub(crate) fn decode_bytes_with_encoding(
     bytes: &[u8],
     requested_encoding: Option<&str>,
 ) -> Result<DecodedTextFile, String> {
@@ -1152,313 +1154,6 @@ fn take_initial_files(state: State<'_, OpenedFilesState>) -> Vec<String> {
     let items = guard.clone();
     guard.clear();
     items
-}
-
-fn guess_image_mime(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("svg") => "image/svg+xml",
-        Some("bmp") => "image/bmp",
-        Some("ico") => "image/x-icon",
-        Some("avif") => "image/avif",
-        _ => "application/octet-stream",
-    }
-}
-
-fn percent_decode_utf8(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let h1 = bytes[i + 1];
-            let h2 = bytes[i + 2];
-            if let (Some(d1), Some(d2)) = (
-                (h1 as char).to_digit(16),
-                (h2 as char).to_digit(16),
-            ) {
-                out.push(((d1 << 4) | d2) as u8);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).to_string()
-}
-
-fn strip_windows_leading_slash(s: &str) -> &str {
-    let bytes = s.as_bytes();
-    if bytes.len() >= 4
-        && bytes[0] == b'/'
-        && bytes[1].is_ascii_alphabetic()
-        && bytes[2] == b':'
-        && (bytes[3] == b'/' || bytes[3] == b'\\')
-    {
-        &s[1..]
-    } else {
-        s
-    }
-}
-
-fn clean_image_path_candidates(raw_path: &str) -> Vec<String> {
-    let mut cleaned = raw_path.trim();
-    if cleaned.starts_with('<') && cleaned.ends_with('>') && cleaned.len() >= 2 {
-        cleaned = cleaned[1..cleaned.len() - 1].trim();
-    }
-
-    let mut candidates = Vec::new();
-    let lower = cleaned.to_ascii_lowercase();
-    if lower.starts_with("file://") {
-        if let Ok(parsed) = url::Url::parse(cleaned) {
-            if let Ok(file_path) = parsed.to_file_path() {
-                let s = file_path.to_string_lossy().to_string();
-                let normalized = strip_windows_leading_slash(&s).to_string();
-                if !normalized.is_empty() {
-                    candidates.push(normalized);
-                }
-            }
-        }
-        let after_scheme = &cleaned[7..];
-        let without_localhost = if after_scheme.to_ascii_lowercase().starts_with("localhost/") {
-            &after_scheme[9..]
-        } else {
-            after_scheme
-        };
-        let stripped = strip_windows_leading_slash(without_localhost);
-        let decoded = strip_windows_leading_slash(&percent_decode_utf8(stripped)).to_string();
-        if !decoded.is_empty() && !candidates.contains(&decoded) {
-            candidates.push(decoded);
-        }
-        if !stripped.is_empty() && !candidates.iter().any(|c| c == stripped) {
-            candidates.push(stripped.to_string());
-        }
-    } else {
-        let stripped = strip_windows_leading_slash(cleaned);
-        let decoded = strip_windows_leading_slash(&percent_decode_utf8(stripped)).to_string();
-        if !stripped.is_empty() {
-            candidates.push(stripped.to_string());
-        }
-        if !decoded.is_empty() && !candidates.contains(&decoded) {
-            candidates.push(decoded);
-        }
-    }
-    candidates
-}
-
-fn read_image_data_url_impl(path: &str, base_dir: Option<&str>) -> Result<String, String> {
-    let candidates = clean_image_path_candidates(path);
-    if candidates.is_empty() {
-        return Err("Empty image path".to_string());
-    }
-
-    let mut resolved = ai::resolve_image_path(&candidates[0], base_dir);
-    if !resolved.exists() {
-        for cand in &candidates[1..] {
-            let try_path = ai::resolve_image_path(cand, base_dir);
-            if try_path.exists() {
-                resolved = try_path;
-                break;
-            }
-        }
-    }
-
-    let bytes = fs::read(&resolved)
-        .map_err(|e| format!("Failed to read image {}: {}", resolved.display(), e))?;
-    if bytes.len() > 25 * 1024 * 1024 {
-        return Err("Image is larger than 25MB".to_string());
-    }
-    let mime = guess_image_mime(&resolved);
-    Ok(format!("data:{};base64,{}", mime, BASE64.encode(&bytes)))
-}
-
-#[tauri::command]
-fn read_image_data_url(path: String, base_dir: Option<String>) -> Result<String, String> {
-    read_image_data_url_impl(&path, base_dir.as_deref())
-}
-
-fn sanitize_asset_folder(raw: Option<&str>) -> Result<(PathBuf, String), String> {
-    let trimmed = raw.unwrap_or("assets").trim().trim_start_matches("./").trim_start_matches(".\\");
-    let effective = if trimmed.is_empty() { "assets" } else { trimmed };
-    let mut rel_buf = PathBuf::new();
-    let mut parts = Vec::new();
-    for seg in effective.split(&['/', '\\'][..]) {
-        let s = seg.trim();
-        if s.is_empty() || s == "." {
-            continue;
-        }
-        if s == ".." || s.contains(':') || s.chars().any(|c| c.is_control()) {
-            return Err("Invalid asset folder path".to_string());
-        }
-        rel_buf.push(s);
-        parts.push(s.to_string());
-    }
-    if parts.is_empty() {
-        return Ok((PathBuf::from("assets"), "assets".to_string()));
-    }
-    Ok((rel_buf, parts.join("/")))
-}
-
-fn resolve_asset_base_dir(doc_path: Option<&str>, workspace_root: Option<&str>) -> Option<PathBuf> {
-    if let Some(doc) = doc_path.map(str::trim).filter(|s| !s.is_empty()) {
-        let doc_p = PathBuf::from(doc);
-        let base_dir = if doc_p.is_dir() {
-            doc_p
-        } else {
-            doc_p
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."))
-        };
-        return Some(base_dir);
-    }
-    if let Some(ws) = workspace_root.map(str::trim).filter(|s| !s.is_empty()) {
-        return Some(PathBuf::from(ws));
-    }
-    None
-}
-
-fn save_image_asset_impl(
-    source_path: &str,
-    doc_path: Option<&str>,
-    workspace_root: Option<&str>,
-    asset_dir: Option<&str>,
-) -> Result<String, String> {
-    let src = PathBuf::from(source_path);
-    if !src.exists() || !src.is_file() {
-        return Err(format!("Image file not found: {}", source_path));
-    }
-
-    if let Some(base_dir) = resolve_asset_base_dir(doc_path, workspace_root) {
-        let (rel_dir_path, rel_dir_posix) = sanitize_asset_folder(asset_dir)?;
-        let assets_dir = base_dir.join(&rel_dir_path);
-        fs::create_dir_all(&assets_dir)
-            .map_err(|e| format!("Failed to create assets dir: {}", e))?;
-
-        let orig_name = src
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("image.png");
-        let sanitized: String = orig_name
-            .chars()
-            .map(|c| if c.is_whitespace() { '-' } else { c })
-            .collect();
-        let mut dest = assets_dir.join(&sanitized);
-        if dest.exists() && dest != src {
-            let raw_stem = src
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("image");
-            let sanitized_stem: String = raw_stem
-                .chars()
-                .map(|c| if c.is_whitespace() { '-' } else { c })
-                .collect();
-            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("png");
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis())
-                .unwrap_or(0);
-            let unique_name = format!("{}-{}.{}", sanitized_stem, ts, ext);
-            dest = assets_dir.join(&unique_name);
-        }
-        if dest != src {
-            fs::copy(&src, &dest).map_err(|e| format!("Failed to copy image: {}", e))?;
-        }
-        let final_name = dest
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("image.png");
-        return Ok(format!("./{}/{}", rel_dir_posix, final_name));
-    }
-
-    Ok(source_path.replace('\\', "/"))
-}
-
-#[tauri::command]
-fn save_image_asset(
-    source_path: String,
-    doc_path: Option<String>,
-    workspace_root: Option<String>,
-    asset_dir: Option<String>,
-) -> Result<String, String> {
-    save_image_asset_impl(
-        &source_path,
-        doc_path.as_deref(),
-        workspace_root.as_deref(),
-        asset_dir.as_deref(),
-    )
-}
-
-fn save_pasted_image_impl(
-    base64_data: &str,
-    ext: &str,
-    doc_path: Option<&str>,
-    workspace_root: Option<&str>,
-    asset_dir: Option<&str>,
-) -> Result<String, String> {
-    let raw_b64 = base64_data
-        .split_once(',')
-        .map(|(_, b)| b)
-        .unwrap_or(base64_data);
-    let bytes = BASE64
-        .decode(raw_b64)
-        .map_err(|e| format!("Invalid image base64: {}", e))?;
-    let safe_ext = ext
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect::<String>();
-    let ext_final = if safe_ext.is_empty() {
-        "png".to_string()
-    } else {
-        safe_ext
-    };
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let file_name = format!("pasted-{}.{}", ts, ext_final);
-
-    if let Some(base_dir) = resolve_asset_base_dir(doc_path, workspace_root) {
-        let (rel_dir_path, rel_dir_posix) = sanitize_asset_folder(asset_dir)?;
-        let assets_dir = base_dir.join(&rel_dir_path);
-        fs::create_dir_all(&assets_dir)
-            .map_err(|e| format!("Failed to create assets dir: {}", e))?;
-        let dest = assets_dir.join(&file_name);
-        fs::write(&dest, &bytes).map_err(|e| format!("Failed to save pasted image: {}", e))?;
-        return Ok(format!("./{}/{}", rel_dir_posix, file_name));
-    }
-
-    let tmp_dir = std::env::temp_dir().join("onigiri-markdown-images");
-    fs::create_dir_all(&tmp_dir).map_err(|e| format!("Failed to create temp image dir: {}", e))?;
-    let dest = tmp_dir.join(&file_name);
-    fs::write(&dest, &bytes).map_err(|e| format!("Failed to save temp image: {}", e))?;
-    Ok(dest.to_string_lossy().replace('\\', "/"))
-}
-
-#[tauri::command]
-fn save_pasted_image(
-    base64_data: String,
-    ext: String,
-    doc_path: Option<String>,
-    workspace_root: Option<String>,
-    asset_dir: Option<String>,
-) -> Result<String, String> {
-    save_pasted_image_impl(
-        &base64_data,
-        &ext,
-        doc_path.as_deref(),
-        workspace_root.as_deref(),
-        asset_dir.as_deref(),
-    )
 }
 
 fn is_readable_workspace_text(path: &Path) -> bool {
@@ -2419,166 +2114,6 @@ fn write_binary_file(path: String, data_base64: String) -> Result<(), String> {
     fs::write(&path, bytes).map_err(|e| format!("Failed to write {}: {}", path, e))
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UnusedAssetEntry {
-    path: String,
-    relative_path: String,
-    name: String,
-    size: u64,
-    modified_ms: u64,
-}
-
-fn is_reference_scan_text_file(path: &Path) -> bool {
-    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-        return false;
-    };
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "md" | "markdown" | "mdown" | "mdx" | "txt" | "html" | "htm" | "json" | "yaml" | "yml"
-    )
-}
-
-fn find_unused_workspace_assets_impl(
-    root_path: &str,
-    extra_contents: &[String],
-) -> Result<Vec<UnusedAssetEntry>, String> {
-    let root = PathBuf::from(root_path)
-        .canonicalize()
-        .map_err(|e| format!("Invalid workspace root: {}", e))?;
-
-    let mut image_entries: Vec<UnusedAssetEntry> = Vec::new();
-    let mut doc_texts: Vec<(String, String)> = Vec::new(); // (doc_rel_dir, normalized_text)
-
-    let walker = WalkDir::new(&root)
-        .max_depth(8)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true;
-            }
-            if e.file_type().is_dir() {
-                let name = e.file_name().to_string_lossy();
-                return !should_skip_dir(&name);
-            }
-            true
-        });
-
-    for entry in walker.flatten() {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.path();
-        let Ok(rel) = path.strip_prefix(&root) else {
-            continue;
-        };
-        let rel_posix = rel.to_string_lossy().replace('\\', "/");
-        if is_supported_image_file(path)
-            || path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("svg"))
-                .unwrap_or(false)
-        {
-            let meta = entry.metadata().ok();
-            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-            let modified_ms = meta
-                .as_ref()
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let name = path
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            image_entries.push(UnusedAssetEntry {
-                path: path.to_string_lossy().to_string(),
-                relative_path: rel_posix,
-                name,
-                size,
-                modified_ms,
-            });
-        } else if is_reference_scan_text_file(path) {
-            if let Ok(meta) = entry.metadata() {
-                if meta.len() > 4 * 1024 * 1024 {
-                    continue;
-                }
-            }
-            if let Ok(bytes) = fs::read(path) {
-                if let Ok(decoded) = decode_bytes_with_encoding(&bytes, None) {
-                    let doc_dir = Path::new(&rel_posix)
-                        .parent()
-                        .map(|p| p.to_string_lossy().replace('\\', "/"))
-                        .unwrap_or_default();
-                    let lower = decoded
-                        .content
-                        .replace("%20", " ")
-                        .replace('\\', "/")
-                        .to_ascii_lowercase();
-                    doc_texts.push((doc_dir.to_ascii_lowercase(), lower));
-                }
-            }
-        }
-    }
-
-    for extra in extra_contents {
-        if !extra.trim().is_empty() {
-            doc_texts.push((
-                String::new(),
-                extra.replace("%20", " ").replace('\\', "/").to_ascii_lowercase(),
-            ));
-        }
-    }
-
-    let mut unused = Vec::new();
-    for img in image_entries {
-        let rel_lower = img.relative_path.to_ascii_lowercase();
-        let name_lower = img.name.to_ascii_lowercase();
-        let encoded_rel = rel_lower.replace(' ', "%20");
-        let encoded_name = name_lower.replace(' ', "%20");
-
-        let mut is_used = false;
-        for (doc_dir, text) in &doc_texts {
-            // 1. Direct workspace-relative or filename match inside markdown/html text
-            if text.contains(&rel_lower)
-                || text.contains(&encoded_rel)
-                || text.contains(&name_lower)
-                || text.contains(&encoded_name)
-            {
-                is_used = true;
-                break;
-            }
-            // 2. Relative from doc_dir (if doc is inside same subtree)
-            if !doc_dir.is_empty() {
-                if let Some(stripped) = rel_lower.strip_prefix(&format!("{}/", doc_dir)) {
-                    if text.contains(stripped) {
-                        is_used = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if !is_used {
-            unused.push(img);
-        }
-    }
-
-    unused.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms).then_with(|| a.relative_path.cmp(&b.relative_path)));
-    Ok(unused)
-}
-
-#[tauri::command]
-async fn find_unused_workspace_assets(
-    root_path: String,
-    extra_contents: Option<Vec<String>>,
-) -> Result<Vec<UnusedAssetEntry>, String> {
-    let extras = extra_contents.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || find_unused_workspace_assets_impl(&root_path, &extras))
-        .await
-        .map_err(|e| format!("Unused asset scan failed: {}", e))?
-}
-
 fn delete_workspace_files_impl(
     root_path: &str,
     paths: &[String],
@@ -3161,12 +2696,15 @@ pub fn run() {
             duplicate_workspace_file,
             delete_workspace_entry,
             delete_workspace_files,
-            find_unused_workspace_assets,
+            images::find_unused_workspace_assets,
             replace_in_workspace,
             take_initial_files,
-            read_image_data_url,
-            save_image_asset,
-            save_pasted_image,
+            images::read_image_data_url,
+            images::read_image_asset_with_meta,
+            images::save_image_asset,
+            images::save_pasted_image,
+            images::migrate_temp_images_on_save,
+            updates::check_app_updates,
             get_os_locale,
             get_git_status,
             get_git_head_file,
@@ -3416,49 +2954,6 @@ mod tests {
     }
 
     #[test]
-    fn save_pasted_image_supports_custom_folder_and_workspace_fallback() {
-        let base = std::env::temp_dir().join(format!(
-            "onigiri_asset_test_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&base).unwrap();
-        // 1x1 transparent PNG base64
-        let png_b64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
-        let doc_file = base.join("note.md");
-        fs::write(&doc_file, "# Doc").unwrap();
-
-        let rel = save_pasted_image_impl(
-            png_b64,
-            "png",
-            Some(&doc_file.to_string_lossy()),
-            None,
-            Some("images/screens"),
-        )
-        .unwrap();
-        assert!(rel.starts_with("./images/screens/pasted-"));
-        assert!(base.join(rel.trim_start_matches("./")).exists());
-
-        // Fallback to workspace_root for unsaved tab
-        let ws_rel = save_pasted_image_impl(
-            png_b64,
-            "png",
-            None,
-            Some(&base.to_string_lossy()),
-            Some("assets"),
-        )
-        .unwrap();
-        assert!(ws_rel.starts_with("./assets/pasted-"));
-
-        // Reject path traversal
-        assert!(sanitize_asset_folder(Some("../escape")).is_err());
-
-        let _ = fs::remove_dir_all(&base);
-    }
-
-    #[test]
     fn index_workspace_notes_extracts_tags_and_links() {
         let base = std::env::temp_dir().join(format!(
             "onigiri_index_test_{}",
@@ -3595,7 +3090,7 @@ mod tests {
         fs::write(base.join("doc.md"), "# Doc\n![alt](assets/used.png)\n").unwrap();
 
         let root_str = base.to_string_lossy().to_string();
-        let found = find_unused_workspace_assets_impl(
+        let found = images::find_unused_workspace_assets_impl(
             &root_str,
             &["Draft with ![draft](assets/unsaved_tab.png)".to_string()],
         )
@@ -3662,82 +3157,6 @@ mod tests {
             let state2 = get_git_panel_state_impl(&root_str);
             assert!(state2.files.iter().any(|f| f.relative_path == "docs/note.md" && !f.staged && f.unstaged));
         }
-
-        let _ = fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn image_path_decoding_and_data_url_reading_handle_spaces_and_unicode() {
-        assert_eq!(
-            percent_decode_utf8("C:/Users/Desktop/%E7%B4%A0%E6%9D%90/KIWI%20WHITE+1.png"),
-            "C:/Users/Desktop/素材/KIWI WHITE+1.png"
-        );
-
-        let win_cands = clean_image_path_candidates(
-            "file:///C:/Users/Administrator/Desktop/%E7%B4%A0%E6%9D%90/KIWI%20WHITE.png",
-        );
-        assert!(win_cands.iter().any(|c| c.contains("C:") && c.contains("素材/KIWI WHITE.png")));
-
-        let angle_cands = clean_image_path_candidates("<./assets/KIWI%20WHITE.png>");
-        assert!(angle_cands.contains(&"./assets/KIWI WHITE.png".to_string()));
-
-        let base = std::env::temp_dir().join(format!(
-            "onigiri_img_read_test_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let sub = base.join("素材");
-        fs::create_dir_all(&sub).unwrap();
-        let img_path = sub.join("KIWI WHITE.png");
-        fs::write(&img_path, b"\x89PNG\r\n\x1a\ntest").unwrap();
-
-        // Read via percent-encoded relative path with workspace base_dir
-        let base_str = base.to_string_lossy().to_string();
-        let data_url = read_image_data_url_impl(
-            "./%E7%B4%A0%E6%9D%90/KIWI%20WHITE.png",
-            Some(&base_str),
-        )
-        .unwrap();
-        assert!(data_url.starts_with("data:image/png;base64,"));
-
-        // Read via file:// URL pointing to absolute path
-        let file_url = url::Url::from_file_path(&img_path).unwrap().to_string();
-        let data_url_from_uri = read_image_data_url_impl(&file_url, None).unwrap();
-        assert_eq!(data_url, data_url_from_uri);
-
-        // Save image asset into workspace root when doc_path is None (unsaved tab)
-        let saved_rel = save_image_asset_impl(
-            &img_path.to_string_lossy(),
-            None,
-            Some(&base_str),
-            Some("assets"),
-        )
-        .unwrap();
-        assert_eq!(saved_rel, "./assets/KIWI-WHITE.png");
-        assert!(base.join("assets").join("KIWI-WHITE.png").exists());
-
-        // Collision fallback also sanitizes whitespace
-        let saved_rel_2 = save_image_asset_impl(
-            &img_path.to_string_lossy(),
-            None,
-            Some(&base_str),
-            Some("assets"),
-        )
-        .unwrap();
-        assert!(saved_rel_2.starts_with("./assets/KIWI-WHITE-"));
-        assert!(!saved_rel_2.contains(' '));
-
-        // Unsaved doc without workspace returns non-empty path without backslashes
-        let fallback_path = save_image_asset_impl(
-            &img_path.to_string_lossy(),
-            None,
-            None,
-            Some("assets"),
-        )
-        .unwrap();
-        assert!(!fallback_path.contains('\\'));
 
         let _ = fs::remove_dir_all(&base);
     }

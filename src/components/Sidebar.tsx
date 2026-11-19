@@ -748,51 +748,61 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-tabs">
+      <div className="sidebar-tabs" role="tablist">
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'files'}
+          aria-label={t.sidebar.files}
           className={`sidebar-tab-btn ${activeTab === 'files' ? 'is-active' : ''}`}
           onClick={() => onTabChange('files')}
           title={t.sidebar.files}
         >
-          <Folder size={14} />
-          <span>{t.sidebar.files}</span>
+          <Folder size={16} />
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'outline'}
+          aria-label={t.sidebar.outline}
           className={`sidebar-tab-btn ${activeTab === 'outline' ? 'is-active' : ''}`}
           onClick={() => onTabChange('outline')}
           title={t.sidebar.outline}
         >
-          <ListTree size={14} />
-          <span>{t.sidebar.outline}</span>
+          <ListTree size={16} />
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'knowledge'}
+          aria-label={t.sidebar.knowledge}
           className={`sidebar-tab-btn ${activeTab === 'knowledge' ? 'is-active' : ''}`}
           onClick={() => onTabChange('knowledge')}
           title={t.sidebar.knowledge}
         >
-          <Network size={14} />
-          <span>{t.sidebar.knowledge}</span>
+          <Network size={16} />
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'snippets'}
+          aria-label={t.sidebar.snippets}
           className={`sidebar-tab-btn ${activeTab === 'snippets' ? 'is-active' : ''}`}
           onClick={() => onTabChange('snippets')}
           title={t.sidebar.snippets}
         >
-          <Puzzle size={14} />
-          <span>{t.sidebar.snippets}</span>
+          <Puzzle size={16} />
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={activeTab === 'git'}
+          aria-label={t.sidebar.git}
           className={`sidebar-tab-btn ${activeTab === 'git' ? 'is-active' : ''}`}
           onClick={() => onTabChange('git')}
           title={t.sidebar.git}
         >
-          <GitBranch size={14} />
-          <span>{t.sidebar.git}</span>
+          <GitBranch size={16} />
           {gitChangeCount > 0 && <span className="sidebar-tab-badge">{gitChangeCount}</span>}
         </button>
       </div>

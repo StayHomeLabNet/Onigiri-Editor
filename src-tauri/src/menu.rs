@@ -184,6 +184,11 @@ pub fn build_app_menu_with_state<R: Runtime>(
     } else {
         "Online Manual"
     };
+    let check_updates_label = if is_ja {
+        "アップデートを確認…"
+    } else {
+        "Check for Updates..."
+    };
 
     let menu_about = MenuItemBuilder::with_id("open-about", about_label).build(app)?;
     let menu_settings = MenuItemBuilder::with_id("open-settings", settings_label)
@@ -313,6 +318,8 @@ pub fn build_app_menu_with_state<R: Runtime>(
 
     let help_online_manual =
         MenuItemBuilder::with_id("open-online-manual", online_manual_label).build(app)?;
+    let help_check_updates =
+        MenuItemBuilder::with_id("check-updates", check_updates_label).build(app)?;
 
     #[cfg(target_os = "macos")]
     let app_submenu = SubmenuBuilder::new(app, "Onigiri Editor")
@@ -397,6 +404,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
 
     let mut help_builder = SubmenuBuilder::new(app, help_title)
         .item(&help_online_manual)
+        .item(&help_check_updates)
         .separator();
     #[cfg(not(target_os = "macos"))]
     {

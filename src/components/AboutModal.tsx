@@ -1,16 +1,31 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { Download, RefreshCw, X } from 'lucide-react';
 import type { Translations } from '../i18n/types';
-import { formatShortcut } from '../utils/platform';
+import type { AppUpdateInfo } from '../types';
+import { formatShortcut, isTauri } from '../utils/platform';
 
 interface AboutModalProps {
   t: Translations;
   open: boolean;
   onClose: () => void;
+  updateInfo?: AppUpdateInfo | null;
+  checkingUpdates?: boolean;
+  onCheckUpdates?: () => void;
+  onOpenExternalUrl?: (url: string) => void;
 }
 
-export const AboutModal: React.FC<AboutModalProps> = ({ t, open, onClose }) => {
+export const AboutModal: React.FC<AboutModalProps> = ({
+  t,
+  open,
+  onClose,
+  updateInfo,
+  checkingUpdates,
+  onCheckUpdates,
+  onOpenExternalUrl,
+}) => {
   if (!open) return null;
+
+  const currentVersion = t.versionLabel.replace(/^v/i, '');
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -29,6 +44,43 @@ export const AboutModal: React.FC<AboutModalProps> = ({ t, open, onClose }) => {
           </div>
         </div>
 
+        {isTauri() && onCheckUpdates && (
+          <div className="about-update-row">
+            <div className="about-update-status">
+              {updateInfo?.hasUpdate ? (
+                <span className="update-badge-new">
+                  {t.updates.availableBannerTitle.replace('{version}', updateInfo.latestVersion)}
+                </span>
+              ) : updateInfo ? (
+                <span className="about-update-ok">
+                  {t.updates.upToDateLabel.replace('{version}', updateInfo.currentVersion || currentVersion)}
+                </span>
+              ) : null}
+            </div>
+            <div className="about-update-actions">
+              {updateInfo?.hasUpdate && onOpenExternalUrl && (
+                <button
+                  type="button"
+                  className="primary-btn compact-btn"
+                  onClick={() => onOpenExternalUrl(updateInfo.downloadUrl || updateInfo.releaseUrl)}
+                >
+                  <Download size={13} />
+                  <span>{t.updates.downloadBtn}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="secondary-btn compact-btn"
+                disabled={checkingUpdates}
+                onClick={onCheckUpdates}
+              >
+                <RefreshCw size={13} className={checkingUpdates ? 'spin' : ''} />
+                <span>{checkingUpdates ? t.updates.checkingBtn : t.updates.checkBtn}</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         <h4 className="shortcuts-heading">{t.dialogs.shortcutsTitle}</h4>
         <div className="shortcuts-grid">
           {t.dialogs.shortcuts.map((s) => (
@@ -42,3 +94,4 @@ export const AboutModal: React.FC<AboutModalProps> = ({ t, open, onClose }) => {
     </div>
   );
 };
+

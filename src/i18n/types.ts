@@ -118,6 +118,7 @@ export interface Translations {
     findUnusedAssets: string;
     knowledgeGraph: string;
     openGitPanel: string;
+    checkUpdates: string;
   };
   toolbar: {
     heading1: string;
@@ -351,6 +352,12 @@ export interface Translations {
       dailyNotesFolder: string;
       autoTitleOnUrlPaste: string;
       projectConfigTitle: string;
+      embedImagesOnHtmlExport: string;
+      inspectorTabStyle: string;
+      inspectorTabStyleIcons: string;
+      inspectorTabStyleActiveLabel: string;
+      inspectorTabStyleLabels: string;
+      checkUpdatesOnStartup: string;
     };
   };
   settingsModal: {
@@ -748,6 +755,10 @@ export interface Translations {
     duplicatedSuccess: string;
     deletedSuccess: string;
     urlAutoTitled: string;
+    tempImagesMigrated: string;
+    updateAvailable: string;
+    upToDate: string;
+    updateCheckFailed: string;
     errorPrefix: string;
   };
   goToLineModal: {
@@ -1107,6 +1118,16 @@ export interface Translations {
     trimTrailingLabel: string;
     finalNewlineLabel: string;
     noneActive: string;
+  };
+  updates: {
+    checkBtn: string;
+    checkingBtn: string;
+    availableBannerTitle: string;
+    downloadBtn: string;
+    releaseNotesBtn: string;
+    dismissBtn: string;
+    upToDateLabel: string;
+    sectionTitle: string;
   };
   sampleDocument: string;
 }

@@ -1,16 +1,22 @@
-Onigiri Editor `v1.2.1` fixes local image drag-and-drop and Markdown preview rendering for Windows paths, filenames containing spaces or parentheses, non-ASCII/Japanese directories, and unsaved documents, alongside the refreshed built-in Welcome Guide (`Welcome.md` / `ようこそ.md`).
+Onigiri Editor `v1.3.0` brings safer image handling across temporary pastes and exports, icon-only Sidebar/Inspector tabs, faster startup via code splitting and lazy loading, LRU image caching with disk modification tracking, in-app GitHub Release update checking, tighter Tauri CSP, and automated Vitest + CI verification.
 
-### Highlights (`v1.2.1`)
-- **Image Drop & Markdown Preview Fix (Windows / Spaces / Non-ASCII Paths)**:
-  - Fixed dropped or inserted images rendering as raw `![alt](C:\...\foo bar.png)` text in Markdown Preview when using unsaved documents without an open workspace folder: paths are now normalized (`\` → `/`) and wrapped cleanly with angle brackets (`<...>`) when containing spaces, parentheses, or special characters.
-  - Updated `rehype-sanitize` (`editableSanitizeSchema`) to permit local Windows drive letters (`C:` etc.), `file:`, `data:`, and `blob:` image sources while continuing to block unsafe protocols such as `javascript:`.
-  - Added safe Markdown image pre-normalization (`preprocessMarkdownImageDestinations`) outside code fences/inline code so manually typed or pasted local/Windows image paths also render properly, plus matching Turndown round-trip serialization (`tiptapImage`).
-  - Enhanced Rust `read_image_data_url` with full UTF-8 percent-decoding (preserving `+`), `file:///C:/...` Windows URI handling, and `<...>` cleanup, and fixed collision filename sanitization in `save_image_asset_impl`.
-- **Unsaved Tab & Visual Preview Improvements**:
-  - Added `workspaceRoot` fallback to `PreviewPane`, `ImageModal`, and `SlidePresentationModal` so relative `./assets/...` images resolve immediately even inside unsaved tabs.
-  - Enabled direct Sidebar workspace file/image drag-and-drop onto TipTap Visual Preview and extension-based image drop detection.
-- **Refreshed Welcome Document (`Welcome.md` / `ようこそ.md`)**:
-  - Updated the default first-launch welcome note to showcase all v1.2 features (Git Source Control panel, Knowledge Graph & Broken Link diagnostics, Citations/Footnotes, Word `.docx` & Mermaid/KaTeX SVG/PNG export, Keybindings UI, and JSON backup).
+### Highlights (`v1.3.0`)
+- **Auto-Migrate Temp Pasted Images on Save**:
+  - Screenshots or images pasted into unsaved documents (`onigiri-markdown-images` temp folder) are now automatically moved into the configured `assets/` folder beside the saved Markdown file on first **Save / Save As**, rewriting Markdown links cleanly to `./assets/...` so they never break after cache cleanup.
+- **Embedded Local Images in HTML & Word (`.docx`) Exports**:
+  - Standalone **HTML Export** now inlines local images as Base64 data URIs by default (toggleable via **Settings → General & View → Embed Local Images on HTML Export**).
+  - **Word (`.docx`) Export** now embeds local and `data:` images (`word/media/` + DrawingML dimensions, supporting PNG/JPEG/GIF/BMP natively and SVG/WebP/AVIF via PNG conversion) instead of text placeholders.
+- **Icon-Only Inspector & Sidebar Tabs + Configurable Style**:
+  - Updated both left Sidebar and right Inspector tab bars to clean icon-only tabs with tooltips, plus an **Inspector Tab Style** preference (`Icons only`, `Active label`, or `Always show labels`).
+- **LRU Image Memory Cache & Modification Tracking**:
+  - Replaced unbounded image data-URL caching with a bounded `ImageLruCache` (120 entries / 48 MiB budget) paired with Rust `read_image_asset_with_meta` disk modification checks and unified cache clearing.
+- **Faster Startup via Code Splitting & Lazy Loading**:
+  - Added Vite `manualChunks`, dynamic `import('mermaid')` and `docxExport`, and `React.lazy` + `<Suspense>` loading across 17 modals to substantially shrink initial JS bundle size.
+- **In-App Update Checker & Tightened Security**:
+  - Added GitHub Releases update checking (`Help → Check for Updates...`, optional startup check, Command Palette, About modal, Settings UI, and an update banner pointing directly to your OS installer) and removed `'unsafe-eval'` from Tauri CSP.
+  - Updated **Help → Online Manual** to `https://stayhomelab.net/help/onigiri-editor/`.
+- **Modularized Codebase & Automated Vitest + CI Suite**:
+  - Split large backend/frontend files into focused modules (`images.rs`, `updates.rs`, `session.ts`, `imageCache.ts`, `exportHelpers.ts`, `cmTheme.ts`, `src/styles/*.css`) and added Vitest frontend unit tests alongside Rust `cargo test` in CI.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel)**: `.dmg` / `.app.tar.gz`
@@ -19,19 +25,25 @@ Onigiri Editor `v1.2.1` fixes local image drag-and-drop and Markdown preview ren
 
 ---
 
-Onigiri Editor `v1.2.1` では、Windows パスや空白・括弧・日本語フォルダーを含む画像のドラッグ＆ドロップおよびマークダウンプレビュー表示の不具合修正と、初期ウェルカムドキュメント（`ようこそ.md` / `Welcome.md`）の刷新を行いました。
+Onigiri Editor `v1.3.0` では、未保存ドキュメントで貼り付けた一時画像の保存時自動移行、HTML／Word（`.docx`）書き出し時の画像埋め込み、左右タブバーのアイコン化、LRU 画像メモリキャッシュ、コード分割・遅延ロードによる高速化、アプリ内アップデート確認、Tauri CSP 強化、および Vitest + CI 自動テストを導入しました。
 
-### 主な変更点（`v1.2.1`）
-- **画像ドロップ＆マークダウンプレビュー表示の修正（Windows パス・空白・日本語対応）**:
-  - 作業フォルダーを開いていない未保存ドキュメント（`無題のドキュメント.md` 等）へローカル画像をドロップ／挿入した際、`![alt](C:\...\素材\KIWI WHITE.png)` が画像として解釈されず生テキストのまま表示される問題を修正しました。挿入時のスラッシュ正規化（`\` → `/`）と角括弧ラップ（`<...>`）により有効な CommonMark として出力されます。
-  - `rehype-sanitize`（`editableSanitizeSchema`）で Windows ドライブレター（`C:` 等）や `file:` / `data:` / `blob:` の画像 `src` が除去されないよう許可し（`javascript:` 等の危険なスキームは引き続きブロック）、手入力・貼り付けされたローカル画像パスもコードブロック外で安全に正規化して描画できるよう改善しました。
-  - TipTap ビジュアル編集からの書き戻し（`tiptapImage`）でも日本語・空白パスが崩れないよう往復変換を統一しました。
-  - Rust バックエンドの `read_image_data_url` で UTF-8 パーセントデコード（`%E7%B4%A0%E6%9D%90` 等、`+` は保持）・Windows `file:///C:/...` URI・`<...>` 処理に対応し、`save_image_asset_impl` の重複時ファイル名サニタイズも修正しました。
-- **未保存タブ・ビジュアルプレビューの操作性向上**:
-  - ワークスペースを開いた状態の未保存タブでも `./assets/...` 等の相対パス画像を解決できるよう `PreviewPane` / `ImageModal` / `SlidePresentationModal` に `workspaceRoot` フォールバックを追加しました。
-  - 左サイドバーからのドラッグ＆ドロップを TipTap ビジュアルプレビュー上でも直接受け付けるようにし、MIME タイプ空のドロップ画像も拡張子で確実に判定するよう改善しました。
-- **初期ウェルカムドキュメント（`ようこそ.md` / `Welcome.md`）の更新**:
-  - Git パネル、ナレッジグラフ＆リンク切れ診断、引用・脚注・DOI/BibTeX、Word（`.docx`）＆図表 SVG/PNG 書き出し、ショートカットカスタマイズ、JSON バックアップなど v1.2 の主要機能を一通り試せる内容へ更新しました。
+### 主な変更点（`v1.3.0`）
+- **未保存ドキュメント保存時の一時画像自動移行**:
+  - 未保存タブへ貼り付けて OS 一時フォルダー（`onigiri-markdown-images`）に保存された画像を、初回 **保存／名前を付けて保存** 時に保存先フォルダー配下の `assets/` へ自動移動し、Markdown リンクも `./assets/...` に自動更新するよう改善しました（キャッシュ削除によるリンク切れを防止）。
+- **HTML / Word（`.docx`）書き出し時のローカル画像埋め込み**:
+  - **HTML 書き出し**: ローカル画像参照を Base64 Data URI として自動埋め込みし、単体 HTML ファイルのまま持ち運べるようにしました（**設定 → 全般・表示** で切替可能）。
+  - **Word（`.docx`）書き出し**: `[Image: ...]` プレースホルダーではなく、ローカル画像や `data:` 画像（PNG/JPEG/GIF/BMP はそのまま、SVG/WebP/AVIF は PNG 変換）を `word/media/` に実画像として埋め込むよう強化しました。
+- **左右タブバーのアイコン化＆インスペクタータブ表示設定**:
+  - 左サイドバーおよび右インスペクターのタブをアイコン中心のすっきりした表示に統一し、ツールチップと **インスペクタータブの表示スタイル** 設定（`アイコンのみ` / `選択中のみラベル` / `常にラベル表示`）を追加しました。
+- **LRU 画像メモリキャッシュ＆更新日時検証**:
+  - 無制限だった画像 Data URL キャッシュを上限付き LRU キャッシュ（120 件 / 48 MiB 上限）に刷新し、Rust 側の `read_image_asset_with_meta` による更新日時チェックとキャッシュ削除連動を実装しました。
+- **コード分割・遅延ロードによる起動高速化**:
+  - Vite の `manualChunks` 設定、Mermaid / `docxExport` の動的 import 化、17 モーダルの `React.lazy` + `Suspense` 化により初期ロード JavaScript サイズを大幅に削減しました。
+- **アプリ内アップデート確認＆セキュリティ強化**:
+  - 起動時（設定で切替可）・**ヘルプ → アップデートを確認…**・コマンドパレット・バージョン情報・設定画面から GitHub Releases の最新バージョンを確認し、通知バナーから OS 対応インストーラーを開けるようにしました。また Tauri CSP から `'unsafe-eval'` を削除しました。
+  - **ヘルプ → オンラインマニュアル** の URL を `https://stayhomelab.net/help/onigiri-editor/` に更新しました。
+- **モジュール分割・Vitest + CI 自動テスト導入**:
+  - 肥大化していた Rust / TypeScript / CSS ファイルを機能別モジュールへ整理し、Vitest フロントエンド単体テストと GitHub Actions での自動テスト実行を追加しました。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応）**: `.dmg` / `.app.tar.gz`

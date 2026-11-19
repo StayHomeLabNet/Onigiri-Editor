@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.2.1',
+  versionLabel: 'v1.3.0',
   modes: {
     simple: 'Simple',
     basic: 'Basic',
@@ -120,6 +120,7 @@ export const en: Translations = {
     findUnusedAssets: 'Find & Clean Unused Workspace Images...',
     knowledgeGraph: 'Open Knowledge Graph & Link Diagnostics...',
     openGitPanel: 'Open Git Panel (Stage / Commit / Push)',
+    checkUpdates: 'Check for Updates...',
   },
   toolbar: {
     heading1: 'Heading 1',
@@ -355,6 +356,12 @@ export const en: Translations = {
       dailyNotesFolder: 'Daily Notes Subfolder (empty = workspace root)',
       autoTitleOnUrlPaste: 'Auto-fetch webpage title when pasting a bare URL on empty selection',
       projectConfigTitle: 'Project Config (.editorconfig / .onigiri.json)',
+      embedImagesOnHtmlExport: 'Embed Local Images on HTML Export (Base64)',
+      inspectorTabStyle: 'Inspector Tab Display',
+      inspectorTabStyleIcons: 'Icons only',
+      inspectorTabStyleActiveLabel: 'Active tab label',
+      inspectorTabStyleLabels: 'Icons + labels',
+      checkUpdatesOnStartup: 'Check for App Updates on Startup',
     },
   },
   settingsModal: {
@@ -832,6 +839,10 @@ export const en: Translations = {
     duplicatedSuccess: 'Duplicated file',
     deletedSuccess: 'Deleted successfully',
     urlAutoTitled: 'Fetched webpage title for pasted URL',
+    tempImagesMigrated: 'Moved {count} pasted image(s) into assets folder',
+    updateAvailable: 'New version v{version} is available',
+    upToDate: 'You are using the latest version (v{version})',
+    updateCheckFailed: 'Failed to check for updates',
     errorPrefix: 'Error:',
   },
   goToLineModal: {
@@ -1210,6 +1221,16 @@ export const en: Translations = {
     trimTrailingLabel: 'Trim Trailing Whitespace on Save',
     finalNewlineLabel: 'Insert Final Newline on Save',
     noneActive: 'No .editorconfig or .onigiri.json active in current folder',
+  },
+  updates: {
+    checkBtn: 'Check for Updates',
+    checkingBtn: 'Checking...',
+    availableBannerTitle: 'Onigiri Editor v{version} is available',
+    downloadBtn: 'Download',
+    releaseNotesBtn: 'Release Notes',
+    dismissBtn: 'Dismiss',
+    upToDateLabel: 'Up to date (v{version})',
+    sectionTitle: 'App Updates',
   },
   sampleDocument: `---
 title: Welcome to Onigiri Editor — AI-Era Hybrid Editor

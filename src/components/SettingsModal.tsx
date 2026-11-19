@@ -18,11 +18,14 @@ import {
   Download,
   Upload,
   FileCode,
+  RefreshCw,
 } from 'lucide-react';
 import type {
   AiFolderMode,
+  AppUpdateInfo,
   ClearAppCacheResult,
   EditorSettings,
+  InspectorTabStyle,
   Locale,
   OeditLineCopyTrigger,
   PreviewTheme,
@@ -129,6 +132,10 @@ interface SettingsModalProps {
   };
   onCreateOnigiriJson?: () => Promise<void> | void;
   onOpenProjectConfigFile?: (path: string) => void;
+  updateInfo?: AppUpdateInfo | null;
+  checkingUpdates?: boolean;
+  onCheckUpdates?: () => void;
+  onOpenExternalUrl?: (url: string) => void;
 }
 
 const TOKEN_KEYS: Array<keyof SyntaxColorMap> = [
@@ -172,6 +179,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   projectConfigInfo,
   onCreateOnigiriJson,
   onOpenProjectConfigFile,
+  updateInfo,
+  checkingUpdates,
+  onCheckUpdates,
+  onOpenExternalUrl,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
   const [resetSel, setResetSel] = useState<SettingsResetSelection>(DEFAULT_RESET_SELECTION);
@@ -552,6 +563,99 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="ai-hint-text">
                     {formatShortcut(t.inspector.settingsLabels.hideTopBarInSimpleModeHint)}
                   </div>
+                </div>
+
+                <div className="settings-card">
+                  <div className="field-row">
+                    <label>{t.inspector.settingsLabels.inspectorTabStyle}</label>
+                    <select
+                      className="select-input"
+                      value={settings.inspectorTabStyle ?? 'icons'}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          inspectorTabStyle: e.target.value as InspectorTabStyle,
+                        })
+                      }
+                    >
+                      <option value="icons">{t.inspector.settingsLabels.inspectorTabStyleIcons}</option>
+                      <option value="active-label">
+                        {t.inspector.settingsLabels.inspectorTabStyleActiveLabel}
+                      </option>
+                      <option value="labels">
+                        {t.inspector.settingsLabels.inspectorTabStyleLabels}
+                      </option>
+                    </select>
+                  </div>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.embedImagesOnHtmlExport ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          embedImagesOnHtmlExport: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.embedImagesOnHtmlExport}</span>
+                  </label>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.checkUpdatesOnStartup ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          checkUpdatesOnStartup: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.checkUpdatesOnStartup}</span>
+                  </label>
+                  {isTauri() && onCheckUpdates && (
+                    <div className="about-update-row" style={{ marginTop: 6 }}>
+                      <div className="about-update-status">
+                        {updateInfo?.hasUpdate ? (
+                          <span className="update-badge-new">
+                            {t.updates.availableBannerTitle.replace(
+                              '{version}',
+                              updateInfo.latestVersion
+                            )}
+                          </span>
+                        ) : updateInfo ? (
+                          <span className="about-update-ok">
+                            {t.updates.upToDateLabel.replace('{version}', updateInfo.currentVersion)}
+                          </span>
+                        ) : (
+                          <span className="ai-hint-text">{t.updates.sectionTitle}</span>
+                        )}
+                      </div>
+                      <div className="about-update-actions">
+                        {updateInfo?.hasUpdate && onOpenExternalUrl && (
+                          <button
+                            type="button"
+                            className="primary-btn compact-btn"
+                            onClick={() =>
+                              onOpenExternalUrl(updateInfo.downloadUrl || updateInfo.releaseUrl)
+                            }
+                          >
+                            <Download size={13} />
+                            <span>{t.updates.downloadBtn}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="secondary-btn compact-btn"
+                          disabled={checkingUpdates}
+                          onClick={onCheckUpdates}
+                        >
+                          <RefreshCw size={13} className={checkingUpdates ? 'spin' : ''} />
+                          <span>{checkingUpdates ? t.updates.checkingBtn : t.updates.checkBtn}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="field-row">

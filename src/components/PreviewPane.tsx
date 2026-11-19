@@ -29,7 +29,6 @@ import { all, createLowlight } from 'lowlight';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
-import mermaid from 'mermaid';
 import type { EditorSettings, ThemeId } from '../types';
 import {
   editableHtmlToMarkdown,
@@ -297,6 +296,8 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
 
     const timer = window.setTimeout(async () => {
       try {
+        const { default: mermaid } = await import('mermaid');
+        if (cancelled) return;
         mermaid.initialize({
           startOnLoad: false,
           theme: isDark ? 'dark' : 'default',

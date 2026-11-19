@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const ja: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.2.1',
+  versionLabel: 'v1.3.0',
   modes: {
     simple: 'シンプル',
     basic: '標準',
@@ -120,6 +120,7 @@ export const ja: Translations = {
     findUnusedAssets: '未使用の画像（孤立アセット）を検出・削除…',
     knowledgeGraph: 'ナレッジグラフ＆リンク診断を開く…',
     openGitPanel: 'Git パネルを開く（ステージ / コミット / プッシュ）',
+    checkUpdates: 'アップデートを確認…',
   },
   toolbar: {
     heading1: '見出し 1',
@@ -355,6 +356,12 @@ export const ja: Translations = {
       dailyNotesFolder: 'デイリーノートの保存サブフォルダ（空欄で直下）',
       autoTitleOnUrlPaste: '空選択で URL を貼り付けた時に Web ページのタイトルを自動取得する',
       projectConfigTitle: 'プロジェクト設定 (.editorconfig / .onigiri.json)',
+      embedImagesOnHtmlExport: 'HTML 書き出し時にローカル画像を埋め込む (Base64)',
+      inspectorTabStyle: '右インスペクタータブ表示',
+      inspectorTabStyleIcons: 'アイコンのみ',
+      inspectorTabStyleActiveLabel: '選択中のみラベル表示',
+      inspectorTabStyleLabels: 'アイコン + ラベル',
+      checkUpdatesOnStartup: '起動時にアップデートを確認',
     },
   },
   settingsModal: {
@@ -832,6 +839,10 @@ export const ja: Translations = {
     duplicatedSuccess: 'ファイルを複製しました',
     deletedSuccess: '削除しました',
     urlAutoTitled: 'URL の Web ページタイトルを自動反映しました',
+    tempImagesMigrated: '一時フォルダの画像 {count} 件をアセットフォルダーへ移動しました',
+    updateAvailable: '新しいバージョン v{version} が利用可能です',
+    upToDate: '最新バージョン (v{version}) を使用中です',
+    updateCheckFailed: 'アップデートの確認に失敗しました',
     errorPrefix: 'エラー:',
   },
   goToLineModal: {
@@ -1210,6 +1221,16 @@ export const ja: Translations = {
     trimTrailingLabel: '保存時に行末空白を除去',
     finalNewlineLabel: '保存時にファイル末尾へ改行を付与',
     noneActive: '現在のフォルダーに .editorconfig / .onigiri.json はありません',
+  },
+  updates: {
+    checkBtn: 'アップデートを確認',
+    checkingBtn: '確認中...',
+    availableBannerTitle: 'Onigiri Editor v{version} が利用可能です',
+    downloadBtn: 'ダウンロード',
+    releaseNotesBtn: 'リリースノート',
+    dismissBtn: '閉じる',
+    upToDateLabel: '最新バージョンです (v{version})',
+    sectionTitle: 'アップデート',
   },
   sampleDocument: `---
 title: Onigiri Editor へようこそ — AI時代のハイブリッドエディタ

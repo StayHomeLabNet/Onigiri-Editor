@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v121">What's New in v1.2.1</a> ・
+    <a href="#whats-new-in-v130">What's New in v1.3.0</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.2.1-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.3.0-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.2.1`
+Current version: `v1.3.0`
 
 ## Key Features
 
@@ -47,7 +47,7 @@ Current version: `v1.2.1`
   - **Simple Mode**: Ultra-minimal single-pane editor with distraction-free focus and automatic file-extension syntax highlighting.
   - **Basic Mode**: Clean editor + bidirectional live preview with synchronized scrolling and essential formatting controls.
   - **Advanced Mode**: Multi-tab editing (with pinning, drag-reordering, side-by-side dual editor & 2-tab diff compare), collapsible workspace folder explorer (Git status badges, tree D&D relative links, context menu, image gallery & **Unused Image Cleaner**), **Knowledge tab** (`[[WikiLinks]]`, Backlinks, `#tag` browser & **Interactive Knowledge Graph / Broken Link Diagnostics**), dedicated **Git Source Control tab** (Stage/Unstage/Discard, inline diff, Commit with **AI Commit Message**, Pull/Push), cross-folder Regex Grep & Replace (`⌘⇧G`), dev-server integration, snapshots, and AI workspace tools.
-- **Bidirectional Visual Editing, Citations, Slide Mode & Writing Workflow**: Edit Markdown in CodeMirror 6 (left) or TipTap visual WYSIWYG (right) with real-time line/block highlights, **Slash Commands (`/`)**, **Custom Snippets**, **Auto TOC**, **Clipboard Image Paste Auto-Save**, **Citations, Footnotes, BibTeX / DOI Lookup, Link Cards & URL Auto-Title Paste**, **Daily Notes & Templates**, **URL Web Clipper**, and **Markdown Slide Presentation Mode**.
+- **Bidirectional Visual Editing, Citations, Slide Mode & Writing Workflow**: Edit Markdown in CodeMirror 6 (left) or TipTap visual WYSIWYG (right) with real-time line/block highlights, **Slash Commands (`/`)**, **Custom Snippets**, **Auto TOC**, **Clipboard Image Paste Auto-Save (with auto-migration on first save)**, **Citations, Footnotes, BibTeX / DOI Lookup, Link Cards & URL Auto-Title Paste**, **Daily Notes & Templates**, **URL Web Clipper**, and **Markdown Slide Presentation Mode**.
 - **100+ Language Syntax Highlighting, Structured Data & Visual Previews**: Built-in support for Markdown, PHP, TypeScript/JavaScript, Python, Rust, SQL, HTML, CSS, YAML, JSON, CSV/TSV, SVG, and more—clickable Status Bar language override, **CSV/TSV interactive table preview**, **JSON/YAML/ENV formatting & conversion**, enhanced **SVG (zoom/background/PNG copy)** & **HTML Visual/Source preview**, **Mermaid & KaTeX SVG/PNG export**, code folding, persisted **Line Bookmarks (`F2`)**, **Focus Mode**, `⌘D` multi-occurrence selection, 7 syntax presets, and 10 per-token color pickers.
 - **Built-in AI Chat (Per-Tab Threads), Document Review & Diff Preview**:
   - Supports **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** with model selection, **per-tab or shared chat threads**, **Export Chat as `.md` Note**, live streaming progress & Stop/Cancel, folder permission pill, **Inline AI Selection Edit (`⌘⇧E`)**, and **Proofread & Document Review**.
@@ -58,7 +58,7 @@ Current version: `v1.2.1`
   - Auto-detects Vite, Next.js, Laravel, WordPress, Docker Compose, Python, Hugo, and static projects, runs pre-flight environment diagnostics, and offers guided setup.
   - **Pattern 1**: Native multi-WebView **Embedded Web Browser** in the right pane (`Settings` toggleable).
   - **Pattern 2**: **External Live Browser Preview** over local HTTP (`127.0.0.1` or LAN `0.0.0.0`) with real-time auto-reload.
-- **Productivity Extras**: **Quick Open (`⌘P` / `@headings`)**, Keyboard macro recording & playback (`⌘⇧M` / `F8`), Format Toolbar edit/zoom controls & Status Bar zoom popover (`25%`–`400%`), Smart Line Copy (`⌘C` / `Ctrl+C`), Mermaid diagrams, KaTeX math, GitHub callouts, YAML Frontmatter editor, AI output cleanup & table formatter, estimated LLM token counter, **Copy as Rich Text** & HTML/TSV smart paste, Find & Replace, Command Palette (`⌘K` / `Ctrl+K`), Zen Mode (`⌘⇧F` / `Ctrl+Shift+F`), and **Word (`.docx`)** / HTML / Markdown / Source Code PDF export.
+- **Productivity Extras & Update Checker**: **Quick Open (`⌘P` / `@headings`)**, Keyboard macro recording & playback (`⌘⇧M` / `F8`), Format Toolbar edit/zoom controls & Status Bar zoom popover (`25%`–`400%`), Smart Line Copy (`⌘C` / `Ctrl+C`), Mermaid diagrams, KaTeX math, GitHub callouts, YAML Frontmatter editor, AI output cleanup & table formatter, estimated LLM token counter, **Copy as Rich Text** & HTML/TSV smart paste, Find & Replace, Command Palette (`⌘K` / `Ctrl+K`), Zen Mode (`⌘⇧F` / `Ctrl+Shift+F`), **Self-Contained Word (`.docx`) / HTML** (embedded local images) / PDF export, and **In-App Update Checker** via GitHub Releases.
 - **OS-Aware First-Launch Language**: Automatically launches in Japanese when the OS language is Japanese, and English for all other languages (manual switch available anytime in Settings or TopBar).
 
 ## Requirements
@@ -89,6 +89,9 @@ npx tauri build
 Run tests and type-checks:
 
 ```bash
+# Frontend unit tests (Vitest)
+npm test
+
 # TypeScript check + production bundle
 npx tsc --noEmit && npm run build
 
@@ -96,11 +99,26 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.2.1
+## What's New in v1.3.0
+
+- **Auto-Migrate Temp Pasted Images on Save**: When screenshots or images pasted into an unsaved document (`onigiri-markdown-images` temp folder) are saved to disk for the first time (Save / Save As), Onigiri Editor automatically moves those images into the configured `assets/` folder beside the document and rewrites the Markdown links (`./assets/...`), preventing broken images after cache cleanup.
+- **Embedded Local Images in HTML & Word (`.docx`) Exports**:
+  - Standalone **HTML Export** now inlines local referenced images as Base64 data URIs by default (toggleable in **Settings → General & View**).
+  - **Word (`.docx`) Export** now embeds local and `data:` images (PNG/JPEG/GIF/BMP natively, SVG/WebP/AVIF via canvas PNG conversion) directly inside `word/media/` with DrawingML dimensions instead of `[Image: ...]` placeholders.
+- **Icon-Only Inspector & Sidebar Tabs + Configurable Tab Style**: Cleaned up right **Inspector** (`AI Chat`, `Review`, `Metadata`, `Format`, `Stats`, `History`) and left **Sidebar** tab bars to compact icon-only tabs with accessible tooltips, plus an **Inspector Tab Style** option (`Icons only`, `Active label`, or `Always show labels`).
+- **LRU Image Memory Cache with Disk Modification Tracking**: Replaced unbounded image data URL caching with an entry-capped (120 items) and byte-budgeted (48 MiB) LRU cache (`ImageLruCache`) backed by file modification timestamp checks (`read_image_asset_with_meta`) and integrated cache clearing.
+- **Faster Startup via Code Splitting & Lazy Loading**: Configured Vite `manualChunks` (`vendor-mermaid`, `vendor-codemirror`, `vendor-tiptap`, `vendor-katex`, `vendor-markdown`, `vendor-highlight`, `vendor-icons`), converted Mermaid rendering and `docxExport` to dynamic imports, and lazy-loaded 17 modals with `<Suspense>` to slash initial JS payload size.
+- **In-App Update Checker & Tightened Tauri CSP**: Added GitHub Releases update checks on startup (configurable), from **Help → Check for Updates...**, Command Palette, **About**, and **Settings**, with an update banner linking to the matching OS installer; tightened Tauri Content Security Policy to remove `'unsafe-eval'`.
+- **Modularized Architecture & Automated Vitest + CI Suite**: Split oversized backend/frontend files into focused modules (`images.rs`, `updates.rs`, `session.ts`, `imageCache.ts`, `exportHelpers.ts`, `cmTheme.ts`, `src/styles/*.css`), updated **Help → Online Manual** URL, and added Vitest frontend unit tests wired into GitHub Actions release builds.
+
+<details>
+<summary>Previous release: v1.2.1</summary>
 
 - **Image Drop & Preview Rendering Fix (Windows Paths, Spaces & Non-ASCII Filenames)**: Fixed local/dropped images failing to render in Markdown Preview when file paths contain spaces, parentheses, non-ASCII characters (e.g. Japanese folders), or Windows drive letters/backslashes (`C:\...\foo bar.png`). Both inserted image syntax (`<C:/...>`) and manually typed/pasted local paths are normalized cleanly, `rehype-sanitize` preserves local drive/`file:`/`data:`/`blob:` image sources, and the Rust backend decodes UTF-8 percent-encoded paths and `file:///` Windows URIs reliably.
 - **Unsaved Tab & Visual Preview Drop Improvements**: Added `workspaceRoot` fallback for image resolution in `PreviewPane`, `ImageModal`, and `SlidePresentationModal`, enabled direct Sidebar drag-and-drop onto Visual Preview, and synced Turndown round-tripping for space/Unicode paths.
 - **Updated Welcome Guide (`Welcome.md` / `ようこそ.md`)**: Refreshed the built-in first-launch welcome document with v1.2 feature examples (Git panel, Knowledge Graph, Citations/Footnotes, Word `.docx` & diagram export, Keybindings UI, and JSON backup).
+
+</details>
 
 <details>
 <summary>Previous release: v1.2.0</summary>
