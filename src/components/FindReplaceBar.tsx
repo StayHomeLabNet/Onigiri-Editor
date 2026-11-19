@@ -29,7 +29,7 @@ import {
   type TextRange,
 } from '../utils/findReplace';
 
-const FIND_OPTS_STORAGE_KEY = 'onigiri-markdown.findOpts';
+export const FIND_OPTS_STORAGE_KEY = 'onigiri-markdown.findOpts';
 
 interface PersistedFindOpts {
   caseSensitive: boolean;
@@ -129,9 +129,24 @@ export const FindReplaceBar = forwardRef<FindReplaceBarHandle, FindReplaceBarPro
     const shouldJumpOnCriteriaChangeRef = useRef(false);
     const seededFocusRef = useRef(false);
 
+    useEffect(() => {
+      const onCleared = () => {
+        setCaseSensitive(false);
+        setWidthSensitive(false);
+        setWholeWord(false);
+        setUseRegex(false);
+      };
+      window.addEventListener('onigiri:find-opts-cleared', onCleared);
+      return () => window.removeEventListener('onigiri:find-opts-cleared', onCleared);
+    }, []);
+
     // Persist toggle options
     useEffect(() => {
       try {
+        if (!caseSensitive && !widthSensitive && !wholeWord && !useRegex) {
+          localStorage.removeItem(FIND_OPTS_STORAGE_KEY);
+          return;
+        }
         localStorage.setItem(
           FIND_OPTS_STORAGE_KEY,
           JSON.stringify({ caseSensitive, widthSensitive, wholeWord, useRegex })

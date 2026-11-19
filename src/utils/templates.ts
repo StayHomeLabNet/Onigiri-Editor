@@ -1,6 +1,6 @@
 import type { DocumentTemplate, Locale } from '../types';
 
-const CUSTOM_TEMPLATES_KEY = 'onigiri-markdown.custom-templates.v1';
+export const CUSTOM_TEMPLATES_KEY = 'onigiri-markdown.custom-templates.v1';
 
 export function formatLocalDateYmd(date = new Date()): string {
   const yyyy = date.getFullYear();
@@ -278,7 +278,11 @@ export function loadCustomTemplates(): DocumentTemplate[] {
 export function saveCustomTemplates(templates: DocumentTemplate[]): void {
   try {
     const customOnly = templates.filter((t) => !t.isBuiltin);
-    localStorage.setItem(CUSTOM_TEMPLATES_KEY, JSON.stringify(customOnly));
+    if (customOnly.length === 0) {
+      localStorage.removeItem(CUSTOM_TEMPLATES_KEY);
+    } else {
+      localStorage.setItem(CUSTOM_TEMPLATES_KEY, JSON.stringify(customOnly));
+    }
   } catch {
     // ignore storage errors
   }

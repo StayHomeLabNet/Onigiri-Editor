@@ -43,6 +43,11 @@ import {
   resolveImageSrc,
   writeClipboardText,
 } from '../utils/platform';
+import {
+  buildKatexSvgWrapper,
+  saveSvgAsPngFile,
+  saveSvgFile,
+} from '../utils/diagramExport';
 
 const lowlight = createLowlight(all);
 
@@ -57,6 +62,8 @@ export interface PreviewHandle {
   insertImage: (src: string, alt?: string) => void;
 }
 
+export type DiagramExportNotifyKind = 'saved-svg' | 'saved-png' | 'copied-latex' | 'error';
+
 interface PreviewPaneProps {
   docId: string;
   markdown: string;
@@ -67,6 +74,12 @@ interface PreviewPaneProps {
   onFocusPane?: () => void;
   onScrollRatio?: (ratio: number) => void;
   onCopyNotify: (kind: 'code' | 'svg') => void;
+  onDiagramExportNotify?: (kind: DiagramExportNotifyKind) => void;
+  diagramLabels?: {
+    saveSvg: string;
+    savePng: string;
+    copyLatex: string;
+  };
   onImagePasteOrDrop?: (file: File) => Promise<void>;
   activePane?: 'code' | 'visual';
   editorSyncLine?: number | null;
@@ -78,12 +91,23 @@ interface RuntimeCtxValue {
   baseDir?: string;
   isDark: boolean;
   onCopyNotify: (kind: 'code' | 'svg') => void;
+  onDiagramExportNotify?: (kind: DiagramExportNotifyKind) => void;
+  diagramLabels: {
+    saveSvg: string;
+    savePng: string;
+    copyLatex: string;
+  };
   onZoomSvg: (svg: string) => void;
 }
 
 const PreviewRuntimeContext = createContext<RuntimeCtxValue>({
   isDark: false,
   onCopyNotify: () => {},
+  diagramLabels: {
+    saveSvg: 'Save SVG',
+    savePng: 'Save PNG',
+    copyLatex: 'Copy LaTeX',
+  },
   onZoomSvg: () => {},
 });
 
@@ -213,7 +237,8 @@ const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttribut
 };
 
 const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) => {
-  const { isDark, onCopyNotify, onZoomSvg } = useContext(PreviewRuntimeContext);
+  const { isDark, onCopyNotify, onDiagramExportNotify, diagramLabels, onZoomSvg } =
+    useContext(PreviewRuntimeContext);
   const language = String(node.attrs.language || '').toLowerCase();
   const isMermaid = language === 'mermaid';
   const codeText = node.textContent || '';
@@ -231,6 +256,18 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
   const [showCode, setShowCode] = useState(!isMermaid);
   const [svgStr, setSvgStr] = useState<string>('');
   const [mermaidErr, setMermaidErr] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+    };
+  }, [ctxMenu]);
 
   useEffect(() => {
     if (!isMermaid) {
@@ -284,6 +321,28 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
     };
   }, [isMermaid, showCode, codeText, isDark]);
 
+  const handleSaveMermaidSvg = async () => {
+    if (!svgStr) return;
+    try {
+      const ok = await saveSvgFile(svgStr, 'mermaid-diagram.svg');
+      if (ok) onDiagramExportNotify?.('saved-svg');
+    } catch {
+      onDiagramExportNotify?.('error');
+    }
+  };
+
+  const handleSaveMermaidPng = async () => {
+    if (!svgStr) return;
+    try {
+      const ok = await saveSvgAsPngFile(svgStr, 'mermaid-diagram.png', {
+        backgroundColor: isDark ? '#14171c' : '#ffffff',
+      });
+      if (ok) onDiagramExportNotify?.('saved-png');
+    } catch {
+      onDiagramExportNotify?.('error');
+    }
+  };
+
   return (
     <NodeViewWrapper className="mf-code-node">
       <div className="mf-code-toolbar mf-ui-ignore" contentEditable={false}>
@@ -324,6 +383,20 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
                   >
                     Copy SVG
                   </button>
+                  <button
+                    type="button"
+                    className="mf-code-copy"
+                    onClick={() => void handleSaveMermaidSvg()}
+                  >
+                    {diagramLabels.saveSvg}
+                  </button>
+                  <button
+                    type="button"
+                    className="mf-code-copy"
+                    onClick={() => void handleSaveMermaidPng()}
+                  >
+                    {diagramLabels.savePng}
+                  </button>
                 </>
               )}
             </>
@@ -342,7 +415,16 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
       </div>
 
       {isMermaid && !showCode ? (
-        <div className="mf-mermaid-placeholder" contentEditable={false}>
+        <div
+          className="mf-mermaid-placeholder"
+          contentEditable={false}
+          onContextMenu={(e) => {
+            if (!svgStr) return;
+            e.preventDefault();
+            e.stopPropagation();
+            setCtxMenu({ x: e.clientX, y: e.clientY });
+          }}
+        >
           {mermaidErr ? (
             <div className="mf-mermaid-error">Mermaid: {mermaidErr}</div>
           ) : svgStr ? (
@@ -352,6 +434,51 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
             />
           ) : (
             <div className="mf-mermaid-empty">Mermaid diagram</div>
+          )}
+          {ctxMenu && svgStr && (
+            <div
+              className="diagram-context-menu"
+              style={{ left: ctxMenu.x, top: ctxMenu.y }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void handleSaveMermaidSvg();
+                }}
+              >
+                {diagramLabels.saveSvg}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void handleSaveMermaidPng();
+                }}
+              >
+                {diagramLabels.savePng}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setCtxMenu(null);
+                  await navigator.clipboard.writeText(svgStr);
+                  onCopyNotify('svg');
+                }}
+              >
+                Copy SVG
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCtxMenu(null);
+                  onZoomSvg(svgStr);
+                }}
+              >
+                Zoom
+              </button>
+            </div>
           )}
         </div>
       ) : (
@@ -364,13 +491,27 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
 };
 
 const MathBlockNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttributes }) => {
+  const { isDark, diagramLabels, onDiagramExportNotify } = useContext(PreviewRuntimeContext);
   const latex = String(node.attrs.latex || '');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(latex);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const mathRenderRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setDraft(latex);
   }, [latex]);
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+    };
+  }, [ctxMenu]);
 
   const rendered = useMemo(() => {
     try {
@@ -379,6 +520,33 @@ const MathBlockNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttr
       return latex;
     }
   }, [latex]);
+
+  const buildMathSvg = () => {
+    const rect = mathRenderRef.current?.getBoundingClientRect();
+    const w = rect?.width && rect.width > 20 ? rect.width : 360;
+    const h = rect?.height && rect.height > 20 ? rect.height : 80;
+    return buildKatexSvgWrapper(rendered, w, h, isDark ? '#e6edf3' : '#1f2328');
+  };
+
+  const handleSaveMathSvg = async () => {
+    try {
+      const ok = await saveSvgFile(buildMathSvg(), 'formula.svg');
+      if (ok) onDiagramExportNotify?.('saved-svg');
+    } catch {
+      onDiagramExportNotify?.('error');
+    }
+  };
+
+  const handleSaveMathPng = async () => {
+    try {
+      const ok = await saveSvgAsPngFile(buildMathSvg(), 'formula.png', {
+        backgroundColor: isDark ? '#14171c' : '#ffffff',
+      });
+      if (ok) onDiagramExportNotify?.('saved-png');
+    } catch {
+      onDiagramExportNotify?.('error');
+    }
+  };
 
   return (
     <NodeViewWrapper
@@ -420,11 +588,90 @@ const MathBlockNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttr
         </div>
       ) : (
         <div
-          className="mf-math-rendered"
-          onClick={() => setEditing(true)}
-          title="Click to edit LaTeX"
-          dangerouslySetInnerHTML={{ __html: rendered }}
-        />
+          className="mf-math-block-wrap"
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setCtxMenu({ x: e.clientX, y: e.clientY });
+          }}
+        >
+          <div className="mf-math-toolbar mf-ui-ignore">
+            <button
+              type="button"
+              className="mf-code-copy"
+              onClick={async (e) => {
+                e.stopPropagation();
+                await writeClipboardText(latex);
+                onDiagramExportNotify?.('copied-latex');
+              }}
+            >
+              {diagramLabels.copyLatex}
+            </button>
+            <button
+              type="button"
+              className="mf-code-copy"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleSaveMathSvg();
+              }}
+            >
+              {diagramLabels.saveSvg}
+            </button>
+            <button
+              type="button"
+              className="mf-code-copy"
+              onClick={(e) => {
+                e.stopPropagation();
+                void handleSaveMathPng();
+              }}
+            >
+              {diagramLabels.savePng}
+            </button>
+          </div>
+          <div
+            ref={mathRenderRef}
+            className="mf-math-rendered"
+            onClick={() => setEditing(true)}
+            title="Click to edit LaTeX"
+            dangerouslySetInnerHTML={{ __html: rendered }}
+          />
+          {ctxMenu && (
+            <div
+              className="diagram-context-menu"
+              style={{ left: ctxMenu.x, top: ctxMenu.y }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={async () => {
+                  setCtxMenu(null);
+                  await writeClipboardText(latex);
+                  onDiagramExportNotify?.('copied-latex');
+                }}
+              >
+                {diagramLabels.copyLatex}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void handleSaveMathSvg();
+                }}
+              >
+                {diagramLabels.saveSvg}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setCtxMenu(null);
+                  void handleSaveMathPng();
+                }}
+              >
+                {diagramLabels.savePng}
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </NodeViewWrapper>
   );
@@ -756,6 +1003,8 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       onFocusPane,
       onScrollRatio,
       onCopyNotify,
+      onDiagramExportNotify,
+      diagramLabels,
       onImagePasteOrDrop,
       activePane,
       editorSyncLine,
@@ -1233,14 +1482,26 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       [editor]
     );
 
+    const resolvedDiagramLabels = useMemo(
+      () =>
+        diagramLabels || {
+          saveSvg: 'Save SVG',
+          savePng: 'Save PNG',
+          copyLatex: 'Copy LaTeX',
+        },
+      [diagramLabels]
+    );
+
     const runtimeValue = useMemo<RuntimeCtxValue>(
       () => ({
         baseDir: docPath,
         isDark,
         onCopyNotify,
+        onDiagramExportNotify,
+        diagramLabels: resolvedDiagramLabels,
         onZoomSvg: setZoomSvg,
       }),
-      [docPath, isDark, onCopyNotify]
+      [docPath, isDark, onCopyNotify, onDiagramExportNotify, resolvedDiagramLabels]
     );
 
     const fmEntries = frontmatter.data ? Object.entries(frontmatter.data) : [];
@@ -1292,13 +1553,45 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
           {zoomSvg && (
             <div className="modal-backdrop" onClick={() => setZoomSvg(null)}>
               <div className="mermaid-zoom-modal" onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  className="modal-close-btn"
-                  onClick={() => setZoomSvg(null)}
-                >
-                  ✕
-                </button>
+                <div className="mermaid-zoom-actions">
+                  <button
+                    type="button"
+                    className="secondary-btn sm"
+                    onClick={async () => {
+                      try {
+                        const ok = await saveSvgFile(zoomSvg, 'mermaid-diagram.svg');
+                        if (ok) onDiagramExportNotify?.('saved-svg');
+                      } catch {
+                        onDiagramExportNotify?.('error');
+                      }
+                    }}
+                  >
+                    {resolvedDiagramLabels.saveSvg}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn sm"
+                    onClick={async () => {
+                      try {
+                        const ok = await saveSvgAsPngFile(zoomSvg, 'mermaid-diagram.png', {
+                          backgroundColor: isDark ? '#14171c' : '#ffffff',
+                        });
+                        if (ok) onDiagramExportNotify?.('saved-png');
+                      } catch {
+                        onDiagramExportNotify?.('error');
+                      }
+                    }}
+                  >
+                    {resolvedDiagramLabels.savePng}
+                  </button>
+                  <button
+                    type="button"
+                    className="modal-close-btn"
+                    onClick={() => setZoomSvg(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
                 <div
                   className="mermaid-zoom-svg"
                   dangerouslySetInnerHTML={{ __html: zoomSvg }}

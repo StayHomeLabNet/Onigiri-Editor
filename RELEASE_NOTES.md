@@ -1,27 +1,19 @@
-Onigiri Editor `v1.1.0` delivers a major productivity, PKM (Personal Knowledge Management), and multi-format workflow upgrade: **Quick Open (`⌘P` / `@headings`)**, **Slash Commands (`/`) & Custom Snippets**, **Auto Table of Contents (TOC)**, **`[[WikiLinks]]`, Backlinks & Tag Browser**, **Clipboard Image Paste Auto-Save & Sidebar D&D Relative Links**, **Cross-Folder Regex Grep & Selective Replace (`⌘⇧G`)**, **CSV/TSV Interactive Table Preview & JSON/YAML/ENV Tools**, **Document Proofread & Review**, **Markdown Slide Presentation Mode**, **Enhanced HTML/SVG Live Preview**, **Dual Editor Improvements**, **Persisted Line Bookmarks (`F2`) & Focus Mode**, **Daily Notes & Templates**, **URL Web Clipper**, **Per-Tab AI Threads & `.md` Note Export**, **Git Status & HEAD Diff**, **Project-Scoped Session Restore**, and **Language Auto-Detection fixes**.
+Onigiri Editor `v1.2.0` introduces a major suite of workflow, publishing, Git source control, knowledge visualization, and customization features: **Sidebar Git Source Control Panel (with Inline Diff & AI Commit Messages)**, **Interactive Knowledge Graph & Broken Link Diagnostics**, **Word (`.docx`) & Diagram SVG/PNG Export**, **Citations, Footnotes, BibTeX / DOI Lookup, Link Cards & URL Auto-Title Paste**, **Unused Image (Orphan Asset) Detector & Cleaner**, **Copy as Rich Text (Markdown & Code)**, **`.editorconfig` & `.onigiri.json` Project Settings**, **Keyboard Shortcut Customization UI**, and **Settings / AI / Snippets / Templates / Keybindings JSON Backup & Import** (plus **Factory Reset & App Cache Cleaner**).
 
-### Highlights (`v1.1.0`)
-- **Navigation, Session & Bookmarks**:
-  - **Quick Open (`⌘P` / `Ctrl+P`)**: Fuzzy-search open tabs, workspace files, and recent files, or prefix `@` to jump to headings in the current file.
-  - **Per-Project Session Restore & Language Auto-Detection**: Saves/restores open tabs, scroll positions, code folding states, language overrides, and bookmarks per workspace folder; fixes initial welcome/unsaved-tab auto-detection carryover.
-  - **Persisted Line Bookmarks (`⌘F2` / `F2` / `⇧F2`) & Focus Mode**: Bookmark lines across sessions and optionally dim inactive paragraphs in **Focus Mode**.
-  - **Line Sorting & Blank Line Removal**: Sort ascending/descending, deduplicate, and remove blank lines from selections via the context menu or Command Palette.
-- **Markdown Writing, Knowledge Management & Notes**:
-  - **Slash Commands (`/`) & Custom Snippets UI**: Type `/` at line start to insert headings, tables, Mermaid, KaTeX, or callouts; create, edit, and save custom snippets in the Sidebar.
-  - **Auto TOC & Table Formatter**: Insert/update `<!-- toc -->` Tables of Contents and auto-align GFM Markdown tables (with TSV paste auto-conversion).
-  - **`[[WikiLinks]]`, Backlinks & Tag Browser**: Autocomplete `[[note]]` links in the editor and browse incoming **Backlinks** and `#tags` across your workspace in the Sidebar **Knowledge** tab.
-  - **Clipboard Image Auto-Save & Sidebar D&D Links**: Auto-save pasted/dropped screenshots to a configurable folder (`assets` by default, with workspace fallback for unsaved tabs), and drag files/images from the Sidebar tree into the editor to insert relative Markdown links.
-  - **Daily Notes, Templates & Web Clipper**: One-click Today's Daily Note, built-in & custom templates (`{{date}}`, `{{time}}`, `{{title}}`), and **URL → Clean Markdown** web clipping.
-- **Multi-Format Previews, Slide Mode & Dual Editor**:
-  - **Cross-Folder Regex Grep & Selective Replace (`⌘⇧G`)**: Search across the workspace with regex/case toggles, select target files via checkboxes, and apply batch replacements cleanly.
-  - **CSV/TSV Table Preview & JSON/YAML/ENV Tools**: Filterable/sortable table view for `.csv`/`.tsv` with Markdown/CSV copy, plus JSON pretty/minify/key-sort, JSON ↔ YAML conversion, and `.env` sorting.
-  - **HTML / SVG Standalone Live Preview Upgrades**: SVG zoom (`Fit` / `50%` / `100%` / `200%`), background switcher (checker/light/dark), copy SVG / copy rasterized PNG, and HTML Visual/Source toggle.
-  - **Markdown Slide Presentation Mode**: Split Markdown by `---` into fullscreen-ready slides with keyboard navigation and grid overview (`G`).
-  - **Dual Editor Simultaneous Editing**: Right-pane Side-by-Side editor tracks active focus for `⌘S` save, toolbar actions, snippets, AI inserts, and bookmarks.
-- **AI, Review & Git Integration**:
-  - **Proofread & Document Review Tab**: Local rule checks (broken links, skipped heading levels, mixed style, repeated words) + AI-assisted review with one-click fixes.
-  - **Per-Tab AI Threads & Note Export**: Keep separate AI conversation threads per tab (or shared) and export chat history directly as a `.md` note.
-  - **Git Status & HEAD Diff Compare**: Shows Git status badges in the Sidebar file tree and compares tabs/files against `Git HEAD`.
+### Highlights (`v1.2.0`)
+- **Publishing, Citations & Rich Export**:
+  - **Word (`.docx`) Native Export**: Export Markdown documents—including headings, lists, task lists, tables, blockquotes, code blocks, and formatting—directly to `.docx` via **File → Export Word (.docx)…**, the Command Palette, or a custom shortcut.
+  - **Mermaid & KaTeX SVG / PNG Export**: Save rendered Mermaid diagrams and KaTeX math blocks directly as `.svg` or rasterized `.png` files from the block toolbar or context menu.
+  - **Copy as Rich Text**: Copy selected text or the full document as clean inline-styled HTML + plain text (`Notion` / `Google Docs` / `Slack` / `Word` ready) via the Inspector, editor right-click menu, Command Palette, or customizable shortcut.
+  - **Citations, Footnotes, BibTeX / DOI Lookup & URL Auto-Title**: Insert inline links, rich link cards, auto-numbered footnotes (`[^N]`), parsed BibTeX citations (APA / Markdown styles), and Crossref DOI lookups via the **Citation Modal**; wrap selected text when pasting a URL (`[selection](url)`), and optionally auto-fetch webpage `<title>` when pasting bare URLs (`autoTitleOnUrlPaste`).
+- **Workspace Knowledge, Assets & Git Source Control**:
+  - **Git Source Control Panel**: Dedicated **Git** Sidebar tab with change-count badge, branch & ahead/behind indicators, staged/unstaged/untracked lists, **Stage / Unstage / Discard**, inline unified **Git Diff** viewer, **Commit**, **AI Commit Message** generator, **Pull / Push**, and recent commits history.
+  - **Interactive Knowledge Graph & Broken Link Diagnostics**: Visualize workspace Markdown note connections with degree-based layout, search/tag filtering, connected-only toggle, orphan note metrics, and clickable broken-link diagnostics that jump straight to the source line.
+  - **Unused Image (Orphan Asset) Detector & Cleaner**: Scan the workspace for image files unreferenced by any workspace file or open tab, preview thumbnails & total size, and batch-delete safely.
+- **Customization, Project Config & Data Management**:
+  - **Keyboard Shortcut Customization UI**: Dedicated **Keybindings** tab in Settings to view, filter, record, clear, reset, and detect conflicts across 27 editor commands—reflected dynamically in Command Palette badges and tooltips.
+  - **`.editorconfig` & `.onigiri.json` Project Settings**: Automatically applies hierarchical `.editorconfig` and `.onigiri.json` rules (`tabSize`, `indentWithTabs`, EOL, encoding, `trimTrailingWhitespace`, `insertFinalNewline`, `imageAssetFolder`, `dailyNotesFolder`, `wordGoal`) with one-click `.onigiri.json` creation/opening in Settings.
+  - **JSON Settings Backup Export/Import & Reset / Cache Cleaner**: Selectively export/import app & editor settings, AI presets (API keys excluded by default), custom snippets, templates, and custom keybindings in **Settings → Reset & Data**, alongside granular factory reset and cache cleanup controls.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel)**: `.dmg` / `.app.tar.gz`
@@ -30,30 +22,22 @@ Onigiri Editor `v1.1.0` delivers a major productivity, PKM (Personal Knowledge M
 
 ---
 
-Onigiri Editor `v1.1.0` では、執筆・ナレッジ管理・開発ワークフローを大幅に強化する多数の新機能を追加しました：**クイックオープン（`⌘P` / `@見出し`）**、**スラッシュコマンド（`/`）＆カスタムスニペット**、**目次（TOC）自動生成**、**`[[Wikiリンク]]`・バックリンク＆タグブラウザ**、**クリップボード画像自動保存＆サイドバー D&D 相対リンク挿入**、**フォルダー横断正規表現 Grep 一括置換（`⌘⇧G`）**、**CSV/TSV テーブルプレビュー＆JSON/YAML/ENV 整形・変換**、**ドキュメント校正・レビュー**、**Markdown スライドプレゼンモード**、**HTML/SVG プレビュー拡張**、**デュアルエディタ同時編集強化**、**行ブックマーク永続化（`F2`）＆フォーカスモード**、**デイリーノート＆テンプレート**、**URL Web クリップ**、**タブ別 AI スレッド＆`.md` 書き出し**、**Git ステータス＆HEAD 差分比較**、**プロジェクト別セッション復元**、および **言語自動判定の修正** に対応しています。
+Onigiri Editor `v1.2.0` では、執筆・ナレッジ可視化・Git ソース管理・Word/図表書き出し・設定カスタマイズを大きく進化させる 9 つの主要機能を追加しました：**サイドバー Git パネル（Diff 表示・AI コミットメッセージ生成対応）**、**ナレッジグラフ＆リンク切れ診断**、**Word（`.docx`）書き出し＆Mermaid/KaTeX SVG・PNG 保存**、**引用・脚注・BibTeX / DOI 検索・リンクカード＆URL タイトル自動取得**、**未使用画像（孤立アセット）の検出・一括整理**、**リッチテキストコピー**、**`.editorconfig` / `.onigiri.json` プロジェクト設定連携**、**キーボードショートカット設定 UI**、および **設定・AI・スニペット・テンプレート・キーバインドの JSON バックアップ書き出し／復元**（あわせて設定初期化・キャッシュ削除機能も整理）に対応しています。
 
-### 主な変更点（`v1.1.0`）
-- **ナビゲーション・セッション管理・ブックマーク**:
-  - **クイックオープン（`⌘P` / `Ctrl+P`）**: 開いているタブ・作業フォルダー内ファイル・最近のファイルをファジー検索して即ジャンプでき、先頭に `@` を付けると現在ファイルの見出しアウトラインへ移動できます。
-  - **プロジェクト別セッション復元＆言語自動判定修正**: フォルダーごとに開いていたタブ・スクロール位置・コード折りたたみ・言語固定・ブックマークを保存／復元し、初回やタブ切り替え時の言語自動判定引き継ぎ不具合を修正しました。
-  - **行ブックマーク永続化（`⌘F2` / `F2` / `⇧F2`）＆フォーカスモード**: タブ単位でブックマークを永続化し、現在段落以外を薄く表示する **フォーカスモード** を追加しました。
-  - **行ソート・空白行削除**: 右クリックメニューやコマンドパレットから昇順／降順ソート・重複行削除・空白行削除を実行できます。
-- **Markdown 執筆・ナレッジ管理・ノート作成**:
-  - **スラッシュコマンド（`/`）＆カスタムスニペット UI**: 行頭で `/` を打つと見出し・テーブル・Mermaid・KaTeX・コールアウトを即挿入でき、サイドバーで独自スニペットを追加・編集・保存できます。
-  - **目次（TOC）自動生成＆テーブル整形**: `<!-- toc -->` の挿入／更新と Markdown 表の自動整形（TSV 貼り付け時の表自動変換を含む）に対応しました。
-  - **`[[Wikiリンク]]`・バックリンク＆タグブラウザ**: エディタでの `[[ノート名]]` 補完と、サイドバーの **ナレッジ** タブから逆リンク一覧・`#タグ` 別絞り込みジャンプが可能です。
-  - **クリップボード画像自動保存＆サイドバー D&D リンク挿入**: 画像ペースト／ドロップ時に指定フォルダー（既定 `assets`、未保存タブも作業フォルダーへフォールバック）へ自動保存し、サイドバーからファイルをエディタへドロップするだけで相対パスの Markdown リンク／画像を挿入します。
-  - **デイリーノート・テンプレート＆Web クリップ**: ワンクリックで今日のデイリーノートを作成し、組み込み／カスタムテンプレート（`{{date}}` / `{{time}}` / `{{title}}`）や **URL → Markdown 変換クリップ** が使えます。
-- **多形式プレビュー・スライド・並列編集**:
-  - **フォルダー横断 Grep 検索＆選択一括置換（`⌘⇧G`）**: 正規表現・大文字小文字区別検索のヒット箇所をファイルごとにチェックボックスで選んで一括置換できます。
-  - **CSV/TSV テーブルプレビュー＆JSON/YAML/ENV ツール**: `.csv` / `.tsv` の絞り込み・列ソート・Markdown 表コピー、JSON 整形／圧縮／キーソート、JSON ⇔ YAML 変換、`.env` ソート整形に対応しました。
-  - **HTML / SVG 単体ライブプレビュー強化**: SVG ズーム（`Fit / 50% / 100% / 200%`）・背景切替（チェッカー／白／黒）・SVG コード＆PNG コピー、HTML のビジュアル／ソース表示切替を追加しました。
-  - **Markdown スライドプレゼンモード**: `---` でスライド分割し、キーボード操作・一覧グリッド（`G`）・フルスクリーン表示・Mermaid / 数式描画に対応しました。
-  - **2ファイル同時編集（デュアルエディタ）強化**: 右ペイン編集側のフォーカスを追跡し、`⌘S` 保存・ツールバー・スニペット・AI 挿入・ブックマークをアクティブ側へ反映します。
-- **AI・校正レビュー・Git 連携**:
-  - **ドキュメント校正・一括チェックタブ**: ローカルルール検査（リンク切れ・見出し飛び・文体混在・重複語等）と AI レビューによるワンクリック修正に対応しました。
-  - **AI チャット タブ別スレッド＆`.md` 書き出し**: タブ専用スレッド／共通スレッドを切り替えられ、会話履歴を新規ノートとして書き出せます。
-  - **Git ステータス＆HEAD 差分比較**: サイドバーツリーに Git 変更バッジを表示し、`Git HEAD` との差分比較を実行できます。
+### 主な変更点（`v1.2.0`）
+- **書き出し・引用・リッチコピー強化**:
+  - **Word（`.docx`）形式でのネイティブ書き出し**: 見出し・箇条書き・タスクリスト・表・引用・コードブロックを含む Markdown ドキュメントを `.docx` ファイルとして直接書き出せます（メニュー / コマンドパレット / ショートカット対応）。
+  - **Mermaid 図 / KaTeX 数式の SVG・PNG 書き出し**: プレビュー上の Mermaid 図や KaTeX 数式ブロックをツールバーやメニューからそのまま `.svg` / `.png` 画像として保存できます。
+  - **リッチテキストとしてコピー**: 選択範囲またはドキュメント全体をインラインスタイル付き HTML＋プレーンテキストとしてコピーし、Notion / Google Docs / Slack / Word へ崩れず貼り付けられます。
+  - **引用・脚注・BibTeX / DOI 検索・URL タイトル自動取得**: **引用・脚注モーダル**からリンクカード・自動採番脚注（`[^N]`）・BibTeX パース（APA 風 / Markdown 強調）・Crossref DOI 検索を行えます。テキスト選択中の URL ペーストで `[選択テキスト](URL)` 化でき、空選択の URL 貼り付け時にはページタイトルの自動取得（`autoTitleOnUrlPaste`、設定で ON/OFF 可）にも対応しました。
+- **ナレッジ可視化・画像整理・Git ソース管理**:
+  - **Git ソース管理パネル**: サイドバーに **Git** タブ（変更件数バッジ付き）を追加。ブランチ＆先行/遅延数表示、ステージ済み/変更ファイル一覧、**ステージ / 戻す / 破棄**、インライン unified **Diff ビューア**、**コミット**、**AI コミットメッセージ生成**、**Pull / Push**、最近のコミット履歴を備えています。
+  - **ナレッジグラフ＆リンク切れ診断**: ノート間のつながりをインタラクティブな相関グラフで可視化し、キーワード・`#タグ` 絞り込み、孤立ノート数・リンク切れ件数の集計、およびクリックによる該当行へのジャンプが可能です。
+  - **未使用画像（孤立アセット）の検出・整理**: 作業フォルダー内のどのテキストファイル・開いているタブからも参照されていない画像を一覧表示し、サムネイルと容量を確認して一括削除できます。
+- **カスタマイズ・プロジェクト設定・バックアップ管理**:
+  - **キーボードショートカット設定 UI**: 設定画面の **キーボード** タブから全 27 コマンドのショートカットをインタラクティブに割り当て・検索・競合警告・クリア・リセットでき、コマンドパレット表示にも即時反映されます。
+  - **`.editorconfig` / `.onigiri.json` プロジェクト設定連携**: 階層的な `.editorconfig` および `.onigiri.json`（インデント幅・タブ/スペース・改行コード・文字コード・保存時行末空白除去/末尾改行付与・画像保存先・デイリーノート保存先・目標文字数）を自動適用し、設定画面から `.onigiri.json` を作成・編集できます。
+  - **設定 JSON バックアップ書き出し／復元＆リセット・キャッシュ管理**: **設定 → リセット・データ管理** からアプリ設定・AI プリセット（API キー除外オプション付き）・マイスニペット・カスタムテンプレート・ショートカット設定を選択的に JSON バックアップ／復元（マージ／上書き選択可）でき、設定初期化やキャッシュ削除も行えます。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応）**: `.dmg` / `.app.tar.gz`

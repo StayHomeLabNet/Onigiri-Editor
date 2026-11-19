@@ -49,7 +49,7 @@ import {
 } from '../utils/platform';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
-const AI_THREADS_STORAGE_KEY = 'onigiri-markdown.ai-threads.v1';
+export const AI_THREADS_STORAGE_KEY = 'onigiri-markdown.ai-threads.v1';
 
 interface AiThreadsStore {
   mode: 'tab' | 'shared';
@@ -80,8 +80,24 @@ function loadAiThreadsStore(): AiThreadsStore {
   }
 }
 
+export function countSavedAiThreadEntries(): number {
+  const store = loadAiThreadsStore();
+  let count = store.shared.length > 0 ? 1 : 0;
+  for (const msgs of Object.values(store.byTab)) {
+    if (Array.isArray(msgs) && msgs.length > 0) count += 1;
+  }
+  return count;
+}
+
 function saveAiThreadsStore(store: AiThreadsStore): void {
   try {
+    const hasMessages =
+      store.shared.length > 0 ||
+      Object.values(store.byTab).some((list) => Array.isArray(list) && list.length > 0);
+    if (!hasMessages && store.mode === 'tab') {
+      localStorage.removeItem(AI_THREADS_STORAGE_KEY);
+      return;
+    }
     localStorage.setItem(AI_THREADS_STORAGE_KEY, JSON.stringify(store));
   } catch {
     // ignore quota errors
@@ -326,6 +342,16 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
       threadMode === 'shared' ? store.shared : store.byTab[activeTabId] || [];
     setMessagesState(list);
   }, [activeTabId, threadMode]);
+
+  useEffect(() => {
+    const onCleared = () => {
+      threadsStoreRef.current = { mode: 'tab', shared: [], byTab: {} };
+      setThreadMode('tab');
+      setMessagesState([]);
+    };
+    window.addEventListener('onigiri:ai-threads-cleared', onCleared);
+    return () => window.removeEventListener('onigiri:ai-threads-cleared', onCleared);
+  }, []);
 
   const handleSaveChatAsNote = useCallback(() => {
     if (!onSaveChatAsNote || messages.length === 0) return;

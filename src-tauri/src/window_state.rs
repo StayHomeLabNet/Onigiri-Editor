@@ -353,6 +353,46 @@ pub fn flush_window_state<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+fn remove_window_state_file(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        fs::remove_file(path)
+            .map_err(|e| format!("Failed to remove {}: {}", path.display(), e))?;
+    }
+    Ok(())
+}
+
+pub fn reset_main_window_state<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let resolved_path = state_file_path(app);
+    if let Some(mgr) = app.try_state::<WindowStateManager>() {
+        let mut guard = mgr.inner.lock().unwrap();
+        let target_path = guard.file_path.clone().or(resolved_path.clone());
+        if let Some(path) = target_path.as_deref() {
+            remove_window_state_file(path)?;
+        }
+        guard.state = SavedWindowState::default();
+        guard.dirty = false;
+        guard.restored = false;
+    } else if let Some(path) = resolved_path.as_deref() {
+        remove_window_state_file(path)?;
+    }
+
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        if window.is_maximized().unwrap_or(false) {
+            let _ = window.unmaximize();
+        }
+        let _ = window.set_size(LogicalSize::new(DEFAULT_WIDTH, DEFAULT_HEIGHT));
+        let _ = window.center();
+    }
+
+    if let Some(mgr) = app.try_state::<WindowStateManager>() {
+        let mut guard = mgr.inner.lock().unwrap();
+        guard.dirty = false;
+        guard.restored = true;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,6 +478,11 @@ mod tests {
         write_window_state_file(&file_path, &state).unwrap();
         let loaded = read_window_state_file(&file_path).unwrap();
         assert_eq!(loaded, state);
+
+        assert!(file_path.exists());
+        remove_window_state_file(&file_path).unwrap();
+        assert!(!file_path.exists());
+        remove_window_state_file(&file_path).unwrap();
 
         let _ = fs::remove_dir_all(&base);
     }

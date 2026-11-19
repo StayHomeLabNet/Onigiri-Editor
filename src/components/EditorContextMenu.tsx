@@ -8,10 +8,12 @@ export type EditorContextAction =
   | 'redo'
   | 'cut'
   | 'copy'
+  | 'copyRichText'
   | 'paste'
   | 'delete'
   | 'selectAll'
   | 'rectangularSelection'
+  | 'insertCitation'
   | 'indentTab'
   | 'unindentTab'
   | 'indentSpace'
@@ -247,6 +249,7 @@ export const EditorContextMenu: React.FC<EditorContextMenuProps> = ({
           shortcut: formatShortcut('⌘+C'),
           disabled: !menu.canCopy,
         })}
+        {renderItem(cm.copyRichText, 'copyRichText')}
         {renderItem(cm.paste, 'paste', {
           shortcut: formatShortcut('⌘+V'),
         })}
@@ -267,6 +270,7 @@ export const EditorContextMenu: React.FC<EditorContextMenuProps> = ({
 
         <div className="editor-ctx-sep" />
 
+        {renderItem(cm.insertCitation, 'insertCitation')}
         {renderItem(cm.aiEditSelection, 'aiEditSelection', {
           shortcut: formatShortcut('⌘+⇧+E'),
           disabled: !menu.hasSelection,

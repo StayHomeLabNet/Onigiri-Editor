@@ -36,6 +36,7 @@ import {
   Square,
   Play,
   Rows2,
+  BookMarked,
 } from 'lucide-react';
 import type { AppMode } from '../types';
 import type { Translations } from '../i18n/types';
@@ -226,6 +227,9 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
             </button>
             <button type="button" className="tb-btn" onClick={() => onAction('callout')} title={t.toolbar.callout}>
               <MessageSquareQuote size={15} />
+            </button>
+            <button type="button" className="tb-btn" onClick={() => onAction('citation')} title={t.actions.insertCitation}>
+              <BookMarked size={15} />
             </button>
           </div>
         </>

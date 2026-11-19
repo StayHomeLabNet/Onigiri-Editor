@@ -1,15 +1,19 @@
 import type {
   AiCapabilities,
   AiProviderId,
+  ClearAppCacheResult,
   FetchedUrlContent,
   FileSyncInfo,
   GitHeadFileResult,
+  GitPanelState,
   GitStatusResult,
+  ProjectConfigBundle,
   ProjectInfo,
   ProjectServerStatus,
   ProjectSetupResult,
   SearchMatch,
   TextEncodingId,
+  UnusedAssetEntry,
   WorkspaceEntry,
   WorkspaceGrepResult,
   WorkspaceNoteIndexEntry,
@@ -1013,5 +1017,174 @@ export async function getGitHeadFile(
   return invoke<GitHeadFileResult>('get_git_head_file', {
     rootPath: rootPath || null,
     filePath,
+  });
+}
+
+export async function clearAppCaches(): Promise<import('../types').ClearAppCacheResult> {
+  if (!isTauri()) {
+    return { removedFiles: 0, removedBytes: 0 };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<import('../types').ClearAppCacheResult>('clear_app_caches');
+}
+
+export async function resetWindowState(): Promise<void> {
+  if (!isTauri()) {
+    return;
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('reset_window_state');
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+export async function saveBinaryExportFile(
+  bytes: Uint8Array,
+  suggestedName: string,
+  filterName: string,
+  extensions: string[],
+  mimeType: string
+): Promise<boolean> {
+  if (isTauri()) {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const { invoke } = await import('@tauri-apps/api/core');
+    const chosen = await save({
+      defaultPath: suggestedName,
+      filters: [{ name: filterName, extensions }],
+    });
+    if (!chosen) return false;
+    await invoke('write_binary_file', {
+      path: chosen,
+      dataBase64: uint8ArrayToBase64(bytes),
+    });
+    return true;
+  }
+  const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const blob = new Blob([buf], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = suggestedName;
+  a.click();
+  URL.revokeObjectURL(url);
+  return true;
+}
+
+export async function findUnusedWorkspaceAssets(
+  rootPath: string,
+  extraContents?: string[]
+): Promise<UnusedAssetEntry[]> {
+  if (!isTauri() || !rootPath) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<UnusedAssetEntry[]>('find_unused_workspace_assets', {
+    rootPath,
+    extraContents: extraContents ?? null,
+  });
+}
+
+export async function deleteWorkspaceFiles(
+  rootPath: string,
+  paths: string[]
+): Promise<ClearAppCacheResult> {
+  if (!isTauri() || !rootPath || paths.length === 0) {
+    return { removedFiles: 0, removedBytes: 0 };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ClearAppCacheResult>('delete_workspace_files', {
+    rootPath,
+    paths,
+  });
+}
+
+export async function getGitPanelState(rootPath: string): Promise<GitPanelState> {
+  if (!isTauri() || !rootPath) {
+    return {
+      isRepo: false,
+      branch: null,
+      ahead: 0,
+      behind: 0,
+      hasRemote: false,
+      files: [],
+      recentCommits: [],
+    };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<GitPanelState>('get_git_panel_state', { rootPath });
+}
+
+export async function gitStageFiles(rootPath: string, paths: string[]): Promise<void> {
+  if (!isTauri() || !rootPath || paths.length === 0) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('git_stage_files', { rootPath, paths });
+}
+
+export async function gitUnstageFiles(rootPath: string, paths: string[]): Promise<void> {
+  if (!isTauri() || !rootPath || paths.length === 0) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('git_unstage_files', { rootPath, paths });
+}
+
+export async function gitDiscardFiles(rootPath: string, paths: string[]): Promise<void> {
+  if (!isTauri() || !rootPath || paths.length === 0) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('git_discard_files', { rootPath, paths });
+}
+
+export async function gitGetDiff(
+  rootPath: string,
+  staged: boolean,
+  filePath?: string | null
+): Promise<string> {
+  if (!isTauri() || !rootPath) return '';
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('git_get_diff', {
+    rootPath,
+    staged,
+    filePath: filePath || null,
+  });
+}
+
+export async function gitCommit(rootPath: string, message: string): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Git commit requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('git_commit', { rootPath, message });
+}
+
+export async function gitPush(rootPath: string): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Git push requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('git_push', { rootPath });
+}
+
+export async function gitPull(rootPath: string): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Git pull requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('git_pull', { rootPath });
+}
+
+export async function readProjectConfigBundle(
+  workspaceRoot?: string | null,
+  targetPath?: string | null
+): Promise<ProjectConfigBundle> {
+  if (!isTauri()) {
+    return { onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] };
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<ProjectConfigBundle>('read_project_config_bundle', {
+    workspaceRoot: workspaceRoot || null,
+    targetPath: targetPath || null,
   });
 }

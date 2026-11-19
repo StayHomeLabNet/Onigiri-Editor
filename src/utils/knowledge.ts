@@ -147,3 +147,151 @@ export function buildTagSummaries(notes: WorkspaceNoteIndexEntry[]): TagSummaryI
     (a, b) => b.count - a.count || a.tag.localeCompare(b.tag)
   );
 }
+
+export interface KnowledgeGraphNode {
+  path: string;
+  relativePath: string;
+  name: string;
+  title: string;
+  tags: string[];
+  inDegree: number;
+  outDegree: number;
+}
+
+export interface KnowledgeGraphEdge {
+  sourcePath: string;
+  targetPath: string;
+  kind: 'wiki' | 'md';
+}
+
+export interface BrokenNoteLink {
+  sourcePath: string;
+  sourceRelativePath: string;
+  sourceTitle: string;
+  target: string;
+  kind: 'wiki' | 'md';
+  line: number;
+  snippet: string;
+}
+
+export interface WorkspaceKnowledgeReport {
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+  orphanNotes: KnowledgeGraphNode[];
+  brokenLinks: BrokenNoteLink[];
+}
+
+export function buildWorkspaceKnowledgeReport(
+  notes: WorkspaceNoteIndexEntry[],
+  allWorkspaceRelPaths: string[] = []
+): WorkspaceKnowledgeReport {
+  const byStem = new Map<string, WorkspaceNoteIndexEntry>();
+  const byRelLower = new Map<string, WorkspaceNoteIndexEntry>();
+  const byRelNoExtLower = new Map<string, WorkspaceNoteIndexEntry>();
+  const workspaceFileRelSet = new Set<string>(
+    allWorkspaceRelPaths.map((p) => p.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase())
+  );
+
+  for (const n of notes) {
+    const rel = n.relativePath.replace(/\\/g, '/').toLowerCase();
+    const relNoExt = stripMdExtension(rel);
+    const stem = stripMdExtension(n.name).toLowerCase();
+    if (!byStem.has(stem)) byStem.set(stem, n);
+    byRelLower.set(rel, n);
+    byRelNoExtLower.set(relNoExt, n);
+    workspaceFileRelSet.add(rel);
+  }
+
+  const nodeMap = new Map<string, KnowledgeGraphNode>();
+  for (const n of notes) {
+    nodeMap.set(n.path, {
+      path: n.path,
+      relativePath: n.relativePath,
+      name: n.name,
+      title: n.title || n.name,
+      tags: Array.from(new Set(n.tags.map((t) => t.tag))),
+      inDegree: 0,
+      outDegree: 0,
+    });
+  }
+
+  const edgeSeen = new Set<string>();
+  const edges: KnowledgeGraphEdge[] = [];
+  const brokenLinks: BrokenNoteLink[] = [];
+
+  for (const note of notes) {
+    const noteRel = note.relativePath.replace(/\\/g, '/');
+    const noteDir = noteRel.includes('/') ? noteRel.slice(0, noteRel.lastIndexOf('/')) : '';
+
+    for (const link of note.outgoingLinks) {
+      const rawTarget = link.target.replace(/\\/g, '/').split('#')[0].split('?')[0].trim();
+      if (!rawTarget || /^(https?:|mailto:|data:|tel:)/i.test(rawTarget)) {
+        continue;
+      }
+
+      let matchedNote: WorkspaceNoteIndexEntry | undefined;
+      let existsAsOtherFile = false;
+
+      if (link.kind === 'wiki') {
+        const lower = rawTarget.toLowerCase();
+        const lowerNoExt = stripMdExtension(lower);
+        matchedNote =
+          byRelLower.get(lower) ||
+          byRelNoExtLower.get(lowerNoExt) ||
+          byStem.get(lowerNoExt);
+        if (!matchedNote && workspaceFileRelSet.has(lower)) {
+          existsAsOtherFile = true;
+        }
+      } else {
+        const resolvedRel = resolvePosixJoin(noteDir, rawTarget).toLowerCase();
+        const resolvedNoExt = stripMdExtension(resolvedRel);
+        matchedNote =
+          byRelLower.get(resolvedRel) ||
+          byRelNoExtLower.get(resolvedNoExt) ||
+          (!rawTarget.includes('/') ? byStem.get(stripMdExtension(rawTarget.toLowerCase())) : undefined);
+        if (!matchedNote && workspaceFileRelSet.has(resolvedRel)) {
+          existsAsOtherFile = true;
+        }
+      }
+
+      if (matchedNote) {
+        if (matchedNote.path !== note.path) {
+          const edgeKey = `${note.path}->${matchedNote.path}`;
+          if (!edgeSeen.has(edgeKey)) {
+            edgeSeen.add(edgeKey);
+            edges.push({
+              sourcePath: note.path,
+              targetPath: matchedNote.path,
+              kind: link.kind,
+            });
+            const srcNode = nodeMap.get(note.path);
+            const dstNode = nodeMap.get(matchedNote.path);
+            if (srcNode) srcNode.outDegree += 1;
+            if (dstNode) dstNode.inDegree += 1;
+          }
+        }
+      } else if (!existsAsOtherFile) {
+        brokenLinks.push({
+          sourcePath: note.path,
+          sourceRelativePath: note.relativePath,
+          sourceTitle: note.title || note.name,
+          target: link.target,
+          kind: link.kind,
+          line: link.line,
+          snippet: link.snippet,
+        });
+      }
+    }
+  }
+
+  const nodes = Array.from(nodeMap.values());
+  const orphanNotes = nodes.filter((n) => n.inDegree === 0 && n.outDegree === 0);
+
+  return {
+    nodes,
+    edges,
+    orphanNotes,
+    brokenLinks,
+  };
+}
+

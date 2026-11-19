@@ -4,7 +4,7 @@ export type RightPaneMode = 'markdown' | 'browser';
 export type ThemeId = 'light' | 'dark' | 'sepia' | 'midnight';
 export type PreviewTheme = 'editorial' | 'github' | 'notion' | 'academic';
 export type Locale = 'ja' | 'en';
-export type SidebarTab = 'files' | 'outline' | 'snippets' | 'knowledge';
+export type SidebarTab = 'files' | 'outline' | 'snippets' | 'knowledge' | 'git';
 export type InspectorTab = 'chat' | 'ai' | 'stats' | 'diff' | 'frontmatter' | 'review' | 'settings';
 
 export type SyntaxPresetId =
@@ -283,6 +283,7 @@ export interface EditorSettings {
   hideTopBarInSimpleMode: boolean;
   showFormatToolbar: boolean;
   showFormatToolbarInSimpleMode: boolean;
+  autoTitleOnUrlPaste?: boolean;
 }
 
 export interface DocumentStats {
@@ -423,4 +424,83 @@ export interface ReviewFinding {
   replacement?: string;
 }
 
+export interface ClearAppCacheResult {
+  removedFiles: number;
+  removedBytes: number;
+}
+
+export interface SettingsResetSelection {
+  editorSettings: boolean;
+  appearanceAndMode: boolean;
+  locale: boolean;
+  aiConfigAndClean: boolean;
+  inlineAiPresets: boolean;
+  windowState: boolean;
+}
+
+export interface UserDataClearSelection {
+  sessions: boolean;
+  recentHistory: boolean;
+  aiThreads: boolean;
+  searchAndMacros: boolean;
+  customSnippetsAndTemplates: boolean;
+  appCaches: boolean;
+}
+
+export interface StoredDataSummary {
+  workspaceSessionCount: number;
+  recentFileCount: number;
+  recentFolderCount: number;
+  aiThreadCount: number;
+  customSnippetCount: number;
+  customTemplateCount: number;
+  macroStepCount: number;
+  dirtyTabCount: number;
+}
+
+export interface UnusedAssetEntry {
+  path: string;
+  relativePath: string;
+  name: string;
+  size: number;
+  modifiedMs: number;
+}
+
+export interface GitWorkingFile {
+  path: string;
+  relativePath: string;
+  indexStatus: string;
+  worktreeStatus: string;
+  staged: boolean;
+  unstaged: boolean;
+  untracked: boolean;
+}
+
+export interface GitCommitSummary {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface GitPanelState {
+  isRepo: boolean;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  hasRemote: boolean;
+  files: GitWorkingFile[];
+  recentCommits: GitCommitSummary[];
+}
+
+export interface EditorConfigFileEntry {
+  dir: string;
+  content: string;
+}
+
+export interface ProjectConfigBundle {
+  onigiriJson: string | null;
+  onigiriJsonPath: string | null;
+  editorconfigs: EditorConfigFileEntry[];
+}
 

@@ -46,7 +46,11 @@ export function loadCustomSnippets(): CustomSnippetRecord[] {
 export function saveCustomSnippets(items: CustomSnippetRecord[]): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(CUSTOM_SNIPPETS_KEY, JSON.stringify(items));
+    if (items.length === 0) {
+      localStorage.removeItem(CUSTOM_SNIPPETS_KEY);
+    } else {
+      localStorage.setItem(CUSTOM_SNIPPETS_KEY, JSON.stringify(items));
+    }
   } catch {
     // ignore quota errors
   }

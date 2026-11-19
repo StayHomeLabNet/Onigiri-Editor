@@ -108,6 +108,7 @@ import {
   foldEffect,
   unfoldEffect,
   foldedRanges,
+  indentUnit,
 } from '@codemirror/language';
 import { highlightSelectionMatches, selectNextOccurrence } from '@codemirror/search';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
@@ -293,12 +294,17 @@ interface EditorPaneProps {
   onFindScopeChange?: (scope: TextRange | null) => void;
   onEditorSelectionChange?: (range: TextRange) => void;
   onAiEditSelection?: () => void;
+  onCopyRichText?: () => void;
+  onOpenCitationModal?: () => void;
+  onBareUrlPasted?: (url: string, from: number, to: number) => void;
   customSnippets?: CustomSnippetRecord[];
   workspaceNotes?: WorkspaceNoteItem[];
   onOpenWikiLink?: (target: string) => void;
   syncHighlightRange?: LineRange | null;
   isRecordingMacro?: boolean;
   onRecordMacroStep?: (step: MacroStep) => void;
+  tabSize?: number;
+  indentWithTabs?: boolean;
   theme: ThemeId;
   settings: EditorSettings;
 }
@@ -1288,12 +1294,17 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onFindScopeChange,
       onEditorSelectionChange,
       onAiEditSelection,
+      onCopyRichText,
+      onOpenCitationModal,
+      onBareUrlPasted,
       customSnippets = [],
       workspaceNotes = [],
       onOpenWikiLink,
       syncHighlightRange,
       isRecordingMacro = false,
       onRecordMacroStep,
+      tabSize = 2,
+      indentWithTabs = false,
       theme,
       settings,
     },
@@ -1313,6 +1324,8 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
     const selectionMatchComp = useRef(new Compartment());
     const closeBracketsComp = useRef(new Compartment());
     const focusModeComp = useRef(new Compartment());
+    const tabSizeComp = useRef(new Compartment());
+    const indentUnitComp = useRef(new Compartment());
 
     const [rulerVersion, setRulerVersion] = useState(0);
     const [rectMode, setRectMode] = useState(false);
@@ -1362,6 +1375,9 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onFindScopeChange,
       onEditorSelectionChange,
       onAiEditSelection,
+      onCopyRichText,
+      onOpenCitationModal,
+      onBareUrlPasted,
       customSnippets,
       workspaceNotes,
       onOpenWikiLink,
@@ -1392,6 +1408,9 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onFindScopeChange,
       onEditorSelectionChange,
       onAiEditSelection,
+      onCopyRichText,
+      onOpenCitationModal,
+      onBareUrlPasted,
       customSnippets,
       workspaceNotes,
       onOpenWikiLink,
@@ -1545,6 +1564,10 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             ),
             eolSymbolComp.current.of(settings.showNewlineSymbols ? newlineSymbolPlugin : []),
             focusModeComp.current.of(settings.focusMode ? focusModePlugin : []),
+            tabSizeComp.current.of(EditorState.tabSize.of(Math.max(1, Math.min(16, tabSize)))),
+            indentUnitComp.current.of(
+              indentUnit.of(indentWithTabs ? '\t' : ' '.repeat(Math.max(1, Math.min(16, tabSize))))
+            ),
             highlightActiveLine(),
             highlightActiveLineGutter(),
             bookmarkField,
@@ -1921,6 +1944,37 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                       (callbacksRef.current.onTablePasteNotify || notify)?.();
                       return true;
                     }
+
+                    // URL paste in Markdown: wrap selection as [selection](url) or auto-fetch title
+                    const trimmedUrl = plain.trim();
+                    if (/^https?:\/\/[^\s<>"]+$/i.test(trimmedUrl)) {
+                      const sel = editorView.state.selection.main;
+                      if (!sel.empty) {
+                        const selectedText = editorView.state.sliceDoc(sel.from, sel.to);
+                        if (selectedText && !selectedText.includes('\n')) {
+                          const wrapped = `[${selectedText}](${trimmedUrl})`;
+                          event.preventDefault();
+                          editorView.dispatch({
+                            changes: { from: sel.from, to: sel.to, insert: wrapped },
+                            selection: { anchor: sel.from + wrapped.length },
+                          });
+                          return true;
+                        }
+                      } else if (
+                        curSettings.autoTitleOnUrlPaste &&
+                        callbacksRef.current.onBareUrlPasted
+                      ) {
+                        event.preventDefault();
+                        const insertFrom = sel.from;
+                        const insertTo = insertFrom + trimmedUrl.length;
+                        editorView.dispatch({
+                          changes: { from: sel.from, to: sel.to, insert: trimmedUrl },
+                          selection: { anchor: insertTo },
+                        });
+                        callbacksRef.current.onBareUrlPasted(trimmedUrl, insertFrom, insertTo);
+                        return true;
+                      }
+                    }
                   }
                 }
 
@@ -2154,12 +2208,16 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
           ),
           eolSymbolComp.current.reconfigure(settings.showNewlineSymbols ? newlineSymbolPlugin : []),
           focusModeComp.current.reconfigure(settings.focusMode ? focusModePlugin : []),
+          tabSizeComp.current.reconfigure(EditorState.tabSize.of(Math.max(1, Math.min(16, tabSize)))),
+          indentUnitComp.current.reconfigure(
+            indentUnit.of(indentWithTabs ? '\t' : ' '.repeat(Math.max(1, Math.min(16, tabSize))))
+          ),
         ],
       });
       if (settings.showRuler) {
         setRulerVersion((v) => v + 1);
       }
-    }, [theme, settings]);
+    }, [theme, settings, tabSize, indentWithTabs]);
 
     // Sync bidirectional active block marker from right preview pane
     useEffect(() => {
@@ -2388,6 +2446,9 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
               recordMacroStep({ type: 'clipboard', action: 'copy' });
             }
             break;
+          case 'copyRichText':
+            callbacksRef.current.onCopyRichText?.();
+            return;
           case 'paste':
             if (shouldRecord) {
               recordMacroStep({ type: 'clipboard', action: 'paste' });
@@ -2408,6 +2469,9 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
               recordMacroStep({ type: 'cmCommand', command: 'selectAll' });
             }
             break;
+          case 'insertCitation':
+            callbacksRef.current.onOpenCitationModal?.();
+            return;
           case 'aiEditSelection':
             callbacksRef.current.onAiEditSelection?.();
             return;

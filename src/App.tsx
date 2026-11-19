@@ -15,21 +15,28 @@ import type {
   AiCleanOptions,
   AiProviderConfig,
   AppMode,
+  ClearAppCacheResult,
   DocumentTab,
   EditorSettings,
+  GitPanelState,
   HeadingItem,
+  InlineAiPresetItem,
   InspectorTab,
   Locale,
+  ProjectConfigBundle,
   ProjectInfo,
   ProjectServerStatus,
   ProjectSetupProgress,
   ReviewFinding,
   RightPaneMode,
   SearchMatch,
+  SettingsResetSelection,
   SidebarTab,
   Snapshot,
+  StoredDataSummary,
   TextEncodingId,
   ThemeId,
+  UserDataClearSelection,
   ViewLayout,
   WorkspaceEntry,
   WorkspaceNoteIndexEntry,
@@ -47,10 +54,17 @@ import {
   renderMarkdownToHtml,
   upsertTocInMarkdown,
 } from './utils/markdown';
-import { formatLocalDateYmd, generateDailyNoteContent } from './utils/templates';
+import {
+  CUSTOM_TEMPLATES_KEY,
+  formatLocalDateYmd,
+  generateDailyNoteContent,
+  loadCustomTemplates,
+  saveCustomTemplates,
+} from './utils/templates';
 import { resolveEditorLanguageLabel, resolveEffectiveLanguageId } from './utils/language';
 import { resolveSyntaxColors, syntaxColorsToCssVars, SYNTAX_PRESETS } from './utils/syntaxThemes';
 import {
+  CUSTOM_SNIPPETS_KEY,
   loadCustomSnippets,
   saveCustomSnippets,
   type CustomSnippetRecord,
@@ -59,25 +73,61 @@ import {
   appendMacroStep,
   isRecordableToolbarAction,
   loadSavedMacroSteps,
+  MACRO_STORAGE_KEY,
   MAX_MACRO_STEPS,
   saveMacroSteps,
   type MacroStep,
 } from './utils/macro';
+import { buildRichClipboardPayload } from './utils/richTextCopy';
+import { exportMarkdownToDocxBytes } from './utils/docxExport';
+import {
+  appendFootnoteDefinition,
+  fetchUrlMetadata,
+  formatMarkdownLink,
+} from './utils/citations';
+import { buildWorkspaceKnowledgeReport } from './utils/knowledge';
+import {
+  applyProjectSaveTransforms,
+  resolveProjectConfigBundle,
+  type ResolvedProjectEditorConfig,
+} from './utils/projectConfig';
+import {
+  buildSettingsBackupPayload,
+  type BackupExportOptions,
+  type BackupImportSelection,
+  type OnigiriSettingsBackup,
+} from './utils/settingsBackup';
+import {
+  formatKeybindingForDisplay,
+  loadCustomKeybindings,
+  matchesKeybinding,
+  resolveEffectiveKeybindings,
+  saveCustomKeybindings,
+} from './utils/keybindings';
 import {
   assistProjectSetup,
   browserClose,
   browserNavAction,
   browserSetBounds,
   checkFilesSync,
+  clearAppCaches,
   createFileInDir,
   createWorkspaceFolder,
   deleteWorkspaceEntry,
   duplicateWorkspaceFile,
   formatShortcut,
   getGitHeadFile,
+  getGitPanelState,
   getGitStatus,
   getOsLocale,
   getProjectDevServerStatus,
+  gitCommit,
+  gitDiscardFiles,
+  gitGetDiff,
+  gitPull,
+  gitPush,
+  gitStageFiles,
+  gitUnstageFiles,
   indexWorkspaceNotes,
   inspectProjectForPath,
   inspectWorkspaceProject,
@@ -86,16 +136,20 @@ import {
   openInExternalBrowser,
   openMarkdownFileDialog,
   readFileByPath,
+  readProjectConfigBundle,
   rebuildAppMenu,
   renameWorkspaceEntry,
   replaceInWorkspace,
+  resetWindowState,
   revealInFileManager,
+  saveBinaryExportFile,
   saveExportFile,
   saveImageAsset,
   saveMarkdownFile,
   savePastedImage,
   scanWorkspaceDir,
   searchWorkspaceDir,
+  sendAiChat,
   setWindowFullscreen,
   setWindowTitle,
   startExternalPreview,
@@ -116,7 +170,7 @@ import {
   type LineRange,
   type WorkspaceNoteItem,
 } from './components/EditorPane';
-import { PreviewPane, type PreviewHandle } from './components/PreviewPane';
+import { PreviewPane, type DiagramExportNotifyKind, type PreviewHandle } from './components/PreviewPane';
 import { WebPagePreviewPane } from './components/WebPagePreviewPane';
 import { CodePreviewPane } from './components/CodePreviewPane';
 import { DataPreviewPane } from './components/DataPreviewPane';
@@ -124,16 +178,27 @@ import { RightBrowserPane } from './components/RightBrowserPane';
 import { SideComparePane, type GitHeadComparisonState } from './components/SideComparePane';
 import { type ProjectSetupActionParams } from './components/ProjectSetupCard';
 import { InspectorDrawer } from './components/InspectorDrawer';
-import { FindReplaceBar, type FindReplaceBarHandle } from './components/FindReplaceBar';
+import {
+  FindReplaceBar,
+  FIND_OPTS_STORAGE_KEY,
+  type FindReplaceBarHandle,
+} from './components/FindReplaceBar';
 import { CommandPalette, type PaletteCommand } from './components/CommandPalette';
 import { QuickOpenModal } from './components/QuickOpenModal';
 import { StatusBar } from './components/StatusBar';
 import { AboutModal } from './components/AboutModal';
 import { ImageModal } from './components/ImageModal';
-import { SettingsModal } from './components/SettingsModal';
+import { SettingsModal, type SettingsTab } from './components/SettingsModal';
 import { EncodingModal, type EncodingModalMode } from './components/EncodingModal';
 import { GoToLineModal } from './components/GoToLineModal';
-import { InlineAiEditModal } from './components/InlineAiEditModal';
+import {
+  InlineAiEditModal,
+  INLINE_AI_PRESETS_KEY,
+} from './components/InlineAiEditModal';
+import {
+  AI_THREADS_STORAGE_KEY,
+  countSavedAiThreadEntries,
+} from './components/AiChatPanel';
 import {
   FolderSwitchGuardModal,
   type FolderSwitchGuardMode,
@@ -147,6 +212,9 @@ import { SlidePresentationModal } from './components/SlidePresentationModal';
 import { WorkspaceGrepModal } from './components/WorkspaceGrepModal';
 import { TemplatePickerModal } from './components/TemplatePickerModal';
 import { WebClipModal } from './components/WebClipModal';
+import { UnusedAssetsModal } from './components/UnusedAssetsModal';
+import { CitationModal } from './components/CitationModal';
+import { KnowledgeGraphModal } from './components/KnowledgeGraphModal';
 
 const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
 const WORKSPACE_SESSIONS_KEY = 'onigiri-markdown.workspace-sessions.v1';
@@ -237,6 +305,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   typewriterMode: false,
   focusMode: false,
   smartPasteHtml: true,
+  autoTitleOnUrlPaste: true,
   showFrontmatterCard: true,
   imageAssetFolder: 'assets',
   dailyNotesFolder: '',
@@ -590,8 +659,35 @@ export function App() {
   const [customSnippets, setCustomSnippets] = useState<CustomSnippetRecord[]>(() =>
     loadCustomSnippets()
   );
+  const [customKeybindings, setCustomKeybindings] = useState<Record<string, string>>(() =>
+    loadCustomKeybindings()
+  );
+  useEffect(() => {
+    saveCustomKeybindings(customKeybindings);
+  }, [customKeybindings]);
+  const effectiveKeybindings = useMemo(
+    () => resolveEffectiveKeybindings(customKeybindings),
+    [customKeybindings]
+  );
+  const shortcutDisplay = useCallback(
+    (id: string) => formatKeybindingForDisplay(effectiveKeybindings[id]),
+    [effectiveKeybindings]
+  );
+
   const [gitStatusEntries, setGitStatusEntries] = useState<Record<string, string>>({});
   const [gitBranch, setGitBranch] = useState<string | null>(null);
+  const [gitPanelState, setGitPanelState] = useState<GitPanelState | null>(null);
+  const [gitPanelBusy, setGitPanelBusy] = useState(false);
+  const [gitDiffTarget, setGitDiffTarget] = useState<{
+    path: string;
+    staged: boolean;
+    content: string;
+  } | null>(null);
+  const [projectConfigBundle, setProjectConfigBundle] = useState<ProjectConfigBundle>({
+    onigiriJson: null,
+    onigiriJsonPath: null,
+    editorconfigs: [],
+  });
 
   const [inlineAiState, setInlineAiState] = useState<{
     selectedText: string;
@@ -609,12 +705,18 @@ export function App() {
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
+  const [dataSummaryTick, setDataSummaryTick] = useState(0);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showGoToLine, setShowGoToLine] = useState(false);
   const [showSlideModal, setShowSlideModal] = useState(false);
   const [showWorkspaceGrep, setShowWorkspaceGrep] = useState(false);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
   const [showWebClipModal, setShowWebClipModal] = useState(false);
+  const [showUnusedAssetsModal, setShowUnusedAssetsModal] = useState(false);
+  const [showCitationModal, setShowCitationModal] = useState(false);
+  const [citationSelectedText, setCitationSelectedText] = useState('');
+  const [showKnowledgeGraphModal, setShowKnowledgeGraphModal] = useState(false);
   const [focusedSplitSide, setFocusedSplitSide] = useState<'main' | 'side'>('main');
   const [encodingModalMode, setEncodingModalMode] = useState<EncodingModalMode | null>(null);
   const [diffPreview, setDiffPreview] = useState<DiffPreviewRequest | null>(null);
@@ -728,7 +830,6 @@ export function App() {
   const focusedSplitSideRef = useRef<'main' | 'side'>(focusedSplitSide);
   focusedSplitSideRef.current = focusedSplitSide;
   const settingsRef = useRef<EditorSettings>(settings);
-  settingsRef.current = settings;
   const workspaceRootRef = useRef<string | null>(workspaceRoot);
   workspaceRootRef.current = workspaceRoot;
   const savingPathsRef = useRef<Set<string>>(new Set());
@@ -763,6 +864,93 @@ export function App() {
   const activeTab = useMemo(
     () => tabs.find((tab) => tab.id === activeTabId) || tabs[0],
     [tabs, activeTabId]
+  );
+
+  useEffect(() => {
+    if (!isTauri() || (!workspaceRoot && !activeTab.filePath)) {
+      setProjectConfigBundle({ onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] });
+      return;
+    }
+    let cancelled = false;
+    readProjectConfigBundle(workspaceRoot, activeTab.filePath)
+      .then((bundle) => {
+        if (!cancelled) setProjectConfigBundle(bundle);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProjectConfigBundle({ onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceRoot, activeTab.filePath, workspaceEntries]);
+
+  const resolvedProjectConfig = useMemo<ResolvedProjectEditorConfig | null>(() => {
+    if (!workspaceRoot && !activeTab.filePath) return null;
+    return resolveProjectConfigBundle(projectConfigBundle, activeTab.filePath);
+  }, [projectConfigBundle, workspaceRoot, activeTab.filePath]);
+
+  const effectiveSettings = useMemo<EditorSettings>(() => {
+    if (!resolvedProjectConfig) return settings;
+    return {
+      ...settings,
+      imageAssetFolder: resolvedProjectConfig.imageAssetFolder ?? settings.imageAssetFolder,
+      dailyNotesFolder: resolvedProjectConfig.dailyNotesFolder ?? settings.dailyNotesFolder,
+      wordGoal: resolvedProjectConfig.wordGoal ?? settings.wordGoal,
+      defaultNewFileEncoding: resolvedProjectConfig.encoding ?? settings.defaultNewFileEncoding,
+      defaultNewFileEol: resolvedProjectConfig.eol ?? settings.defaultNewFileEol,
+    };
+  }, [settings, resolvedProjectConfig]);
+  settingsRef.current = effectiveSettings;
+
+  const projectConfigInfo = useMemo(() => {
+    const hasEditorConfig = Boolean(resolvedProjectConfig?.sources.includes('editorconfig'));
+    const hasOnigiriJson = Boolean(
+      projectConfigBundle.onigiriJsonPath || resolvedProjectConfig?.sources.includes('onigiri.json')
+    );
+    const parts: string[] = [];
+    if (hasEditorConfig) parts.push(t.projectConfig.editorConfigActive);
+    if (hasOnigiriJson) parts.push(t.projectConfig.onigiriJsonActive);
+    if (resolvedProjectConfig?.tabSize !== undefined || resolvedProjectConfig?.indentWithTabs !== undefined) {
+      const unit = resolvedProjectConfig.indentWithTabs ? 'Tab' : 'Spaces';
+      const sz = resolvedProjectConfig.tabSize ?? 2;
+      parts.push(`${t.projectConfig.indentLabel}: ${unit}(${sz})`);
+    }
+    if (resolvedProjectConfig?.eol) {
+      parts.push(`${t.projectConfig.eolLabel}: ${resolvedProjectConfig.eol === '\r\n' ? 'CRLF' : 'LF'}`);
+    }
+    if (resolvedProjectConfig?.trimTrailingWhitespace) {
+      parts.push(t.projectConfig.trimTrailingLabel);
+    }
+    if (resolvedProjectConfig?.insertFinalNewline) {
+      parts.push(t.projectConfig.finalNewlineLabel);
+    }
+    return {
+      hasEditorConfig,
+      hasOnigiriJson,
+      onigiriJsonPath: projectConfigBundle.onigiriJsonPath,
+      resolvedSummary: parts.join(' · '),
+    };
+  }, [resolvedProjectConfig, projectConfigBundle.onigiriJsonPath, t.projectConfig]);
+
+  const workspaceKnowledgeReport = useMemo(
+    () => buildWorkspaceKnowledgeReport(workspaceNoteIndex),
+    [workspaceNoteIndex]
+  );
+
+  const unusedAssetExtraContents = useMemo(
+    () => tabs.map((tb) => tb.content),
+    [tabs]
+  );
+
+  const backupCounts = useMemo(
+    () => ({
+      snippets: customSnippets.length,
+      templates: loadCustomTemplates().length,
+      keybindings: Object.keys(customKeybindings).length,
+    }),
+    [customSnippets.length, customKeybindings, showSettings, dataSummaryTick]
   );
 
   const isTopBarVisible =
@@ -1058,29 +1246,57 @@ export function App() {
     saveCustomSnippets(customSnippets);
   }, [customSnippets]);
 
-  const refreshGitStatus = useCallback(async (root: string | null) => {
+  const refreshGitPanel = useCallback(async (root: string | null) => {
     if (!root || !isTauri()) {
-      setGitStatusEntries({});
-      setGitBranch(null);
+      setGitPanelState(null);
       return;
     }
     try {
-      const st = await getGitStatus(root);
-      if (st.isRepo) {
-        setGitStatusEntries(st.entries || {});
-        setGitBranch(st.branch || null);
-      } else {
-        setGitStatusEntries({});
-        setGitBranch(null);
-      }
+      const panel = await getGitPanelState(root);
+      setGitPanelState(panel);
     } catch {
-      setGitStatusEntries({});
-      setGitBranch(null);
+      setGitPanelState(null);
     }
   }, []);
 
+  const refreshGitStatus = useCallback(
+    async (root: string | null) => {
+      if (!root || !isTauri()) {
+        setGitStatusEntries({});
+        setGitBranch(null);
+        setGitPanelState(null);
+        return;
+      }
+      try {
+        const st = await getGitStatus(root);
+        if (st.isRepo) {
+          setGitStatusEntries(st.entries || {});
+          setGitBranch(st.branch || null);
+          void refreshGitPanel(root);
+        } else {
+          setGitStatusEntries({});
+          setGitBranch(null);
+          setGitPanelState(null);
+        }
+      } catch {
+        setGitStatusEntries({});
+        setGitBranch(null);
+        setGitPanelState(null);
+      }
+    },
+    [refreshGitPanel]
+  );
+
+  useEffect(() => {
+    if (sidebarTab === 'git' && workspaceRoot) {
+      void refreshGitPanel(workspaceRoot);
+    }
+  }, [sidebarTab, workspaceRoot, refreshGitPanel]);
+
+  const skipSessionPersistRef = useRef(false);
+
   const persistSessionNow = useCallback(() => {
-    if (!sessionHydratedRef.current) return;
+    if (!sessionHydratedRef.current || skipSessionPersistRef.current) return;
     const records: PersistedTabRecord[] = tabsRef.current.map(serializeTabRecord);
     const payload: PersistedSession = {
       version: 1,
@@ -1768,7 +1984,7 @@ export function App() {
   const dropHelpersRef = useRef({
     docPath: activeTab.filePath,
     workspaceRoot,
-    imageAssetFolder: settings.imageAssetFolder,
+    imageAssetFolder: effectiveSettings.imageAssetFolder,
     insertImageIntoActivePane,
     openPathInTab,
     notify,
@@ -1780,7 +1996,7 @@ export function App() {
         ? sideTab.filePath
         : activeTab.filePath,
     workspaceRoot,
-    imageAssetFolder: settings.imageAssetFolder,
+    imageAssetFolder: effectiveSettings.imageAssetFolder,
     insertImageIntoActivePane,
     openPathInTab,
     notify,
@@ -1863,8 +2079,8 @@ export function App() {
   // File actions
   const handleNewFile = useCallback(
     (opts?: { encoding?: TextEncodingId; eol?: '\n' | '\r\n' }) => {
-      const encoding = opts?.encoding ?? settings.defaultNewFileEncoding ?? 'utf-8';
-      const eol = opts?.eol ?? settings.defaultNewFileEol ?? '\n';
+      const encoding = opts?.encoding ?? effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = opts?.eol ?? effectiveSettings.defaultNewFileEol ?? '\n';
       const created = makeTab(t.dialogs.untitledName, '', undefined, undefined, {
         encoding,
         eol,
@@ -1882,8 +2098,8 @@ export function App() {
     [
       mode,
       activeTab.dirty,
-      settings.defaultNewFileEncoding,
-      settings.defaultNewFileEol,
+      effectiveSettings.defaultNewFileEncoding,
+      effectiveSettings.defaultNewFileEol,
       t.dialogs.unsavedCloseConfirm,
       t.dialogs.untitledName,
     ]
@@ -1955,7 +2171,7 @@ export function App() {
   const handleSave = useCallback(
     async (forceSaveAs = false) => {
       const targetTab = isSideEditorActive() && sideTab ? sideTab : activeTab;
-      const savedSnapshot = targetTab.content;
+      const savedSnapshot = applyProjectSaveTransforms(targetTab.content, resolvedProjectConfig);
       const prevPath = targetTab.filePath;
       const targetEncoding: TextEncodingId = targetTab.encoding ?? 'utf-8';
       const targetEol: '\n' | '\r\n' = targetTab.eol ?? '\n';
@@ -1990,10 +2206,12 @@ export function App() {
         setTabs((prev) =>
           prev.map((tab) => {
             if (tab.id !== targetTab.id) return tab;
+            const nextContent = tab.content === targetTab.content ? savedSnapshot : tab.content;
             const nextSaved = {
               ...tab,
               title: res.name,
               filePath: res.path,
+              content: nextContent,
               savedContent: savedSnapshot,
               savedEncoding: targetEncoding,
               savedEol: targetEol,
@@ -2002,7 +2220,7 @@ export function App() {
               ...nextSaved,
               dirty: computeTabDirty(
                 nextSaved,
-                tab.content,
+                nextContent,
                 tab.encoding ?? 'utf-8',
                 tab.eol ?? '\n'
               ),
@@ -2020,6 +2238,11 @@ export function App() {
               .then(setWorkspaceNoteIndex)
               .catch(() => {});
           }
+        }
+        if (/(\.editorconfig|\.onigiri\.json)$/i.test(res.path) && isTauri()) {
+          readProjectConfigBundle(workspaceRootRef.current, res.path)
+            .then(setProjectConfigBundle)
+            .catch(() => {});
         }
         notify(t.toasts.savedSuccess);
         if (
@@ -2055,6 +2278,7 @@ export function App() {
       activeTab,
       sideTab,
       isSideEditorActive,
+      resolvedProjectConfig,
       runWithHiddenNativeBrowser,
       pushRecentFile,
       refreshGitStatus,
@@ -2176,8 +2400,8 @@ export function App() {
       const remaining = tabs.filter((tb) => tb.id !== id);
       if (remaining.length === 0) {
         const fresh = makeTab(t.dialogs.untitledName, '', undefined, undefined, {
-          encoding: settings.defaultNewFileEncoding ?? 'utf-8',
-          eol: settings.defaultNewFileEol ?? '\n',
+          encoding: effectiveSettings.defaultNewFileEncoding ?? 'utf-8',
+          eol: effectiveSettings.defaultNewFileEol ?? '\n',
         });
         setTabs([fresh]);
         setActiveTabId(fresh.id);
@@ -2193,8 +2417,8 @@ export function App() {
       activeTabId,
       sideTabId,
       gitHeadComparison?.tabId,
-      settings.defaultNewFileEncoding,
-      settings.defaultNewFileEol,
+      effectiveSettings.defaultNewFileEncoding,
+      effectiveSettings.defaultNewFileEol,
       t.dialogs.unsavedCloseConfirm,
       t.dialogs.untitledName,
     ]
@@ -2450,8 +2674,8 @@ export function App() {
             : `Note "${fileName}" was not found. Create it?`;
         if (window.confirm(confirmMsg)) {
           try {
-            const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
-            const eol = settings.defaultNewFileEol ?? '\n';
+            const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+            const eol = effectiveSettings.defaultNewFileEol ?? '\n';
             const fullPath = await createFileInDir(
               workspaceRootRef.current,
               fileName,
@@ -2485,8 +2709,8 @@ export function App() {
       workspaceNotes,
       openPathInTab,
       locale,
-      settings.defaultNewFileEncoding,
-      settings.defaultNewFileEol,
+      effectiveSettings.defaultNewFileEncoding,
+      effectiveSettings.defaultNewFileEol,
       refreshWorkspace,
       pushRecentFile,
       notify,
@@ -2540,6 +2764,9 @@ export function App() {
     setSearchMatches([]);
     setGitStatusEntries({});
     setGitBranch(null);
+    setGitPanelState(null);
+    setGitDiffTarget(null);
+    setProjectConfigBundle({ onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] });
     setGitHeadComparison(null);
     setProjectSetupLogs([]);
     setProjectSetupFeedback(null);
@@ -2562,6 +2789,7 @@ export function App() {
       }
 
       setGitHeadComparison(null);
+      setGitDiffTarget(null);
       setSearchMatches([]);
 
       if (!isSameRoot && settings.restoreSessionEnabled) {
@@ -2804,8 +3032,8 @@ export function App() {
       if (!workspaceRoot) return;
       try {
         const starter = '';
-        const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
-        const eol = settings.defaultNewFileEol ?? '\n';
+        const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+        const eol = effectiveSettings.defaultNewFileEol ?? '\n';
         const fullPath = await createFileInDir(workspaceRoot, fileName, starter, encoding);
         await refreshWorkspace(workspaceRoot);
         const syncRes = await checkFilesSync([fullPath]).catch(() => []);
@@ -2823,8 +3051,8 @@ export function App() {
     },
     [
       workspaceRoot,
-      settings.defaultNewFileEncoding,
-      settings.defaultNewFileEol,
+      effectiveSettings.defaultNewFileEncoding,
+      effectiveSettings.defaultNewFileEol,
       refreshWorkspace,
       pushRecentFile,
       notify,
@@ -2866,8 +3094,8 @@ export function App() {
       if (!workspaceRoot) return;
       try {
         const starter = '';
-        const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
-        const eol = settings.defaultNewFileEol ?? '\n';
+        const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+        const eol = effectiveSettings.defaultNewFileEol ?? '\n';
         const fullPath = await createFileInDir(targetDir, fileName, starter, encoding);
         await refreshWorkspace(workspaceRoot);
         const syncRes = await checkFilesSync([fullPath]).catch(() => []);
@@ -2886,8 +3114,8 @@ export function App() {
     },
     [
       workspaceRoot,
-      settings.defaultNewFileEncoding,
-      settings.defaultNewFileEol,
+      effectiveSettings.defaultNewFileEncoding,
+      effectiveSettings.defaultNewFileEol,
       refreshWorkspace,
       pushRecentFile,
       notify,
@@ -3159,12 +3387,12 @@ export function App() {
     const dateStr = formatLocalDateYmd();
     const fileName = `${dateStr}.md`;
     const starter = generateDailyNoteContent(dateStr, locale);
-    const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
-    const eol = settings.defaultNewFileEol ?? '\n';
+    const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+    const eol = effectiveSettings.defaultNewFileEol ?? '\n';
 
     if (workspaceRootRef.current && isTauri()) {
       const root = workspaceRootRef.current;
-      const folder = (settings.dailyNotesFolder || '')
+      const folder = (effectiveSettings.dailyNotesFolder || '')
         .trim()
         .replace(/^[/\\]+|[/\\]+$/g, '');
       const relPath = folder ? `${folder.replace(/\\/g, '/')}/${fileName}` : fileName;
@@ -3218,9 +3446,9 @@ export function App() {
     setActiveTabId(created.id);
   }, [
     locale,
-    settings.defaultNewFileEncoding,
-    settings.defaultNewFileEol,
-    settings.dailyNotesFolder,
+    effectiveSettings.defaultNewFileEncoding,
+    effectiveSettings.defaultNewFileEol,
+    effectiveSettings.dailyNotesFolder,
     workspaceEntries,
     openPathInTab,
     refreshWorkspace,
@@ -3231,8 +3459,8 @@ export function App() {
 
   const handleCreateFromTemplate = useCallback(
     async (payload: { title: string; fileName: string; content: string }) => {
-      const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
-      const eol = settings.defaultNewFileEol ?? '\n';
+      const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = effectiveSettings.defaultNewFileEol ?? '\n';
       const cleanName = (payload.fileName || 'note.md').replace(/^[/\\]+/, '');
 
       if (workspaceRootRef.current && isTauri()) {
@@ -3289,8 +3517,8 @@ export function App() {
       setActiveTabId(dirtyTab.id);
     },
     [
-      settings.defaultNewFileEncoding,
-      settings.defaultNewFileEol,
+      effectiveSettings.defaultNewFileEncoding,
+      effectiveSettings.defaultNewFileEol,
       workspaceEntries,
       refreshWorkspace,
       pushRecentFile,
@@ -3301,8 +3529,8 @@ export function App() {
 
   const handleOpenClippedNote = useCallback(
     (payload: { title: string; suggestedFileName: string; markdown: string }) => {
-      const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
-      const eol = settings.defaultNewFileEol ?? '\n';
+      const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = effectiveSettings.defaultNewFileEol ?? '\n';
       const fileName = payload.suggestedFileName || 'web-clip.md';
       const created = makeTab(fileName, payload.markdown, undefined, undefined, {
         encoding,
@@ -3316,13 +3544,13 @@ export function App() {
       setTabs((prev) => [...prev, dirtyTab]);
       setActiveTabId(dirtyTab.id);
     },
-    [settings.defaultNewFileEncoding, settings.defaultNewFileEol]
+    [effectiveSettings.defaultNewFileEncoding, effectiveSettings.defaultNewFileEol]
   );
 
   const handleSaveChatAsNote = useCallback(
     (title: string, markdown: string) => {
-      const encoding = settings.defaultNewFileEncoding ?? 'utf-8';
-      const eol = settings.defaultNewFileEol ?? '\n';
+      const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
+      const eol = effectiveSettings.defaultNewFileEol ?? '\n';
       const safeTitle = (title || 'ai-chat').replace(/[\\/:*?"<>|]/g, '-').slice(0, 60);
       const fileName = safeTitle.endsWith('.md') ? safeTitle : `${safeTitle}.md`;
       const created = makeTab(fileName, markdown, undefined, undefined, {
@@ -3338,7 +3566,12 @@ export function App() {
       setActiveTabId(dirtyTab.id);
       notify(t.aiChat.savedAsNoteToast);
     },
-    [settings.defaultNewFileEncoding, settings.defaultNewFileEol, notify, t.aiChat.savedAsNoteToast]
+    [
+      effectiveSettings.defaultNewFileEncoding,
+      effectiveSettings.defaultNewFileEol,
+      notify,
+      t.aiChat.savedAsNoteToast,
+    ]
   );
 
   // AI & Clipboard Actions
@@ -3349,27 +3582,35 @@ export function App() {
   }, [activeTab.content, cleanOptions, updateActiveContent, notify, t.toasts.aiCleaned]);
 
   const handleCopyRichText = useCallback(async () => {
-    const htmlStr = await renderMarkdownToHtml(activeTab.content);
-    const tmp = document.createElement('div');
-    tmp.innerHTML = htmlStr;
-    const plainStr = tmp.innerText || activeTab.content;
+    const ed = getActiveEditorTarget();
+    const selected = ed?.getSelectedText() || '';
+    const targetTab = isSideEditorActive() && sideTab ? sideTab : activeTab;
+    const sourceMd = selected.trim() ? selected : targetTab.content;
+    const { html, plain } = await buildRichClipboardPayload(sourceMd);
     try {
-      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
         await navigator.clipboard.write([
           new ClipboardItem({
-            'text/html': new Blob([htmlStr], { type: 'text/html' }),
-            'text/plain': new Blob([plainStr], { type: 'text/plain' }),
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([plain], { type: 'text/plain' }),
           }),
         ]);
       } else {
-        await navigator.clipboard.writeText(plainStr);
+        await writeClipboardText(plain);
       }
       notify(t.toasts.copiedRichText);
     } catch {
-      await navigator.clipboard.writeText(plainStr);
+      await writeClipboardText(plain);
       notify(t.toasts.copiedRichText);
     }
-  }, [activeTab.content, notify, t.toasts.copiedRichText]);
+  }, [
+    activeTab,
+    sideTab,
+    isSideEditorActive,
+    getActiveEditorTarget,
+    notify,
+    t.toasts.copiedRichText,
+  ]);
 
   const handleCopyHtml = useCallback(async () => {
     const htmlStr = await renderMarkdownToHtml(activeTab.content);
@@ -3415,6 +3656,492 @@ export function App() {
     notify,
     t.toasts.exportedSuccess,
   ]);
+
+  const handleExportDocx = useCallback(async () => {
+    try {
+      const bytes = await exportMarkdownToDocxBytes(activeTab.content);
+      const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '') || 'document';
+      const ok = await runWithHiddenNativeBrowser(() =>
+        saveBinaryExportFile(
+          bytes,
+          `${baseName}.docx`,
+          'Word Document',
+          ['docx'],
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
+      );
+      if (ok) notify(t.toasts.exportedSuccess);
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    }
+  }, [
+    activeTab.content,
+    activeTab.title,
+    runWithHiddenNativeBrowser,
+    notify,
+    t.toasts.exportedSuccess,
+    t.toasts.errorPrefix,
+  ]);
+
+  const handleDiagramExportNotify = useCallback(
+    (kind: DiagramExportNotifyKind) => {
+      if (kind === 'saved-svg') notify(t.diagramExport.savedSvgToast);
+      else if (kind === 'saved-png') notify(t.diagramExport.savedPngToast);
+      else if (kind === 'copied-latex') notify(t.diagramExport.copiedLatexToast);
+      else notify(t.diagramExport.exportFailedToast);
+    },
+    [
+      notify,
+      t.diagramExport.savedSvgToast,
+      t.diagramExport.savedPngToast,
+      t.diagramExport.copiedLatexToast,
+      t.diagramExport.exportFailedToast,
+    ]
+  );
+
+  const handleOpenCitationModal = useCallback(() => {
+    const selected = getActiveEditorTarget()?.getSelectedText() || '';
+    setCitationSelectedText(selected);
+    setShowCitationModal(true);
+  }, [getActiveEditorTarget]);
+
+  const handleInsertFootnote = useCallback(
+    (inlineMarker: string, footnoteBody: string) => {
+      const markerId = inlineMarker.replace(/^\[\^|\]$/g, '');
+      const targetTab = isSideEditorActive() && sideTab ? sideTab : activeTab;
+      const ed = getActiveEditorTarget();
+      const range = ed?.getSelectionRange() ?? null;
+      const cur = targetTab.content;
+      const withMarker = range
+        ? cur.slice(0, range.from) + inlineMarker + cur.slice(range.to)
+        : cur + (cur && !cur.endsWith('\n') ? ' ' : '') + inlineMarker;
+      const nextContent = appendFootnoteDefinition(withMarker, markerId, footnoteBody);
+      updateTabContentById(targetTab.id, nextContent);
+    },
+    [activeTab, sideTab, isSideEditorActive, getActiveEditorTarget, updateTabContentById]
+  );
+
+  const handleBareUrlPasted = useCallback(
+    (url: string, from: number, to: number) => {
+      if (!url) return;
+      const useSide = isSideEditorActive() && Boolean(sideTabIdRef.current);
+      const targetTabId = useSide ? sideTabIdRef.current! : activeTabIdRef.current;
+      void (async () => {
+        try {
+          const meta = await fetchUrlMetadata(url);
+          if (!meta.title || meta.title === url || meta.title === meta.domain) return;
+          const currentTab = tabsRef.current.find((tb) => tb.id === targetTabId);
+          if (!currentTab) return;
+          if (currentTab.content.slice(from, to) !== url) return;
+          const mdLink = formatMarkdownLink(meta.title, url);
+          if (useSide && sideEditorRef.current) {
+            sideEditorRef.current.replaceRange(from, to, mdLink, { selectResult: false });
+          } else if (!useSide && targetTabId === activeTabIdRef.current && editorRef.current) {
+            editorRef.current.replaceRange(from, to, mdLink, { selectResult: false });
+          } else {
+            const next =
+              currentTab.content.slice(0, from) + mdLink + currentTab.content.slice(to);
+            updateTabContentById(targetTabId, next);
+          }
+          notify(t.toasts.urlAutoTitled);
+        } catch {
+          // keep bare URL if metadata lookup fails
+        }
+      })();
+    },
+    [isSideEditorActive, editorRef, updateTabContentById, notify, t.toasts.urlAutoTitled]
+  );
+
+  const handleCreateOnigiriJson = useCallback(async () => {
+    const root = workspaceRootRef.current;
+    if (!root || !isTauri()) return;
+    try {
+      const starterObj = {
+        imageAssetFolder: settings.imageAssetFolder ?? 'assets',
+        dailyNotesFolder: settings.dailyNotesFolder ?? '',
+        defaultNewFileEncoding: settings.defaultNewFileEncoding ?? 'utf-8',
+        defaultNewFileEol: settings.defaultNewFileEol ?? '\n',
+        wordGoal: settings.wordGoal ?? 0,
+        trimTrailingWhitespace: false,
+        insertFinalNewline: true,
+      };
+      const content = `${JSON.stringify(starterObj, null, 2)}\n`;
+      const createdPath = await createFileInDir(root, '.onigiri.json', content, 'utf-8');
+      await refreshWorkspace(root);
+      const bundle = await readProjectConfigBundle(root, activeTab.filePath).catch(() => null);
+      if (bundle) setProjectConfigBundle(bundle);
+      await openPathInTab(createdPath);
+      notify(t.projectConfig.createdOnigiriJsonToast);
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    }
+  }, [
+    settings.imageAssetFolder,
+    settings.dailyNotesFolder,
+    settings.defaultNewFileEncoding,
+    settings.defaultNewFileEol,
+    settings.wordGoal,
+    activeTab.filePath,
+    refreshWorkspace,
+    openPathInTab,
+    notify,
+    t.projectConfig.createdOnigiriJsonToast,
+    t.toasts.errorPrefix,
+  ]);
+
+  const handleExportBackupJson = useCallback(
+    async (options: BackupExportOptions): Promise<boolean> => {
+      let inlineAiPresets: InlineAiPresetItem[] = [];
+      try {
+        const raw = localStorage.getItem(INLINE_AI_PRESETS_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) inlineAiPresets = parsed as InlineAiPresetItem[];
+        }
+      } catch {
+        inlineAiPresets = [];
+      }
+      const payload = buildSettingsBackupPayload(
+        {
+          mode,
+          theme,
+          locale,
+          settings,
+          aiConfig,
+          cleanOptions,
+          inlineAiPresets,
+          customSnippets,
+          customTemplates: loadCustomTemplates(),
+          customKeybindings,
+        },
+        options
+      );
+      const jsonText = `${JSON.stringify(payload, null, 2)}\n`;
+      const ok = await runWithHiddenNativeBrowser(() =>
+        saveExportFile(
+          jsonText,
+          'onigiri-settings-backup.json',
+          'JSON',
+          ['json'],
+          'application/json'
+        )
+      );
+      if (ok) {
+        notify(t.settingsModal.dataManagement.backupExportedToast);
+      }
+      return ok;
+    },
+    [
+      mode,
+      theme,
+      locale,
+      settings,
+      aiConfig,
+      cleanOptions,
+      customSnippets,
+      customKeybindings,
+      runWithHiddenNativeBrowser,
+      notify,
+      t.settingsModal.dataManagement.backupExportedToast,
+    ]
+  );
+
+  const handleReadBackupJsonFile = useCallback(async (): Promise<string | null> => {
+    if (isTauri()) {
+      return await runWithHiddenNativeBrowser(async () => {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const selected = await open({
+          multiple: false,
+          directory: false,
+          filters: [{ name: 'JSON', extensions: ['json'] }],
+        });
+        if (!selected || typeof selected !== 'string') return null;
+        const fileRes = await readFileByPath(selected, 'utf-8');
+        return fileRes.content;
+      });
+    }
+    return await new Promise<string | null>((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json,application/json';
+      let settled = false;
+      const done = (val: string | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(val);
+      };
+      input.onchange = async () => {
+        const f = input.files?.[0];
+        if (!f) {
+          done(null);
+          return;
+        }
+        try {
+          done(await f.text());
+        } catch {
+          done(null);
+        }
+      };
+      window.addEventListener(
+        'focus',
+        () => {
+          window.setTimeout(() => {
+            if (!settled && (!input.files || input.files.length === 0)) {
+              done(null);
+            }
+          }, 400);
+        },
+        { once: true }
+      );
+      input.click();
+    });
+  }, [runWithHiddenNativeBrowser]);
+
+  const handleApplyBackupImport = useCallback(
+    async (backup: OnigiriSettingsBackup, selection: BackupImportSelection) => {
+      if (selection.restoreAppAndEditor) {
+        if (backup.app?.mode) handleModeChange(backup.app.mode);
+        if (backup.app?.theme) setTheme(backup.app.theme);
+        if (backup.app?.locale) setLocale(backup.app.locale);
+        if (backup.editorSettings) {
+          setSettings((prev) => ({
+            ...DEFAULT_SETTINGS,
+            ...prev,
+            ...backup.editorSettings,
+          }));
+        }
+      }
+
+      if (selection.restoreAi && backup.ai) {
+        if (backup.ai.aiConfig) {
+          const importedAi = backup.ai.aiConfig;
+          const excludeKeys = Boolean(backup.ai.apiKeysExcluded);
+          setAiConfig((prev) => ({
+            ...DEFAULT_AI_CONFIG,
+            ...prev,
+            ...importedAi,
+            apiKeys: excludeKeys
+              ? { ...prev.apiKeys }
+              : { ...prev.apiKeys, ...(importedAi.apiKeys || {}) },
+            baseUrls: { ...prev.baseUrls, ...(importedAi.baseUrls || {}) },
+            models: { ...(prev.models || {}), ...(importedAi.models || {}) },
+          }));
+        }
+        if (backup.ai.cleanOptions) {
+          setCleanOptions((prev) => ({ ...prev, ...backup.ai!.cleanOptions }));
+        }
+        if (Array.isArray(backup.ai.inlineAiPresets)) {
+          try {
+            localStorage.setItem(
+              INLINE_AI_PRESETS_KEY,
+              JSON.stringify(backup.ai.inlineAiPresets)
+            );
+          } catch {
+            // ignore
+          }
+          window.dispatchEvent(new CustomEvent('onigiri:inline-ai-presets-reset'));
+        }
+      }
+
+      if (selection.restoreSnippets && Array.isArray(backup.customSnippets)) {
+        if (selection.mergeCustomItems) {
+          setCustomSnippets((prev) => {
+            const byId = new Map(prev.map((s) => [s.id, s]));
+            for (const item of backup.customSnippets!) {
+              byId.set(item.id, item);
+            }
+            return Array.from(byId.values());
+          });
+        } else {
+          setCustomSnippets(backup.customSnippets);
+        }
+      }
+
+      if (selection.restoreTemplates && Array.isArray(backup.customTemplates)) {
+        const imported = backup.customTemplates.map((tpl) => ({ ...tpl, isBuiltin: false }));
+        if (selection.mergeCustomItems) {
+          const existing = loadCustomTemplates();
+          const byId = new Map(existing.map((tpl) => [tpl.id, tpl]));
+          for (const tpl of imported) {
+            byId.set(tpl.id, tpl);
+          }
+          saveCustomTemplates(Array.from(byId.values()));
+        } else {
+          saveCustomTemplates(imported);
+        }
+      }
+
+      if (selection.restoreKeybindings && backup.customKeybindings) {
+        if (selection.mergeCustomItems) {
+          setCustomKeybindings((prev) => ({ ...prev, ...backup.customKeybindings! }));
+        } else {
+          setCustomKeybindings({ ...backup.customKeybindings });
+        }
+      }
+
+      setDataSummaryTick((v) => v + 1);
+      notify(t.settingsModal.dataManagement.backupImportedToast);
+    },
+    [handleModeChange, setLocale, notify, t.settingsModal.dataManagement.backupImportedToast]
+  );
+
+  const handleGitStageFiles = useCallback(
+    async (paths: string[]) => {
+      const root = workspaceRootRef.current;
+      if (!root || paths.length === 0) return;
+      setGitPanelBusy(true);
+      try {
+        await gitStageFiles(root, paths);
+        await refreshGitStatus(root);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      } finally {
+        setGitPanelBusy(false);
+      }
+    },
+    [refreshGitStatus, notify, t.toasts.errorPrefix]
+  );
+
+  const handleGitUnstageFiles = useCallback(
+    async (paths: string[]) => {
+      const root = workspaceRootRef.current;
+      if (!root || paths.length === 0) return;
+      setGitPanelBusy(true);
+      try {
+        await gitUnstageFiles(root, paths);
+        await refreshGitStatus(root);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      } finally {
+        setGitPanelBusy(false);
+      }
+    },
+    [refreshGitStatus, notify, t.toasts.errorPrefix]
+  );
+
+  const handleGitDiscardFiles = useCallback(
+    async (paths: string[]) => {
+      const root = workspaceRootRef.current;
+      if (!root || paths.length === 0) return;
+      setGitPanelBusy(true);
+      try {
+        await gitDiscardFiles(root, paths);
+        setGitDiffTarget(null);
+        await refreshWorkspace(root);
+        await syncOpenTabsWithDisk();
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      } finally {
+        setGitPanelBusy(false);
+      }
+    },
+    [refreshWorkspace, syncOpenTabsWithDisk, notify, t.toasts.errorPrefix]
+  );
+
+  const handleGitViewDiff = useCallback(
+    async (filePath: string, staged: boolean) => {
+      const root = workspaceRootRef.current;
+      if (!root) return;
+      try {
+        const content = await gitGetDiff(root, staged, filePath);
+        setGitDiffTarget({ path: filePath, staged, content });
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      }
+    },
+    [notify, t.toasts.errorPrefix]
+  );
+
+  const handleGitCommit = useCallback(
+    async (message: string): Promise<boolean> => {
+      const root = workspaceRootRef.current;
+      if (!root || !message.trim()) return false;
+      setGitPanelBusy(true);
+      try {
+        await gitCommit(root, message.trim());
+        setGitDiffTarget(null);
+        await refreshGitStatus(root);
+        notify(t.gitPanel.committedToast);
+        return true;
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        return false;
+      } finally {
+        setGitPanelBusy(false);
+      }
+    },
+    [refreshGitStatus, notify, t.gitPanel.committedToast, t.toasts.errorPrefix]
+  );
+
+  const handleGitPush = useCallback(async () => {
+    const root = workspaceRootRef.current;
+    if (!root) return;
+    setGitPanelBusy(true);
+    try {
+      await gitPush(root);
+      await refreshGitStatus(root);
+      notify(t.gitPanel.pushedToast);
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    } finally {
+      setGitPanelBusy(false);
+    }
+  }, [refreshGitStatus, notify, t.gitPanel.pushedToast, t.toasts.errorPrefix]);
+
+  const handleGitPull = useCallback(async () => {
+    const root = workspaceRootRef.current;
+    if (!root) return;
+    setGitPanelBusy(true);
+    try {
+      await gitPull(root);
+      setGitDiffTarget(null);
+      await refreshWorkspace(root);
+      await syncOpenTabsWithDisk();
+      notify(t.gitPanel.pulledToast);
+    } catch (err) {
+      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+    } finally {
+      setGitPanelBusy(false);
+    }
+  }, [refreshWorkspace, syncOpenTabsWithDisk, notify, t.gitPanel.pulledToast, t.toasts.errorPrefix]);
+
+  const handleGitAiCommitMessage = useCallback(async (): Promise<string> => {
+    const root = workspaceRootRef.current;
+    if (!root) return '';
+    try {
+      const [stagedDiff, unstagedDiff] = await Promise.all([
+        gitGetDiff(root, true).catch(() => ''),
+        gitGetDiff(root, false).catch(() => ''),
+      ]);
+      const combined = (stagedDiff.trim() ? stagedDiff : unstagedDiff).slice(0, 12000);
+      if (!combined.trim()) return '';
+      const sysPrompt =
+        locale === 'ja'
+          ? '以下の git diff に対して、簡潔で明確な Conventional Commits 形式のコミットメッセージを1つだけ（説明やコードブロックなし、1行目50文字目安）生成してください。'
+          : 'Generate a single concise, clear Conventional Commits style commit message for the following git diff. Return only the commit message text without code fences or explanations.';
+      const reply = await sendAiChat({
+        requestId: `git-commit-${Date.now()}`,
+        provider: aiConfig.provider,
+        model: aiConfig.model.trim() || undefined,
+        apiKey: aiConfig.apiKeys[aiConfig.provider] || undefined,
+        baseUrl: aiConfig.baseUrls[aiConfig.provider] || undefined,
+        customCliCmd: aiConfig.customCliCmd,
+        systemPrompt: sysPrompt,
+        messages: [{ role: 'user', content: combined }],
+        workspaceDir: root,
+        allowWorkspaceWrite: false,
+      });
+      return reply.content.replace(/^```[^\n]*\n?|\n?```$/g, '').trim();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!aiConfig.apiKeys[aiConfig.provider] && ['openai', 'anthropic', 'gemini'].includes(aiConfig.provider)) {
+        notify(t.gitPanel.noAiProviderToast);
+      } else {
+        notify(`${t.toasts.errorPrefix} ${msg}`);
+      }
+      return '';
+    }
+  }, [aiConfig, locale, notify, t.gitPanel.noAiProviderToast, t.toasts.errorPrefix]);
 
   const handleExportPdf = useCallback(() => {
     setPrintMode('preview');
@@ -3676,6 +4403,10 @@ export function App() {
       }
       if (action === 'image') {
         setShowImageModal(true);
+        return;
+      }
+      if (action === 'citation') {
+        handleOpenCitationModal();
         return;
       }
       if (action === 'aiClean') {
@@ -4499,35 +5230,250 @@ export function App() {
     });
   }, [locale, notify, t.toasts.errorPrefix]);
 
+  const openSettingsModal = useCallback((tab: SettingsTab = 'general') => {
+    setSettingsInitialTab(tab);
+    setShowSettings(true);
+  }, []);
+
+  const handleResetSelectedSettings = useCallback(
+    async (selection: SettingsResetSelection) => {
+      if (selection.editorSettings) {
+        setSettings(DEFAULT_SETTINGS);
+        setPreviewSyncLineRange(null);
+      }
+      if (selection.appearanceAndMode) {
+        const osTheme: ThemeId = window.matchMedia?.('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light';
+        setTheme(osTheme);
+        setMode('basic');
+        setLayout('split');
+        preSimpleLayoutRef.current = 'split';
+        setEditorSplitVertical(false);
+        setEditorSplitRatio(0.5);
+        setShowSidebar(true);
+        setShowInspector(false);
+        setSidebarTab('outline');
+        setInspectorTab('chat');
+      }
+      if (selection.locale) {
+        hasSavedLocaleOnStartRef.current = false;
+        try {
+          localStorage.removeItem('onigiri-markdown.locale');
+        } catch {
+          // ignore
+        }
+        try {
+          const osLoc = await getOsLocale();
+          setLocaleState(osLoc);
+        } catch {
+          setLocaleState(detectInitialLocale());
+        }
+      }
+      if (selection.aiConfigAndClean) {
+        setAiConfig(DEFAULT_AI_CONFIG);
+        setCleanOptions(DEFAULT_CLEAN_OPTS);
+      }
+      if (selection.inlineAiPresets) {
+        try {
+          localStorage.removeItem(INLINE_AI_PRESETS_KEY);
+        } catch {
+          // ignore
+        }
+        window.dispatchEvent(new CustomEvent('onigiri:inline-ai-presets-reset'));
+      }
+      if (selection.windowState) {
+        try {
+          await resetWindowState();
+        } catch (err) {
+          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        }
+      }
+      notify(t.settingsModal.dataManagement.resetDoneToast);
+    },
+    [notify, t.settingsModal.dataManagement.resetDoneToast, t.toasts.errorPrefix]
+  );
+
+  const handleClearSelectedUserData = useCallback(
+    async (
+      selection: UserDataClearSelection,
+      options: { reloadAfter: boolean }
+    ): Promise<ClearAppCacheResult> => {
+      let cacheRes: ClearAppCacheResult = { removedFiles: 0, removedBytes: 0 };
+
+      if (selection.sessions) {
+        try {
+          localStorage.removeItem(SESSION_STORAGE_KEY);
+          localStorage.removeItem(WORKSPACE_SESSIONS_KEY);
+        } catch {
+          // ignore
+        }
+        if (options.reloadAfter) {
+          skipSessionPersistRef.current = true;
+        } else {
+          const hasDirty = tabsRef.current.some((tb) => tb.dirty);
+          if (!hasDirty) {
+            const welcome = makeTab(
+              locale === 'ja' ? 'ようこそ.md' : 'Welcome.md',
+              getTranslations(locale).sampleDocument
+            );
+            setTabs([welcome]);
+            setActiveTabId(welcome.id);
+            setSideTabId(null);
+            setGitHeadComparison(null);
+            setWorkspaceRoot(null);
+            setWorkspaceEntries([]);
+            setWorkspaceNoteIndex([]);
+            setSearchMatches([]);
+            setGitStatusEntries({});
+            setGitBranch(null);
+            setGitPanelState(null);
+            setGitDiffTarget(null);
+            setProjectConfigBundle({ onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] });
+            setProjectInfo(null);
+            setProjectServer(null);
+          }
+        }
+      }
+
+      if (selection.recentHistory) {
+        handleClearRecent();
+      }
+
+      if (selection.aiThreads) {
+        try {
+          localStorage.removeItem(AI_THREADS_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+        window.dispatchEvent(new CustomEvent('onigiri:ai-threads-cleared'));
+      }
+
+      if (selection.searchAndMacros) {
+        try {
+          localStorage.removeItem(FIND_OPTS_STORAGE_KEY);
+          localStorage.removeItem(MACRO_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+        setIsRecordingMacro(false);
+        setRecordingMacroSteps([]);
+        recordingMacroStepsRef.current = [];
+        setMacroSteps([]);
+        saveMacroSteps([]);
+        window.dispatchEvent(new CustomEvent('onigiri:find-opts-cleared'));
+      }
+
+      if (selection.customSnippetsAndTemplates) {
+        try {
+          localStorage.removeItem(CUSTOM_SNIPPETS_KEY);
+          localStorage.removeItem(CUSTOM_TEMPLATES_KEY);
+        } catch {
+          // ignore
+        }
+        setCustomSnippets([]);
+      }
+
+      if (selection.appCaches) {
+        try {
+          cacheRes = await clearAppCaches();
+        } catch (err) {
+          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        }
+      }
+
+      setDataSummaryTick((v) => v + 1);
+      notify(t.settingsModal.dataManagement.clearDoneToast);
+
+      if (options.reloadAfter) {
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 120);
+      }
+
+      return cacheRes;
+    },
+    [
+      handleClearRecent,
+      locale,
+      notify,
+      t.settingsModal.dataManagement.clearDoneToast,
+      t.toasts.errorPrefix,
+    ]
+  );
+
+  const storedDataSummary = useMemo<StoredDataSummary>(() => {
+    if (!showSettings) {
+      return {
+        workspaceSessionCount: 0,
+        recentFileCount: recentFiles.length,
+        recentFolderCount: recentFolders.length,
+        aiThreadCount: 0,
+        customSnippetCount: customSnippets.length,
+        customTemplateCount: 0,
+        macroStepCount: macroSteps.length,
+        dirtyTabCount: tabs.filter((tb) => tb.dirty).length,
+      };
+    }
+    return {
+      workspaceSessionCount: Object.keys(loadWorkspaceSessionsMap()).length,
+      recentFileCount: recentFiles.length,
+      recentFolderCount: recentFolders.length,
+      aiThreadCount: countSavedAiThreadEntries(),
+      customSnippetCount: customSnippets.length,
+      customTemplateCount: loadCustomTemplates().length,
+      macroStepCount: macroSteps.length,
+      dirtyTabCount: tabs.filter((tb) => tb.dirty).length,
+    };
+  }, [
+    showSettings,
+    dataSummaryTick,
+    recentFiles.length,
+    recentFolders.length,
+    customSnippets.length,
+    macroSteps.length,
+    tabs,
+  ]);
+
   // Global keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (meta && !e.shiftKey && e.key.toLowerCase() === 's') {
+      if (matchesKeybinding(e, effectiveKeybindings['save-file'])) {
         e.preventDefault();
         handleSave(false);
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === 's') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['save-as'])) {
         e.preventDefault();
         handleSave(true);
-      } else if (meta && e.key.toLowerCase() === 'o') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['open-file'])) {
         e.preventDefault();
         handleOpenFile();
-      } else if (meta && e.key.toLowerCase() === 'n') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['new-file'])) {
         e.preventDefault();
         handleNewFile();
-      } else if (meta && e.key === ',') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['open-settings'])) {
         e.preventDefault();
-        setShowSettings((v) => !v);
-      } else if (meta && !e.shiftKey && e.key.toLowerCase() === 'p') {
+        if (showSettings) {
+          setShowSettings(false);
+        } else {
+          openSettingsModal('general');
+        }
+      } else if (matchesKeybinding(e, effectiveKeybindings['quick-open'])) {
         e.preventDefault();
         setShowQuickOpen((v) => !v);
-      } else if (meta && (e.key.toLowerCase() === 'k' || (e.shiftKey && e.key.toLowerCase() === 'p'))) {
+      } else if (
+        matchesKeybinding(e, effectiveKeybindings['palette']) ||
+        (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p')
+      ) {
         e.preventDefault();
         setShowPalette((v) => !v);
-      } else if (meta && e.key.toLowerCase() === 'f' && !e.shiftKey) {
+      } else if (matchesKeybinding(e, effectiveKeybindings['replace'])) {
         e.preventDefault();
-        openFindBar({ target: e.altKey ? 'replace' : 'find' });
-      } else if (meta && !e.shiftKey && e.key.toLowerCase() === 'l') {
+        openFindBar({ target: 'replace' });
+      } else if (matchesKeybinding(e, effectiveKeybindings['find'])) {
+        e.preventDefault();
+        openFindBar({ target: 'find' });
+      } else if (matchesKeybinding(e, effectiveKeybindings['go-to-line'])) {
         e.preventDefault();
         setShowGoToLine((v) => !v);
       } else if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'h') {
@@ -4540,41 +5486,65 @@ export function App() {
         } else {
           findBarRef.current?.findNext();
         }
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'g') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['workspace-grep'])) {
         e.preventDefault();
         setShowWorkspaceGrep((v) => !v);
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'f') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['zen'])) {
         e.preventDefault();
         toggleZenMode();
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'e') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['ai-edit-selection'])) {
         e.preventDefault();
         handleOpenInlineAiEdit();
-      } else if (meta && e.shiftKey && e.key.toLowerCase() === 'm') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['macro-toggle-record'])) {
         e.preventDefault();
         handleToggleMacroRecording();
-      } else if (e.key === 'F8' && !meta && !e.altKey && !e.shiftKey) {
+      } else if (matchesKeybinding(e, effectiveKeybindings['macro-play'])) {
         e.preventDefault();
         void handlePlayMacro();
-      } else if (meta && e.key === '\\') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['cycle-mode'])) {
         e.preventDefault();
         const nextMode: AppMode =
           mode === 'simple' ? 'basic' : mode === 'basic' ? 'advanced' : 'simple';
         handleModeChange(nextMode);
-      } else if (meta && e.key.toLowerCase() === 'b') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['bold'])) {
         e.preventDefault();
         handleToolbarAction('bold');
-      } else if (meta && e.key.toLowerCase() === 'i') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['italic'])) {
         e.preventDefault();
         handleToolbarAction('italic');
-      } else if (meta && (e.key === '=' || e.key === '+')) {
+      } else if (
+        matchesKeybinding(e, effectiveKeybindings['zoom-in']) ||
+        (meta && e.key === '+' && effectiveKeybindings['zoom-in'] === 'Mod+=')
+      ) {
         e.preventDefault();
         handleZoomIn();
-      } else if (meta && e.key === '-') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['zoom-out'])) {
         e.preventDefault();
         handleZoomOut();
-      } else if (meta && e.key === '0') {
+      } else if (matchesKeybinding(e, effectiveKeybindings['zoom-reset'])) {
         e.preventDefault();
         handleSetZoom(100);
+      } else if (matchesKeybinding(e, effectiveKeybindings['copy-rich'])) {
+        e.preventDefault();
+        void handleCopyRichText();
+      } else if (matchesKeybinding(e, effectiveKeybindings['export-docx'])) {
+        e.preventDefault();
+        void handleExportDocx();
+      } else if (matchesKeybinding(e, effectiveKeybindings['insert-citation'])) {
+        e.preventDefault();
+        handleOpenCitationModal();
+      } else if (matchesKeybinding(e, effectiveKeybindings['knowledge-graph'])) {
+        e.preventDefault();
+        setShowKnowledgeGraphModal((v) => !v);
+      } else if (matchesKeybinding(e, effectiveKeybindings['unused-assets'])) {
+        e.preventDefault();
+        setShowUnusedAssetsModal((v) => !v);
+      } else if (matchesKeybinding(e, effectiveKeybindings['git-panel'])) {
+        e.preventDefault();
+        if (mode !== 'advanced') handleModeChange('advanced');
+        setShowSidebar(true);
+        setSidebarTab('git');
+        if (workspaceRootRef.current) void refreshGitPanel(workspaceRootRef.current);
       } else if (e.key === 'Escape') {
         if (
           diffPreview ||
@@ -4582,7 +5552,10 @@ export function App() {
           showSlideModal ||
           showWorkspaceGrep ||
           showTemplateModal ||
-          showWebClipModal
+          showWebClipModal ||
+          showUnusedAssetsModal ||
+          showCitationModal ||
+          showKnowledgeGraphModal
         ) {
           return;
         }
@@ -4600,6 +5573,7 @@ export function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
+    effectiveKeybindings,
     mode,
     handleModeChange,
     handleSave,
@@ -4612,11 +5586,15 @@ export function App() {
     showQuickOpen,
     showGoToLine,
     showSettings,
+    openSettingsModal,
     showFind,
     showSlideModal,
     showWorkspaceGrep,
     showTemplateModal,
     showWebClipModal,
+    showUnusedAssetsModal,
+    showCitationModal,
+    showKnowledgeGraphModal,
     diffPreview,
     inlineAiState,
     handleOpenInlineAiEdit,
@@ -4627,6 +5605,10 @@ export function App() {
     handleZoomIn,
     handleZoomOut,
     handleSetZoom,
+    handleCopyRichText,
+    handleExportDocx,
+    handleOpenCitationModal,
+    refreshGitPanel,
   ]);
 
   // Listen to native macOS/Win/Linux menu bar actions
@@ -4634,7 +5616,7 @@ export function App() {
   menuActionsRef.current = {
     'open-about': () => setShowAbout(true),
     'open-online-manual': handleOpenOnlineManual,
-    'open-settings': () => setShowSettings(true),
+    'open-settings': () => openSettingsModal('general'),
     'new-file': () => handleNewFile(),
     'new-file-with-encoding': () => setEncodingModalMode('new'),
     'reopen-with-encoding': () => {
@@ -4723,15 +5705,27 @@ export function App() {
         id: 'quick-open',
         category: 'File',
         label: t.actions.quickOpen,
-        shortcut: formatShortcut('⌘P'),
+        shortcut: shortcutDisplay('quick-open'),
         action: () => setShowQuickOpen(true),
       },
       {
         id: 'open-settings',
         category: 'Settings',
         label: t.actions.settings,
-        shortcut: formatShortcut('⌘,'),
-        action: () => setShowSettings(true),
+        shortcut: shortcutDisplay('open-settings'),
+        action: () => openSettingsModal('general'),
+      },
+      {
+        id: 'open-settings-keybindings',
+        category: 'Settings',
+        label: t.settingsModal.keybindings.title,
+        action: () => openSettingsModal('keybindings'),
+      },
+      {
+        id: 'open-settings-data',
+        category: 'Settings',
+        label: t.settingsModal.dataManagement.openDataTabCommand,
+        action: () => openSettingsModal('data'),
       },
       {
         id: 'mode-simple',
@@ -4868,21 +5862,21 @@ export function App() {
         id: 'zoom-in',
         category: 'View',
         label: t.actions.zoomIn,
-        shortcut: formatShortcut('⌘+'),
+        shortcut: shortcutDisplay('zoom-in'),
         action: handleZoomIn,
       },
       {
         id: 'zoom-out',
         category: 'View',
         label: t.actions.zoomOut,
-        shortcut: formatShortcut('⌘-'),
+        shortcut: shortcutDisplay('zoom-out'),
         action: handleZoomOut,
       },
       {
         id: 'zoom-reset',
         category: 'View',
         label: t.actions.resetZoom,
-        shortcut: formatShortcut('⌘0'),
+        shortcut: shortcutDisplay('zoom-reset'),
         action: () => handleSetZoom(100),
       },
       {
@@ -4932,10 +5926,17 @@ export function App() {
         action: () => setShowImageModal(true),
       },
       {
+        id: 'insert-citation',
+        category: 'Markdown',
+        label: t.actions.insertCitation,
+        shortcut: shortcutDisplay('insert-citation'),
+        action: handleOpenCitationModal,
+      },
+      {
         id: 'new-file',
         category: 'File',
         label: t.actions.newFile,
-        shortcut: formatShortcut('⌘N'),
+        shortcut: shortcutDisplay('new-file'),
         action: () => handleNewFile(),
       },
       {
@@ -4966,7 +5967,7 @@ export function App() {
         id: 'open-file',
         category: 'File',
         label: t.actions.openFile,
-        shortcut: formatShortcut('⌘O'),
+        shortcut: shortcutDisplay('open-file'),
         action: handleOpenFile,
       },
       {
@@ -4989,14 +5990,14 @@ export function App() {
         id: 'save-file',
         category: 'File',
         label: t.actions.save,
-        shortcut: formatShortcut('⌘S'),
+        shortcut: shortcutDisplay('save-file'),
         action: () => handleSave(false),
       },
       {
         id: 'save-as',
         category: 'File',
         label: t.actions.saveAs,
-        shortcut: formatShortcut('⌘⇧S'),
+        shortcut: shortcutDisplay('save-as'),
         action: () => handleSave(true),
       },
       {
@@ -5007,13 +6008,14 @@ export function App() {
       },
       {
         id: 'copy-rich',
-        category: 'AI',
+        category: 'Edit',
         label: t.actions.copyRichText,
+        shortcut: shortcutDisplay('copy-rich'),
         action: handleCopyRichText,
       },
       {
         id: 'paste-html',
-        category: 'AI',
+        category: 'Edit',
         label: t.actions.pasteHtmlAsMd,
         action: handlePasteHtmlAsMd,
       },
@@ -5022,6 +6024,13 @@ export function App() {
         category: 'Export',
         label: t.actions.exportHtml,
         action: handleExportHtml,
+      },
+      {
+        id: 'export-docx',
+        category: 'Export',
+        label: t.actions.exportDocx,
+        shortcut: shortcutDisplay('export-docx'),
+        action: () => void handleExportDocx(),
       },
       {
         id: 'export-pdf',
@@ -5039,7 +6048,7 @@ export function App() {
         id: 'ai-edit-selection',
         category: 'AI',
         label: t.contextMenu.aiEditSelection,
-        shortcut: formatShortcut('⌘⇧E'),
+        shortcut: shortcutDisplay('ai-edit-selection'),
         action: handleOpenInlineAiEdit,
       },
       ...(tabs.length > 1
@@ -5065,6 +6074,32 @@ export function App() {
             },
           ]
         : []),
+      {
+        id: 'git-panel',
+        category: 'Git',
+        label: t.actions.openGitPanel,
+        shortcut: shortcutDisplay('git-panel'),
+        action: () => {
+          if (mode !== 'advanced') handleModeChange('advanced');
+          setShowSidebar(true);
+          setSidebarTab('git');
+          if (workspaceRoot) void refreshGitPanel(workspaceRoot);
+        },
+      },
+      {
+        id: 'knowledge-graph',
+        category: 'Knowledge',
+        label: t.actions.knowledgeGraph,
+        shortcut: shortcutDisplay('knowledge-graph'),
+        action: () => setShowKnowledgeGraphModal(true),
+      },
+      {
+        id: 'unused-assets',
+        category: 'Workspace',
+        label: t.actions.findUnusedAssets,
+        shortcut: shortcutDisplay('unused-assets'),
+        action: () => setShowUnusedAssetsModal(true),
+      },
       {
         id: 'insert-update-toc',
         category: 'Markdown',
@@ -5172,21 +6207,21 @@ export function App() {
         id: 'zen',
         category: 'View',
         label: zenMode ? t.actions.exitZen : t.actions.zenMode,
-        shortcut: formatShortcut('⌘⇧F'),
+        shortcut: shortcutDisplay('zen'),
         action: toggleZenMode,
       },
       {
         id: 'find',
         category: 'Edit',
         label: t.actions.findReplace,
-        shortcut: formatShortcut('⌘F'),
+        shortcut: shortcutDisplay('find'),
         action: () => openFindBar({ target: 'find' }),
       },
       {
         id: 'go-to-line',
         category: 'Edit',
         label: t.actions.goToLine,
-        shortcut: formatShortcut('⌘L'),
+        shortcut: shortcutDisplay('go-to-line'),
         action: () => setShowGoToLine(true),
       },
       {
@@ -5220,7 +6255,7 @@ export function App() {
         id: 'workspace-grep',
         category: 'Workspace',
         label: t.actions.workspaceGrep,
-        shortcut: formatShortcut('⌘⇧G'),
+        shortcut: shortcutDisplay('workspace-grep'),
         action: () => setShowWorkspaceGrep(true),
       },
       {
@@ -5261,14 +6296,14 @@ export function App() {
         id: 'macro-toggle-record',
         category: 'Macro',
         label: isRecordingMacro ? t.actions.macroStop : t.actions.macroRecord,
-        shortcut: formatShortcut('⌘⇧M'),
+        shortcut: shortcutDisplay('macro-toggle-record'),
         action: handleToggleMacroRecording,
       },
       {
         id: 'macro-play',
         category: 'Macro',
         label: t.actions.macroPlay,
-        shortcut: 'F8',
+        shortcut: shortcutDisplay('macro-play'),
         action: () => {
           void handlePlayMacro();
         },
@@ -5353,6 +6388,7 @@ export function App() {
     workspaceEntries,
     isRecordingMacro,
     macroSteps.length,
+    shortcutDisplay,
     notify,
     handleModeChange,
     handleToggleTopBar,
@@ -5367,13 +6403,16 @@ export function App() {
     handleOpenFolder,
     handleCloseFolder,
     workspaceRoot,
+    refreshGitPanel,
     handleSave,
     handleAiClean,
     handleCopyRichText,
     handlePasteHtmlAsMd,
     handleExportHtml,
+    handleExportDocx,
     handleExportPdf,
     handlePrintSource,
+    handleOpenCitationModal,
     handleOpenInlineAiEdit,
     handleCompareTabWithActive,
     handleCompareTabWithGitHead,
@@ -5391,6 +6430,7 @@ export function App() {
     handleToggleMacroRecording,
     handlePlayMacro,
     handleClearMacro,
+    openSettingsModal,
   ]);
 
   const handleJumpToHeading = (h: HeadingItem) => {
@@ -5463,6 +6503,9 @@ export function App() {
     showWorkspaceGrep ||
     showTemplateModal ||
     showWebClipModal ||
+    showUnusedAssetsModal ||
+    showCitationModal ||
+    showKnowledgeGraphModal ||
     Boolean(inlineAiState) ||
     Boolean(encodingModalMode) ||
     Boolean(diffPreview) ||
@@ -5524,15 +6567,19 @@ export function App() {
               onSave={() => handleSave(false)}
               onExportHtml={handleExportHtml}
               onExportPdf={handleExportPdf}
+              onExportDocx={() => void handleExportDocx()}
               onOpenCommandPalette={() => setShowPalette(true)}
               onToggleZen={toggleZenMode}
-              onOpenSettings={() => setShowSettings(true)}
+              onOpenSettings={() => openSettingsModal('general')}
               onOpenAbout={() => setShowAbout(true)}
               onOpenSlidePresentation={() => setShowSlideModal(true)}
               onOpenDailyNote={() => void handleOpenDailyNote()}
               onOpenTemplateModal={() => setShowTemplateModal(true)}
               onOpenWebClip={() => setShowWebClipModal(true)}
               onOpenWorkspaceGrep={() => setShowWorkspaceGrep(true)}
+              onOpenCitationModal={handleOpenCitationModal}
+              onOpenKnowledgeGraph={() => setShowKnowledgeGraphModal(true)}
+              onOpenUnusedAssets={() => setShowUnusedAssetsModal(true)}
               focusMode={Boolean(settings.focusMode)}
               onToggleFocusMode={handleToggleFocusMode}
               isMarkdown={previewKind === 'markdown'}
@@ -5644,6 +6691,21 @@ export function App() {
             onOpenWorkspaceGrepModal={() => setShowWorkspaceGrep(true)}
             onOpenDailyNote={() => void handleOpenDailyNote()}
             onOpenTemplateModal={() => setShowTemplateModal(true)}
+            onOpenUnusedAssets={() => setShowUnusedAssetsModal(true)}
+            onOpenKnowledgeGraph={() => setShowKnowledgeGraphModal(true)}
+            gitPanelState={gitPanelState}
+            gitBusy={gitPanelBusy}
+            gitDiffTarget={gitDiffTarget}
+            onCloseGitDiff={() => setGitDiffTarget(null)}
+            onRefreshGitPanel={() => void refreshGitPanel(workspaceRoot)}
+            onGitStageFiles={handleGitStageFiles}
+            onGitUnstageFiles={handleGitUnstageFiles}
+            onGitDiscardFiles={handleGitDiscardFiles}
+            onGitViewDiff={handleGitViewDiff}
+            onGitCommit={handleGitCommit}
+            onGitPush={handleGitPush}
+            onGitPull={handleGitPull}
+            onGitAiCommitMessage={handleGitAiCommitMessage}
           />
         )}
 
@@ -5840,7 +6902,12 @@ export function App() {
                             : null
                         }
                         theme={theme}
-                        settings={settings}
+                        settings={effectiveSettings}
+                        tabSize={resolvedProjectConfig?.tabSize}
+                        indentWithTabs={resolvedProjectConfig?.indentWithTabs}
+                        onCopyRichText={handleCopyRichText}
+                        onOpenCitationModal={handleOpenCitationModal}
+                        onBareUrlPasted={handleBareUrlPasted}
                         isRecordingMacro={isRecordingMacro && activeEditorSlot === 'top'}
                         onRecordMacroStep={handleRecordMacroStep}
                       />
@@ -5922,7 +6989,12 @@ export function App() {
                             : null
                         }
                         theme={theme}
-                        settings={settings}
+                        settings={effectiveSettings}
+                        tabSize={resolvedProjectConfig?.tabSize}
+                        indentWithTabs={resolvedProjectConfig?.indentWithTabs}
+                        onCopyRichText={handleCopyRichText}
+                        onOpenCitationModal={handleOpenCitationModal}
+                        onBareUrlPasted={handleBareUrlPasted}
                         isRecordingMacro={isRecordingMacro && activeEditorSlot === 'bottom'}
                         onRecordMacroStep={handleRecordMacroStep}
                       />
@@ -5988,7 +7060,12 @@ export function App() {
                     }
                     syncHighlightRange={activePane === 'visual' ? previewSyncLineRange : null}
                     theme={theme}
-                    settings={settings}
+                    settings={effectiveSettings}
+                    tabSize={resolvedProjectConfig?.tabSize}
+                    indentWithTabs={resolvedProjectConfig?.indentWithTabs}
+                    onCopyRichText={handleCopyRichText}
+                    onOpenCitationModal={handleOpenCitationModal}
+                    onBareUrlPasted={handleBareUrlPasted}
                     isRecordingMacro={isRecordingMacro}
                     onRecordMacroStep={handleRecordMacroStep}
                   />
@@ -6105,7 +7182,7 @@ export function App() {
                       workspaceNotes={workspaceNotes}
                       onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                       theme={theme}
-                      settings={settings}
+                      settings={effectiveSettings}
                     />
                   ) : previewKind === 'webpage' ? (
                     <WebPagePreviewPane
@@ -6149,7 +7226,7 @@ export function App() {
                       detectedLanguageId={detectedLanguageId}
                       content={activeTab.content}
                       activeLine={activeTab.cursorLine}
-                      settings={settings}
+                      settings={effectiveSettings}
                       onCopyNotify={() => notify(t.toasts.copiedCode)}
                       onOpenBuiltinBrowser={() => {
                         setSettings((s) => ({ ...s, builtinBrowserEnabled: true }));
@@ -6175,7 +7252,7 @@ export function App() {
                       markdown={activeTab.content}
                       docPath={activeTab.filePath}
                       theme={theme}
-                      settings={settings}
+                      settings={effectiveSettings}
                       onMarkdownChange={(next, sourceDocId) =>
                         updateTabContentById(sourceDocId || activeTab.id, next)
                       }
@@ -6187,6 +7264,8 @@ export function App() {
                       onCopyNotify={(kind) =>
                         notify(kind === 'svg' ? t.toasts.copiedSvg : t.toasts.copiedCode)
                       }
+                      onDiagramExportNotify={handleDiagramExportNotify}
+                      diagramLabels={t.diagramExport}
                       onImagePasteOrDrop={handleImageFileInput}
                       activePane={activePane}
                       editorSyncLine={activeTab.cursorLine}
@@ -6243,7 +7322,7 @@ export function App() {
             onRestoreSnapshot={handleRestoreSnapshot}
             onDeleteSnapshot={handleDeleteSnapshot}
             onUpdateMarkdown={updateActiveContent}
-            settings={settings}
+            settings={effectiveSettings}
             onSettingsChange={setSettings}
             aiConfig={aiConfig}
             onAiConfigChange={setAiConfig}
@@ -6298,7 +7377,7 @@ export function App() {
             onRequestDiffPreview={setDiffPreview}
             onJumpToLine={(ln) => handleGoToLine(ln)}
             onApplyReviewFix={handleApplyReviewFix}
-            onOpenFullSettings={() => setShowSettings(true)}
+            onOpenFullSettings={() => openSettingsModal('general')}
           />
         )}
       </div>
@@ -6328,12 +7407,12 @@ export function App() {
           onToggleSyncScroll={() =>
             setSettings((s) => ({ ...s, syncScroll: !s.syncScroll }))
           }
-          wordGoal={settings.wordGoal}
+          wordGoal={effectiveSettings.wordGoal}
           zoomPercent={zoomPercent}
           onChangeZoom={handleSetZoom}
           topBarHidden={!isTopBarVisible}
           onSwitchToBasic={() => handleModeChange('basic')}
-          onOpenSettings={() => setShowSettings(true)}
+          onOpenSettings={() => openSettingsModal('general')}
           onOpenGoToLine={() => setShowGoToLine(true)}
           isRecordingMacro={isRecordingMacro}
           macroStepCount={recordingMacroSteps.length}
@@ -6367,6 +7446,7 @@ export function App() {
       <SettingsModal
         t={t}
         open={showSettings}
+        initialTab={settingsInitialTab}
         onClose={() => setShowSettings(false)}
         locale={locale}
         onLocaleChange={setLocale}
@@ -6378,6 +7458,19 @@ export function App() {
         externalPreviewLanUrls={externalPreviewLanUrls}
         onToggleExternalPreview={handleToggleExternalPreview}
         onCopyLanUrl={handleCopyLanUrl}
+        dataSummary={storedDataSummary}
+        onResetSelectedSettings={handleResetSelectedSettings}
+        onClearSelectedUserData={handleClearSelectedUserData}
+        customKeybindings={customKeybindings}
+        onCustomKeybindingsChange={setCustomKeybindings}
+        onExportBackupJson={handleExportBackupJson}
+        onReadBackupJsonFile={handleReadBackupJsonFile}
+        onApplyBackupImport={handleApplyBackupImport}
+        backupCounts={backupCounts}
+        workspaceRoot={workspaceRoot}
+        projectConfigInfo={projectConfigInfo}
+        onCreateOnigiriJson={handleCreateOnigiriJson}
+        onOpenProjectConfigFile={(p) => void openPathInTab(p)}
       />
 
       <ImageModal
@@ -6485,6 +7578,50 @@ export function App() {
         open={showWebClipModal}
         onClose={() => setShowWebClipModal(false)}
         onOpenClippedNote={handleOpenClippedNote}
+      />
+
+      <UnusedAssetsModal
+        t={t}
+        open={showUnusedAssetsModal}
+        workspaceRoot={workspaceRoot}
+        extraContents={unusedAssetExtraContents}
+        onClose={() => setShowUnusedAssetsModal(false)}
+        onDeleted={(count) => {
+          notify(t.unusedAssetsModal.deletedToast.replace('{count}', String(count)));
+          if (workspaceRoot) void refreshWorkspace(workspaceRoot);
+        }}
+      />
+
+      <CitationModal
+        t={t}
+        open={showCitationModal}
+        currentMarkdown={activeTab.content}
+        selectedText={citationSelectedText}
+        onClose={() => setShowCitationModal(false)}
+        onInsertInline={(text) => {
+          const ed = getActiveEditorTarget();
+          if (ed) {
+            ed.insertText(text);
+          } else {
+            updateActiveContent(activeTab.content + text);
+          }
+        }}
+        onInsertFootnote={handleInsertFootnote}
+      />
+
+      <KnowledgeGraphModal
+        t={t}
+        open={showKnowledgeGraphModal}
+        report={workspaceKnowledgeReport}
+        activeFilePath={activeTab.filePath}
+        onOpenFile={(fp, ln) => {
+          if (ln) {
+            void handleOpenFileAtLine(fp, ln);
+          } else {
+            void openPathInTab(fp);
+          }
+        }}
+        onClose={() => setShowKnowledgeGraphModal(false)}
       />
 
       {isDraggingFile && (

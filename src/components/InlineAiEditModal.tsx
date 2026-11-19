@@ -4,7 +4,7 @@ import type { AiProviderConfig, AiProviderId, InlineAiPresetItem } from '../type
 import type { Translations } from '../i18n/types';
 import { cancelAiChat, sendAiChat } from '../utils/platform';
 
-const INLINE_AI_PRESETS_KEY = 'onigiri-markdown.inline-ai-presets.v1';
+export const INLINE_AI_PRESETS_KEY = 'onigiri-markdown.inline-ai-presets.v1';
 
 const DEFAULT_BASE_URLS: Partial<Record<AiProviderId, string>> = {
   'openai-api': 'https://api.openai.com/v1',
@@ -97,8 +97,22 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
   const requestIdRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const skipNextPersistRef = useRef(true);
 
   useEffect(() => {
+    const onReset = () => {
+      skipNextPersistRef.current = true;
+      setPresets(loadSavedPresets(t));
+    };
+    window.addEventListener('onigiri:inline-ai-presets-reset', onReset);
+    return () => window.removeEventListener('onigiri:inline-ai-presets-reset', onReset);
+  }, [t]);
+
+  useEffect(() => {
+    if (skipNextPersistRef.current) {
+      skipNextPersistRef.current = false;
+      return;
+    }
     try {
       localStorage.setItem(INLINE_AI_PRESETS_KEY, JSON.stringify(presets));
     } catch {
@@ -174,6 +188,7 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
   };
 
   const handleResetPresets = () => {
+    skipNextPersistRef.current = true;
     setPresets(buildBuiltinPresets(t));
     try {
       localStorage.removeItem(INLINE_AI_PRESETS_KEY);

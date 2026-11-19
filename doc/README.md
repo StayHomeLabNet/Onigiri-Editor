@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.1.0)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.2.0)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -14,14 +14,14 @@
 
 1. [Getting Started & Language Settings](#1-getting-started--language-settings)
 2. [Three UI Modes, Dual Editor & Layout Controls](#2-three-ui-modes-dual-editor--layout-controls)
-3. [Markdown, Slash Commands, WikiLinks & Slide Mode](#3-markdown-slash-commands-wikilinks--slide-mode)
+3. [Markdown, Slash Commands, Citations, WikiLinks & Slide Mode](#3-markdown-slash-commands-citations-wikilinks--slide-mode)
 4. [Advanced Editing, Quick Open, Bookmarks & Context Menu](#4-advanced-editing-quick-open-bookmarks--context-menu)
 5. [Character Encodings & Line Endings (EOL)](#5-character-encodings--line-endings-eol)
 6. [Multi-Language Syntax Highlighting, Data & SVG/HTML Previews](#6-multi-language-syntax-highlighting-data--svghtml-previews)
-7. [Workspace, Knowledge Graph, Grep Replace & Session Restore](#7-workspace-knowledge-graph-grep-replace--session-restore)
+7. [Workspace, Knowledge Graph, Git Panel, Grep Replace & Project Config](#7-workspace-knowledge-graph-git-panel-grep-replace--project-config)
 8. [Dev Server Integration & Dual Browser Preview](#8-dev-server-integration--dual-browser-preview)
 9. [AI Chat, Inline Edit, Document Review & Formatting Tools](#9-ai-chat-inline-edit-document-review--formatting-tools)
-10. [Export, Themes & Settings Reference](#10-export-themes--settings-reference)
+10. [Export (`.docx` / HTML / PDF), Themes, Keybindings & Backup Settings](#10-export-docx--html--pdf-themes-keybindings--backup-settings)
 11. [Keyboard Shortcuts & Menu Bar Reference](#11-keyboard-shortcuts--menu-bar-reference)
 
 ---
@@ -61,7 +61,7 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 
 ---
 
-## 3. Markdown, Slash Commands, WikiLinks & Slide Mode
+## 3. Markdown, Slash Commands, Citations, WikiLinks & Slide Mode
 
 ### Bidirectional Sync (CodeMirror 6 ↔ TipTap)
 
@@ -75,9 +75,11 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 - **Auto Table of Contents (TOC)**: Run **Insert / Update Table of Contents (TOC)** from the Command Palette to insert or refresh a `<!-- toc -->` block from document headings.
 - **TSV Smart Table Paste & Formatter**: Pasting tab-separated spreadsheet cells automatically converts them into a formatted GFM table; run **Format Markdown Tables** from the Command Palette or Inspector anytime.
 
-### `[[WikiLinks]]`, Daily Notes, Templates & Web Clipper
+### `[[WikiLinks]]`, Citations, Footnotes, Daily Notes & Web Clipper
 
 - **`[[WikiLinks]]`**: Type `[[` in a workspace to autocomplete note names. Ctrl/Cmd-click (or follow the link in preview) to jump to or create the linked note.
+- **Citations, Link Cards, BibTeX / DOI Lookup & Footnotes**: Open **Insert Citation / Link Card / Footnote** from the Format Toolbar, Command Palette, or a custom shortcut to insert inline links, formatted link cards, auto-numbered footnotes (`[^N]`), parsed BibTeX entries (APA or Markdown styles), or Crossref DOI lookups.
+- **Smart URL Paste & Auto-Title**: Pasting a URL over selected text automatically wraps it as `[selection](url)`. When pasting a bare URL with no selection and **Auto-fetch webpage title** (`autoTitleOnUrlPaste`) is enabled, Onigiri Editor asynchronously fetches the webpage `<title>` and replaces the URL with `[Title](url)`.
 - **Daily Notes**: Click the **Daily Note** button in the TopBar/Sidebar (or run **Open / Create Today's Daily Note** in the Command Palette) to open or create `YYYY-MM-DD.md` inside your configured **Daily Notes Folder**.
 - **Document Templates**: Open **Templates & Daily Notes** from the TopBar (`+` / Template menu), Sidebar, or Command Palette. Supports built-in templates (**Meeting Notes**, **Technical Design Doc**, **ADR**, **Weekly/Daily Report**) and **Custom Templates** with `{{date}}`, `{{time}}`, and `{{title}}` variables.
 - **Web Clipper (URL → Markdown)**: Open **Clip Web Page URL to Markdown...** from the TopBar, Template menu, or Command Palette to fetch a webpage, strip navigation noise, resolve relative links/images, optionally attach YAML frontmatter, and open as a clean Markdown tab.
@@ -88,9 +90,9 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 - **Images & Clipboard Auto-Save**:
   - Paste screenshots (`⌘V` / `Ctrl+V`) or drag & drop image files directly onto the editor/preview to auto-save PNG/image assets to your configured **Image Asset Folder** (default `assets`, falls back to workspace root for unsaved tabs) and insert `![image](assets/...)`.
   - Drag files or images from the left **Sidebar tree** into the editor to automatically compute and insert a relative Markdown link or image tag.
-- **Extended Blocks**:
-  - **Math (KaTeX)**: Inline (`$ ... $`) and block (`$$ ... $$`) LaTeX math rendering.
-  - **Mermaid Diagrams**: Live rendering for `` ```mermaid `` code blocks with one-click SVG copy.
+- **Extended Blocks & SVG / PNG Export**:
+  - **Math (KaTeX)**: Inline (`$ ... $`) and block (`$$ ... $$`) LaTeX math rendering with **Copy LaTeX**, **Save SVG**, and **Save PNG** actions.
+  - **Mermaid Diagrams**: Live rendering for `` ```mermaid `` code blocks with **Copy SVG**, **Save SVG**, and **Save PNG** export (plus zoom modal export).
   - **GitHub Callouts**: Styled rendering for `> [!NOTE]`, `> [!TIP]`, `> [!IMPORTANT]`, `> [!WARNING]`, and `> [!CAUTION]`.
   - **YAML Frontmatter (Metadata)**: Open the **Metadata** tab in the right Options drawer to add frontmatter, edit key/value pairs, or toggle the metadata card at the top of the preview.
 
@@ -170,13 +172,14 @@ Right-click inside the editor to access:
 
 ---
 
-## 7. Workspace, Knowledge Graph, Grep Replace & Session Restore
+## 7. Workspace, Knowledge Graph, Git Panel, Grep Replace & Project Config
 
 ### Sidebar Tabs (Advanced Mode)
 
-- **Files Tab**: Browse a collapsible hierarchical folder tree with **Git status badges** (`M`, `A`, `D`, `?`), **Quick Action bar** (Daily Note, Templates, Workspace Grep), right-click context menu (New File/Folder, Open to Side, Compare with Git HEAD, Rename, Duplicate, Delete, Copy Path, Reveal), **Workspace Image Gallery Modal**, **drag-and-drop onto editor** for relative links, **Close Workspace Folder** (with active dev-server guard), and inline search/replace.
+- **Files Tab**: Browse a collapsible hierarchical folder tree with **Git status badges** (`M`, `A`, `D`, `?`), **Quick Action bar** (Daily Note, Templates, Workspace Grep, **Unused Images**), right-click context menu (New File/Folder, Open to Side, Compare with Git HEAD, Rename, Duplicate, Delete, Copy Path, Reveal), **Workspace Image Gallery Modal**, **Unused Image (Orphan Asset) Detector & Cleaner** (scans unreferenced workspace images with thumbnails & batch deletion), **drag-and-drop onto editor** for relative links, **Close Workspace Folder** (with active dev-server guard), and inline search/replace.
 - **Outline Tab**: Lists Markdown headings (`#` to `######`); click any heading to jump to it.
-- **Knowledge Tab**: Displays **Backlinks** (other notes in the workspace referencing the active note via `[[WikiLinks]]` or Markdown links) and a workspace-wide **`#Tag` Browser** (extracting Frontmatter & inline `#tags` to filter and jump to tagged lines).
+- **Knowledge Tab**: Displays **Backlinks** (other notes in the workspace referencing the active note via `[[WikiLinks]]` or Markdown links), a workspace-wide **`#Tag` Browser**, and a button to launch the **Interactive Knowledge Graph & Link Diagnostics Modal** (visualizes note connections with search/`#tag` filters, connected-only toggle, orphan stats, and clickable broken links that jump directly to the source line).
+- **Git Tab**: Dedicated **Git Source Control** panel with change-count badge, current branch & ahead/behind counters, **Staged / Unstaged / Untracked** file lists, **Stage / Unstage / Discard**, inline unified **Git Diff** viewer, **Commit**, **AI Generate** commit message button, **Pull / Push**, and **Recent Commits** log.
 - **Snippets Tab**: Manage **Custom Snippets** (add, edit, delete, persisted locally) alongside built-in Markdown/diagram snippets.
 
 ### Cross-Folder Regex Grep & Selective Replace (`⌘⇧G` / `Ctrl+Shift+G`)
@@ -184,10 +187,11 @@ Right-click inside the editor to access:
 - Open from the Sidebar Quick Bar, Command Palette, or `⌘⇧G` / `Ctrl+Shift+G`.
 - Search across the workspace with **Match Case** and **Regex** (`$1` capture support), inspect file-grouped matches, click any match to open the file at that line, and check/uncheck individual files before applying batch replacement (open tabs sync automatically).
 
-### Project-Scoped Session Restore, Git HEAD Diff & File Watching
+### Project Config (`.editorconfig` & `.onigiri.json`), Session Restore & File Watching
 
+- **Project Config (`.editorconfig` & `.onigiri.json`)**: Automatically resolves hierarchical `.editorconfig` and `.onigiri.json` settings (`tabSize`, `indentWithTabs`, EOL, encoding, `trimTrailingWhitespace`, `insertFinalNewline`, `imageAssetFolder`, `dailyNotesFolder`, `wordGoal`). You can also create or open `.onigiri.json` directly from **Settings → Editor & Line Copy**.
 - **Per-Project Session Restore**: Remembers open tabs, unsaved drafts, cursor & scroll positions, folded lines, bookmarks, language overrides, recent files/folders (synced to **File → Open Recent**), and window geometry per workspace folder.
-- **Git Integration**: Shows changed-file badges in the Sidebar and lets you **Compare Diff with Git HEAD** from the Tab Bar, Sidebar context menu, or Command Palette.
+- **Git HEAD Diff**: Right-click any tab or file in the Sidebar (or use the Command Palette) to **Compare Diff with Git HEAD**.
 - **External File Change Detection**: Watches open files on disk—auto-reloading clean tabs or displaying a conflict banner (**Reload**, **Compare Diff**, **Keep Mine**, **Save Again**) when unsaved edits exist.
 - **Snapshots & History Diff**: Save labeled checkpoints in the **History** Inspector tab and compare line-by-line diffs or restore earlier snapshots.
 
@@ -225,26 +229,30 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 ### Proofread & Document Review, Formatter & Stats
 
 - **Review Tab**: Run **Rule Checks** (broken local/anchor links, skipped heading levels, mixed writing style, repeated words, trailing spaces) or **Run AI Review**, click any finding to jump to its line, or click **Apply Fix**.
-- **Formatter Tab**: **AI Output Cleanup & Formatter**, **Paste Clipboard HTML as Markdown**, **Copy as Rich Text** (Notion / Google Docs / Slack ready).
+- **Formatter Tab**: **AI Output Cleanup & Formatter**, **Paste Clipboard HTML as Markdown**, **Copy as Rich Text** (inline-styled HTML + plain text for Notion / Google Docs / Slack / Word).
 - **Stats Tab**: Characters, words, lines, paragraphs, reading time, **Estimated AI Tokens**, element counts, and writing goal progress.
 
 ---
 
-## 10. Export, Themes & Settings Reference
+## 10. Export (`.docx` / HTML / PDF), Themes, Keybindings & Backup Settings
 
-- **Exports**: **Export HTML**, **Print / Export PDF** (Markdown preview or Source Code), **Export Plain Text**, **Copy Markdown / HTML / Rich Text**.
+- **Exports & Rich Copy**: **Export Word (`.docx`)**, **Export HTML**, **Print / Export PDF** (Markdown preview or Source Code), **Export Plain Text**, **Mermaid & KaTeX SVG / PNG Export**, **Copy as Rich Text** (selection or full document via Inspector, right-click menu, Command Palette, or custom shortcut), and **Copy Markdown / HTML**.
 - **Themes & Preview Styles**: `Light`, `Dark`, `Sepia`, `Midnight` + `Editorial`, `GitHub`, `Notion`, `Academic` + **Custom Preview CSS**.
 - **Settings Tabs (`⌘,` / `Ctrl+,`)**:
   - **General & View**: Language, Theme, Preview Style, Font Size, Line Height, Preview Width, Editor Font, Bar visibility toggles, Focus Mode, Session Restore, Auto-Save, Writing Goal, **Daily Notes Folder**, **Image Asset Folder**, Custom CSS.
-  - **Editor & Line Copy**: Line Numbers, Word Wrap & Column Width, Column Ruler, Visible Symbols, Matching Brackets, Auto-Close Brackets, Default Encoding/EOL, Active Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, Smart Line Copy.
+  - **Editor & Line Copy**: Line Numbers, Word Wrap & Column Width, Column Ruler, Visible Symbols, Matching Brackets, Auto-Close Brackets, Default Encoding/EOL, Active Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, **Auto-fetch webpage title on URL paste (`autoTitleOnUrlPaste`)**, Smart Line Copy, and **Project Config (`.editorconfig` / `.onigiri.json`)** status & quick creation.
   - **Syntax Colors**: 7 presets + 10 per-token color pickers.
+  - **Keybindings**: Interactive shortcut editor for 27 commands with search filter, conflict detection, clear, individual reset, and Reset All (dynamically reflected in Command Palette badges).
   - **AI & Browser**: AI Folder Access, Built-in Browser toggle & default URL, External Live Preview toggle, port, and LAN sharing.
+  - **Reset & Data**: **Export / Import JSON Backup** (selectively save/restore App & Editor settings, AI config & presets with optional API key exclusion, Custom Snippets, Templates, and Keybindings with merge/replace), **Reset Settings to Defaults**, and **Clear User Data & Caches**.
 
 ---
 
 ## 11. Keyboard Shortcuts & Menu Bar Reference
 
 ### Key Shortcuts
+
+> Most commands—including **Copy as Rich Text**, **Export Word (`.docx`)**, **Insert Citation / Link Card / Footnote**, **Open Knowledge Graph**, **Find Unused Workspace Images**, and **Open Git Panel**—can be freely customized or assigned in **Settings → Keybindings**.
 
 | Action | macOS | Windows / Linux |
 | :--- | :--- | :--- |

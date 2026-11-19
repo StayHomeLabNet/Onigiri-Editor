@@ -27,6 +27,9 @@ import {
   TextSearch,
   Focus,
   Wrench,
+  BookMarked,
+  Network,
+  Images,
 } from 'lucide-react';
 import type { AppMode, Locale, ThemeId, ViewLayout } from '../types';
 import type { Translations } from '../i18n/types';
@@ -52,6 +55,7 @@ interface TopBarProps {
   onSave: () => void;
   onExportHtml: () => void;
   onExportPdf: () => void;
+  onExportDocx?: () => void;
   onOpenCommandPalette: () => void;
   onToggleZen: () => void;
   onOpenSettings: () => void;
@@ -61,6 +65,9 @@ interface TopBarProps {
   onOpenTemplateModal?: () => void;
   onOpenWebClip?: () => void;
   onOpenWorkspaceGrep?: () => void;
+  onOpenCitationModal?: () => void;
+  onOpenKnowledgeGraph?: () => void;
+  onOpenUnusedAssets?: () => void;
   focusMode?: boolean;
   onToggleFocusMode?: () => void;
   isMarkdown?: boolean;
@@ -88,6 +95,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onSave,
   onExportHtml,
   onExportPdf,
+  onExportDocx,
   onOpenCommandPalette,
   onToggleZen,
   onOpenSettings,
@@ -97,6 +105,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenTemplateModal,
   onOpenWebClip,
   onOpenWorkspaceGrep,
+  onOpenCitationModal,
+  onOpenKnowledgeGraph,
+  onOpenUnusedAssets,
   focusMode,
   onToggleFocusMode,
   isMarkdown = true,
@@ -262,6 +273,9 @@ export const TopBar: React.FC<TopBarProps> = ({
               onOpenTemplateModal ||
               onOpenWebClip ||
               onOpenWorkspaceGrep ||
+              onOpenCitationModal ||
+              onOpenKnowledgeGraph ||
+              onOpenUnusedAssets ||
               onToggleFocusMode) && (
               <div className="dropdown-wrapper">
                 <button type="button" className="icon-btn" title={t.actions.newFromTemplate}>
@@ -286,10 +300,28 @@ export const TopBar: React.FC<TopBarProps> = ({
                       <span>{t.actions.webClipUrl}</span>
                     </button>
                   )}
+                  {onOpenCitationModal && (
+                    <button type="button" onClick={onOpenCitationModal}>
+                      <BookMarked size={13} />
+                      <span>{t.actions.insertCitation}</span>
+                    </button>
+                  )}
                   {onOpenWorkspaceGrep && (
                     <button type="button" onClick={onOpenWorkspaceGrep}>
                       <TextSearch size={13} />
                       <span>{t.actions.workspaceGrep}</span>
+                    </button>
+                  )}
+                  {onOpenKnowledgeGraph && (
+                    <button type="button" onClick={onOpenKnowledgeGraph}>
+                      <Network size={13} />
+                      <span>{t.actions.knowledgeGraph}</span>
+                    </button>
+                  )}
+                  {onOpenUnusedAssets && (
+                    <button type="button" onClick={onOpenUnusedAssets}>
+                      <Images size={13} />
+                      <span>{t.actions.findUnusedAssets}</span>
                     </button>
                   )}
                   {onOpenSlidePresentation && isMarkdown && (
@@ -330,6 +362,11 @@ export const TopBar: React.FC<TopBarProps> = ({
                 <button type="button" onClick={onExportPdf}>
                   {t.actions.exportPdf}
                 </button>
+                {onExportDocx && (
+                  <button type="button" onClick={onExportDocx}>
+                    {t.actions.exportDocx}
+                  </button>
+                )}
               </div>
             </div>
             <button

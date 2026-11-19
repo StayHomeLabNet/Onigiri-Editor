@@ -102,6 +102,11 @@ pub struct FetchedUrlContent {
 }
 
 fn is_supported_text_file(path: &Path) -> bool {
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if name.eq_ignore_ascii_case(".editorconfig") {
+            return true;
+        }
+    }
     let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
         return false;
     };
@@ -2204,6 +2209,761 @@ fn get_git_head_file(
     get_git_head_file_impl(root_path.as_deref(), &file_path)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearAppCacheResult {
+    removed_files: usize,
+    removed_bytes: u64,
+}
+
+fn clear_dir_contents(dir: &Path) -> (usize, u64) {
+    if !dir.exists() || !dir.is_dir() {
+        return (0, 0);
+    }
+    let mut removed_files = 0usize;
+    let mut removed_bytes = 0u64;
+    let Ok(entries) = fs::read_dir(dir) else {
+        return (0, 0);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let (sub_files, sub_bytes) = clear_dir_contents(&path);
+            removed_files += sub_files;
+            removed_bytes += sub_bytes;
+            let _ = fs::remove_dir(&path);
+        } else {
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            if fs::remove_file(&path).is_ok() {
+                removed_files += 1;
+                removed_bytes += size;
+            }
+        }
+    }
+    (removed_files, removed_bytes)
+}
+
+fn clear_temp_prefix_files(temp_dir: &Path) -> (usize, u64) {
+    if !temp_dir.exists() || !temp_dir.is_dir() {
+        return (0, 0);
+    }
+    let mut removed_files = 0usize;
+    let mut removed_bytes = 0u64;
+    let Ok(entries) = fs::read_dir(temp_dir) else {
+        return (0, 0);
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if name.starts_with("onigiri_ai_setup_")
+            || name.starts_with("onigiri_project_setup.")
+            || name.starts_with("onigiri_codex_")
+        {
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            if fs::remove_file(&path).is_ok() {
+                removed_files += 1;
+                removed_bytes += size;
+            }
+        }
+    }
+    (removed_files, removed_bytes)
+}
+
+#[tauri::command]
+fn clear_app_caches(app: tauri::AppHandle) -> Result<ClearAppCacheResult, String> {
+    let mut removed_files = 0usize;
+    let mut removed_bytes = 0u64;
+
+    let temp_dir = std::env::temp_dir();
+    let (img_files, img_bytes) = clear_dir_contents(&temp_dir.join("onigiri-markdown-images"));
+    removed_files += img_files;
+    removed_bytes += img_bytes;
+
+    let (tmp_files, tmp_bytes) = clear_temp_prefix_files(&temp_dir);
+    removed_files += tmp_files;
+    removed_bytes += tmp_bytes;
+
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
+        let (cache_files, cache_bytes) = clear_dir_contents(&cache_dir);
+        removed_files += cache_files;
+        removed_bytes += cache_bytes;
+    }
+
+    Ok(ClearAppCacheResult {
+        removed_files,
+        removed_bytes,
+    })
+}
+
+#[tauri::command]
+fn reset_window_state(app: tauri::AppHandle) -> Result<(), String> {
+    window_state::reset_main_window_state(&app)
+}
+
+#[tauri::command]
+fn write_binary_file(path: String, data_base64: String) -> Result<(), String> {
+    let bytes = BASE64
+        .decode(data_base64.trim())
+        .map_err(|e| format!("Invalid base64 payload: {}", e))?;
+    if let Some(parent) = Path::new(&path).parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create parent folder: {}", e))?;
+        }
+    }
+    fs::write(&path, bytes).map_err(|e| format!("Failed to write {}: {}", path, e))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnusedAssetEntry {
+    path: String,
+    relative_path: String,
+    name: String,
+    size: u64,
+    modified_ms: u64,
+}
+
+fn is_reference_scan_text_file(path: &Path) -> bool {
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "md" | "markdown" | "mdown" | "mdx" | "txt" | "html" | "htm" | "json" | "yaml" | "yml"
+    )
+}
+
+fn find_unused_workspace_assets_impl(
+    root_path: &str,
+    extra_contents: &[String],
+) -> Result<Vec<UnusedAssetEntry>, String> {
+    let root = PathBuf::from(root_path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {}", e))?;
+
+    let mut image_entries: Vec<UnusedAssetEntry> = Vec::new();
+    let mut doc_texts: Vec<(String, String)> = Vec::new(); // (doc_rel_dir, normalized_text)
+
+    let walker = WalkDir::new(&root)
+        .max_depth(8)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true;
+            }
+            if e.file_type().is_dir() {
+                let name = e.file_name().to_string_lossy();
+                return !should_skip_dir(&name);
+            }
+            true
+        });
+
+    for entry in walker.flatten() {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(rel) = path.strip_prefix(&root) else {
+            continue;
+        };
+        let rel_posix = rel.to_string_lossy().replace('\\', "/");
+        if is_supported_image_file(path)
+            || path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("svg"))
+                .unwrap_or(false)
+        {
+            let meta = entry.metadata().ok();
+            let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified_ms = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let name = path
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            image_entries.push(UnusedAssetEntry {
+                path: path.to_string_lossy().to_string(),
+                relative_path: rel_posix,
+                name,
+                size,
+                modified_ms,
+            });
+        } else if is_reference_scan_text_file(path) {
+            if let Ok(meta) = entry.metadata() {
+                if meta.len() > 4 * 1024 * 1024 {
+                    continue;
+                }
+            }
+            if let Ok(bytes) = fs::read(path) {
+                if let Ok(decoded) = decode_bytes_with_encoding(&bytes, None) {
+                    let doc_dir = Path::new(&rel_posix)
+                        .parent()
+                        .map(|p| p.to_string_lossy().replace('\\', "/"))
+                        .unwrap_or_default();
+                    let lower = decoded
+                        .content
+                        .replace("%20", " ")
+                        .replace('\\', "/")
+                        .to_ascii_lowercase();
+                    doc_texts.push((doc_dir.to_ascii_lowercase(), lower));
+                }
+            }
+        }
+    }
+
+    for extra in extra_contents {
+        if !extra.trim().is_empty() {
+            doc_texts.push((
+                String::new(),
+                extra.replace("%20", " ").replace('\\', "/").to_ascii_lowercase(),
+            ));
+        }
+    }
+
+    let mut unused = Vec::new();
+    for img in image_entries {
+        let rel_lower = img.relative_path.to_ascii_lowercase();
+        let name_lower = img.name.to_ascii_lowercase();
+        let encoded_rel = rel_lower.replace(' ', "%20");
+        let encoded_name = name_lower.replace(' ', "%20");
+
+        let mut is_used = false;
+        for (doc_dir, text) in &doc_texts {
+            // 1. Direct workspace-relative or filename match inside markdown/html text
+            if text.contains(&rel_lower)
+                || text.contains(&encoded_rel)
+                || text.contains(&name_lower)
+                || text.contains(&encoded_name)
+            {
+                is_used = true;
+                break;
+            }
+            // 2. Relative from doc_dir (if doc is inside same subtree)
+            if !doc_dir.is_empty() {
+                if let Some(stripped) = rel_lower.strip_prefix(&format!("{}/", doc_dir)) {
+                    if text.contains(stripped) {
+                        is_used = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !is_used {
+            unused.push(img);
+        }
+    }
+
+    unused.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms).then_with(|| a.relative_path.cmp(&b.relative_path)));
+    Ok(unused)
+}
+
+#[tauri::command]
+async fn find_unused_workspace_assets(
+    root_path: String,
+    extra_contents: Option<Vec<String>>,
+) -> Result<Vec<UnusedAssetEntry>, String> {
+    let extras = extra_contents.unwrap_or_default();
+    tauri::async_runtime::spawn_blocking(move || find_unused_workspace_assets_impl(&root_path, &extras))
+        .await
+        .map_err(|e| format!("Unused asset scan failed: {}", e))?
+}
+
+fn delete_workspace_files_impl(
+    root_path: &str,
+    paths: &[String],
+) -> Result<ClearAppCacheResult, String> {
+    let root = PathBuf::from(root_path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {}", e))?;
+    let mut removed_files = 0usize;
+    let mut removed_bytes = 0u64;
+    for raw in paths {
+        let Ok(target) = PathBuf::from(raw).canonicalize() else {
+            continue;
+        };
+        if !target.starts_with(&root) || target == root || !target.is_file() {
+            continue;
+        }
+        let size = fs::metadata(&target).map(|m| m.len()).unwrap_or(0);
+        if fs::remove_file(&target).is_ok() {
+            removed_files += 1;
+            removed_bytes += size;
+        }
+    }
+    Ok(ClearAppCacheResult {
+        removed_files,
+        removed_bytes,
+    })
+}
+
+#[tauri::command]
+fn delete_workspace_files(
+    root_path: String,
+    paths: Vec<String>,
+) -> Result<ClearAppCacheResult, String> {
+    delete_workspace_files_impl(&root_path, &paths)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorkingFile {
+    path: String,
+    relative_path: String,
+    index_status: String,
+    worktree_status: String,
+    staged: bool,
+    unstaged: bool,
+    untracked: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitSummary {
+    hash: String,
+    message: String,
+    author: String,
+    date: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPanelState {
+    is_repo: bool,
+    branch: Option<String>,
+    ahead: u32,
+    behind: u32,
+    has_remote: bool,
+    files: Vec<GitWorkingFile>,
+    recent_commits: Vec<GitCommitSummary>,
+}
+
+fn resolve_git_repo_and_root(root_path: &str) -> Result<(PathBuf, PathBuf), String> {
+    let root_canon = PathBuf::from(root_path)
+        .canonicalize()
+        .map_err(|e| format!("Invalid workspace root: {}", e))?;
+    let top_out = run_git_command(&root_canon, &["rev-parse", "--show-toplevel"])?;
+    if !top_out.status.success() {
+        return Err("Not inside a Git repository".to_string());
+    }
+    let top_raw = String::from_utf8_lossy(&top_out.stdout).trim().to_string();
+    let repo_top = PathBuf::from(&top_raw)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(&top_raw));
+    Ok((root_canon, repo_top))
+}
+
+fn validate_git_rel_paths(
+    root_canon: &Path,
+    repo_top: &Path,
+    paths: &[String],
+) -> Result<Vec<String>, String> {
+    let mut repo_rels = Vec::new();
+    for raw in paths {
+        let p = Path::new(raw);
+        let candidate = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            root_canon.join(raw.replace('/', std::path::MAIN_SEPARATOR_STR))
+        };
+        let resolved = candidate.canonicalize().unwrap_or(candidate);
+        if !resolved.starts_with(repo_top) {
+            return Err("Path escapes git repository".to_string());
+        }
+        let rel = resolved
+            .strip_prefix(repo_top)
+            .map_err(|_| "Path outside repository".to_string())?;
+        repo_rels.push(rel.to_string_lossy().replace('\\', "/"));
+    }
+    Ok(repo_rels)
+}
+
+fn get_git_panel_state_impl(root_path: &str) -> GitPanelState {
+    let Ok((root_canon, repo_top)) = resolve_git_repo_and_root(root_path) else {
+        return GitPanelState {
+            is_repo: false,
+            branch: None,
+            ahead: 0,
+            behind: 0,
+            has_remote: false,
+            files: Vec::new(),
+            recent_commits: Vec::new(),
+        };
+    };
+
+    let branch = run_git_command(&repo_top, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let has_remote = run_git_command(&repo_top, &["remote"])
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
+        .unwrap_or(false);
+
+    let mut ahead = 0u32;
+    let mut behind = 0u32;
+    if let Ok(ab) = run_git_command(&repo_top, &["rev-list", "--left-right", "--count", "HEAD...@{u}"]) {
+        if ab.status.success() {
+            let txt = String::from_utf8_lossy(&ab.stdout);
+            let parts: Vec<&str> = txt.split_whitespace().collect();
+            if parts.len() == 2 {
+                ahead = parts[0].parse::<u32>().unwrap_or(0);
+                behind = parts[1].parse::<u32>().unwrap_or(0);
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    if let Ok(status_out) = run_git_command(&repo_top, &["status", "--porcelain=v1", "-z", "-uall"]) {
+        if status_out.status.success() {
+            let tokens: Vec<&[u8]> = status_out.stdout.split(|&b| b == 0).collect();
+            let mut i = 0;
+            while i < tokens.len() {
+                let tok = tokens[i];
+                i += 1;
+                if tok.len() < 4 {
+                    continue;
+                }
+                let s = String::from_utf8_lossy(tok);
+                let mut chars = s.chars();
+                let Some(x) = chars.next() else { continue };
+                let Some(y) = chars.next() else { continue };
+                let Some(_sp) = chars.next() else { continue };
+                let rel_from_repo: String = chars.collect();
+                if rel_from_repo.is_empty() {
+                    continue;
+                }
+                if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
+                    i += 1;
+                }
+                let abs_candidate =
+                    repo_top.join(rel_from_repo.replace('/', std::path::MAIN_SEPARATOR_STR));
+                let display_rel = if let Ok(stripped) = abs_candidate.strip_prefix(&root_canon) {
+                    stripped.to_string_lossy().replace('\\', "/")
+                } else {
+                    rel_from_repo.clone()
+                };
+                let untracked = x == '?' && y == '?';
+                let staged = !untracked && x != ' ';
+                let unstaged = untracked || y != ' ';
+                files.push(GitWorkingFile {
+                    path: abs_candidate.to_string_lossy().to_string(),
+                    relative_path: display_rel,
+                    index_status: x.to_string(),
+                    worktree_status: y.to_string(),
+                    staged,
+                    unstaged,
+                    untracked,
+                });
+            }
+        }
+    }
+
+    let mut recent_commits = Vec::new();
+    if let Ok(log_out) = run_git_command(
+        &repo_top,
+        &["log", "-n", "10", "--pretty=format:%h\x1f%s\x1f%an\x1f%cr"],
+    ) {
+        if log_out.status.success() {
+            let log_str = String::from_utf8_lossy(&log_out.stdout);
+            for line in log_str.lines() {
+                let cols: Vec<&str> = line.split('\x1f').collect();
+                if cols.len() >= 4 {
+                    recent_commits.push(GitCommitSummary {
+                        hash: cols[0].to_string(),
+                        message: cols[1].to_string(),
+                        author: cols[2].to_string(),
+                        date: cols[3].to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    GitPanelState {
+        is_repo: true,
+        branch,
+        ahead,
+        behind,
+        has_remote,
+        files,
+        recent_commits,
+    }
+}
+
+#[tauri::command]
+fn get_git_panel_state(root_path: String) -> GitPanelState {
+    get_git_panel_state_impl(&root_path)
+}
+
+fn git_stage_files_impl(root_path: &str, paths: &[String]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let (root_canon, repo_top) = resolve_git_repo_and_root(root_path)?;
+    let rels = validate_git_rel_paths(&root_canon, &repo_top, paths)?;
+    let mut args: Vec<&str> = vec!["add", "-A", "--"];
+    for r in &rels {
+        args.push(r.as_str());
+    }
+    let out = run_git_command(&repo_top, &args)?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_stage_files(root_path: String, paths: Vec<String>) -> Result<(), String> {
+    git_stage_files_impl(&root_path, &paths)
+}
+
+fn git_unstage_files_impl(root_path: &str, paths: &[String]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let (root_canon, repo_top) = resolve_git_repo_and_root(root_path)?;
+    let rels = validate_git_rel_paths(&root_canon, &repo_top, paths)?;
+    let has_head = run_git_command(&repo_top, &["rev-parse", "--verify", "HEAD"])
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let mut args: Vec<&str> = if has_head {
+        vec!["reset", "HEAD", "--"]
+    } else {
+        vec!["rm", "--cached", "--"]
+    };
+    for r in &rels {
+        args.push(r.as_str());
+    }
+    let out = run_git_command(&repo_top, &args)?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn git_unstage_files(root_path: String, paths: Vec<String>) -> Result<(), String> {
+    git_unstage_files_impl(&root_path, &paths)
+}
+
+#[tauri::command]
+fn git_discard_files(root_path: String, paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let (root_canon, repo_top) = resolve_git_repo_and_root(&root_path)?;
+    let rels = validate_git_rel_paths(&root_canon, &repo_top, &paths)?;
+    for rel in rels {
+        let abs = repo_top.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        // Check if file is tracked
+        let tracked = run_git_command(&repo_top, &["ls-files", "--error-unmatch", "--", &rel])
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if tracked {
+            let out = run_git_command(&repo_top, &["checkout", "--", &rel])?;
+            if !out.status.success() {
+                return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+            }
+        } else if abs.exists() && abs.is_file() {
+            fs::remove_file(&abs).map_err(|e| format!("Failed to remove untracked file: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+fn git_get_diff_impl(
+    root_path: &str,
+    staged: bool,
+    file_path: Option<&str>,
+) -> Result<String, String> {
+    let (root_canon, repo_top) = resolve_git_repo_and_root(root_path)?;
+    let mut args: Vec<String> = vec!["diff".to_string()];
+    if staged {
+        args.push("--cached".to_string());
+    }
+    if let Some(fp) = file_path {
+        if !fp.trim().is_empty() {
+            let rels = validate_git_rel_paths(&root_canon, &repo_top, &[fp.to_string()])?;
+            args.push("--".to_string());
+            args.extend(rels);
+        }
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = run_git_command(&repo_top, &arg_refs)?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+#[tauri::command]
+fn git_get_diff(
+    root_path: String,
+    staged: bool,
+    file_path: Option<String>,
+) -> Result<String, String> {
+    git_get_diff_impl(&root_path, staged, file_path.as_deref())
+}
+
+fn git_commit_impl(root_path: &str, message: &str) -> Result<String, String> {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return Err("Commit message is empty".to_string());
+    }
+    let (_root_canon, repo_top) = resolve_git_repo_and_root(root_path)?;
+    let out = run_git_command(&repo_top, &["commit", "-m", trimmed])?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        return Err(if err.is_empty() { stdout } else { err });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[tauri::command]
+fn git_commit(root_path: String, message: String) -> Result<String, String> {
+    git_commit_impl(&root_path, &message)
+}
+
+#[tauri::command]
+async fn git_push(root_path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let (_root_canon, repo_top) = resolve_git_repo_and_root(&root_path)?;
+        let out = run_git_command(&repo_top, &["push"])?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            return Err(if err.is_empty() { stdout } else { err });
+        }
+        let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(if !stdout.is_empty() { stdout } else { msg })
+    })
+    .await
+    .map_err(|e| format!("Git push failed: {}", e))?
+}
+
+#[tauri::command]
+async fn git_pull(root_path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let (_root_canon, repo_top) = resolve_git_repo_and_root(&root_path)?;
+        let out = run_git_command(&repo_top, &["pull"])?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            return Err(if err.is_empty() { stdout } else { err });
+        }
+        let msg = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(msg)
+    })
+    .await
+    .map_err(|e| format!("Git pull failed: {}", e))?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorConfigFileEntry {
+    dir: String,
+    content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectConfigBundle {
+    onigiri_json: Option<String>,
+    onigiri_json_path: Option<String>,
+    editorconfigs: Vec<EditorConfigFileEntry>,
+}
+
+fn read_project_config_bundle_impl(
+    workspace_root: Option<&str>,
+    target_path: Option<&str>,
+) -> ProjectConfigBundle {
+    let root_canon = workspace_root.and_then(|r| PathBuf::from(r).canonicalize().ok());
+    let mut onigiri_json = None;
+    let mut onigiri_json_path = None;
+    if let Some(ref root) = root_canon {
+        let cfg_path = root.join(".onigiri.json");
+        if cfg_path.is_file() {
+            if let Ok(txt) = fs::read_to_string(&cfg_path) {
+                onigiri_json = Some(txt);
+                onigiri_json_path = Some(cfg_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    let start_dir: Option<PathBuf> = target_path
+        .and_then(|tp| {
+            let p = PathBuf::from(tp);
+            if p.exists() {
+                p.canonicalize().ok()
+            } else {
+                p.parent().and_then(|par| par.canonicalize().ok())
+            }
+        })
+        .map(|p| if p.is_file() { p.parent().unwrap_or(&p).to_path_buf() } else { p })
+        .or_else(|| root_canon.clone());
+
+    let mut editorconfigs = Vec::new();
+    if let Some(mut cur) = start_dir {
+        let mut guard = 0usize;
+        while guard < 16 {
+            guard += 1;
+            let ec_path = cur.join(".editorconfig");
+            if ec_path.is_file() {
+                if let Ok(content) = fs::read_to_string(&ec_path) {
+                    editorconfigs.push(EditorConfigFileEntry {
+                        dir: cur.to_string_lossy().to_string(),
+                        content,
+                    });
+                }
+            }
+            if let Some(ref root) = root_canon {
+                if &cur == root {
+                    break;
+                }
+            }
+            let Some(parent) = cur.parent() else {
+                break;
+            };
+            if parent == cur {
+                break;
+            }
+            cur = parent.to_path_buf();
+        }
+    }
+    // Order from outermost ancestor down to target directory so standard overrides apply naturally
+    editorconfigs.reverse();
+
+    ProjectConfigBundle {
+        onigiri_json,
+        onigiri_json_path,
+        editorconfigs,
+    }
+}
+
+#[tauri::command]
+fn read_project_config_bundle(
+    workspace_root: Option<String>,
+    target_path: Option<String>,
+) -> ProjectConfigBundle {
+    read_project_config_bundle_impl(workspace_root.as_deref(), target_path.as_deref())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut initial_files = Vec::new();
@@ -2283,6 +3043,7 @@ pub fn run() {
             read_text_file,
             read_text_file_with_encoding,
             write_text_file,
+            write_binary_file,
             read_clipboard_text,
             write_clipboard_text,
             scan_workspace,
@@ -2299,6 +3060,8 @@ pub fn run() {
             rename_workspace_entry,
             duplicate_workspace_file,
             delete_workspace_entry,
+            delete_workspace_files,
+            find_unused_workspace_assets,
             replace_in_workspace,
             take_initial_files,
             read_image_data_url,
@@ -2307,6 +3070,15 @@ pub fn run() {
             get_os_locale,
             get_git_status,
             get_git_head_file,
+            get_git_panel_state,
+            git_stage_files,
+            git_unstage_files,
+            git_discard_files,
+            git_get_diff,
+            git_commit,
+            git_push,
+            git_pull,
+            read_project_config_bundle,
             ai::detect_ai_capabilities,
             ai::list_subscription_models,
             ai::list_local_models,
@@ -2329,7 +3101,9 @@ pub fn run() {
             project::start_project_dev_server,
             project::stop_project_dev_server,
             project::get_project_dev_server_status,
-            project::assist_project_setup
+            project::assist_project_setup,
+            clear_app_caches,
+            reset_window_state
         ])
         .build(tauri::generate_context!())
         .expect("error while building Onigiri Editor");
@@ -2665,6 +3439,128 @@ mod tests {
                 get_git_head_file_impl(Some(&root_str), &base.join("new.md").to_string_lossy())
                     .unwrap();
             assert!(!head_untracked.exists_in_head);
+        }
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn clear_dir_and_temp_prefix_cleanup_works() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_cache_clean_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let sub = base.join("nested");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(base.join("img1.png"), b"12345").unwrap();
+        fs::write(sub.join("img2.png"), b"67890").unwrap();
+
+        let (files, bytes) = clear_dir_contents(&base);
+        assert_eq!(files, 2);
+        assert_eq!(bytes, 10);
+        assert!(base.exists());
+        assert!(!sub.exists());
+
+        fs::write(base.join("onigiri_ai_setup_123.sh"), b"echo hi").unwrap();
+        fs::write(base.join("onigiri_project_setup.sh"), b"echo dev").unwrap();
+        fs::write(base.join("unrelated.txt"), b"keep").unwrap();
+        let (tfiles, tbytes) = clear_temp_prefix_files(&base);
+        assert_eq!(tfiles, 2);
+        assert_eq!(tbytes, 15);
+        assert!(base.join("unrelated.txt").exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn unused_assets_scan_and_delete_works_safely() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_unused_assets_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let assets = base.join("assets");
+        fs::create_dir_all(&assets).unwrap();
+        let used_img = assets.join("used.png");
+        let unsaved_img = assets.join("unsaved_tab.png");
+        let unused_img = assets.join("orphan.png");
+        fs::write(&used_img, b"used-bytes").unwrap();
+        fs::write(&unsaved_img, b"unsaved-bytes").unwrap();
+        fs::write(&unused_img, b"orphan-123456").unwrap();
+        fs::write(base.join("doc.md"), "# Doc\n![alt](assets/used.png)\n").unwrap();
+
+        let root_str = base.to_string_lossy().to_string();
+        let found = find_unused_workspace_assets_impl(
+            &root_str,
+            &["Draft with ![draft](assets/unsaved_tab.png)".to_string()],
+        )
+        .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "orphan.png");
+
+        let del = delete_workspace_files_impl(
+            &root_str,
+            &[unused_img.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        assert_eq!(del.removed_files, 1);
+        assert_eq!(del.removed_bytes, 13);
+        assert!(used_img.exists());
+        assert!(!unused_img.exists());
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn git_panel_stage_diff_commit_and_project_config_work() {
+        let base = std::env::temp_dir().join(format!(
+            "onigiri_git_panel_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let nested = base.join("docs");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(base.join(".editorconfig"), "root = true\n[*]\nindent_size = 2\n").unwrap();
+        fs::write(nested.join(".editorconfig"), "[*.md]\nindent_size = 4\n").unwrap();
+        fs::write(base.join(".onigiri.json"), "{\"imageAssetFolder\":\"img\"}\n").unwrap();
+
+        let root_str = base.to_string_lossy().to_string();
+        let target_md = nested.join("note.md");
+        fs::write(&target_md, "# Note\n").unwrap();
+
+        let bundle = read_project_config_bundle_impl(
+            Some(&root_str),
+            Some(&target_md.to_string_lossy()),
+        );
+        assert!(bundle.onigiri_json.is_some());
+        assert_eq!(bundle.editorconfigs.len(), 2);
+
+        if std::process::Command::new("git").arg("--version").output().is_ok() {
+            let _ = run_git_command(&base, &["init"]);
+            let _ = run_git_command(&base, &["config", "user.name", "Tester"]);
+            let _ = run_git_command(&base, &["config", "user.email", "tester@example.com"]);
+            git_stage_files_impl(&root_str, &["docs/note.md".to_string()]).unwrap();
+            let state1 = get_git_panel_state_impl(&root_str);
+            assert!(state1.is_repo);
+            assert!(state1.files.iter().any(|f| f.relative_path == "docs/note.md" && f.staged));
+            let _ = git_commit_impl(&root_str, "Add note").unwrap();
+
+            fs::write(&target_md, "# Updated Note\n").unwrap();
+            let diff_unstaged = git_get_diff_impl(&root_str, false, Some("docs/note.md")).unwrap();
+            assert!(diff_unstaged.contains("Updated Note"));
+            git_stage_files_impl(&root_str, &["docs/note.md".to_string()]).unwrap();
+            let diff_staged = git_get_diff_impl(&root_str, true, Some("docs/note.md")).unwrap();
+            assert!(diff_staged.contains("Updated Note"));
+            git_unstage_files_impl(&root_str, &["docs/note.md".to_string()]).unwrap();
+            let state2 = get_git_panel_state_impl(&root_str);
+            assert!(state2.files.iter().any(|f| f.relative_path == "docs/note.md" && !f.staged && f.unstaged));
         }
 
         let _ = fs::remove_dir_all(&base);

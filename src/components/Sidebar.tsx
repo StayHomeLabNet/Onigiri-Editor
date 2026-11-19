@@ -34,8 +34,19 @@ import {
   CalendarDays,
   FileStack,
   TextSearch,
+  Images,
+  Sparkles,
+  ArrowUp,
+  ArrowDown,
+  Undo2,
+  Minus,
+  Eye,
+  AlertTriangle,
+  FileQuestion,
+  Check,
 } from 'lucide-react';
 import type {
+  GitPanelState,
   HeadingItem,
   Locale,
   ProjectInfo,
@@ -53,7 +64,11 @@ import {
   saveCustomSnippets,
   type CustomSnippetRecord,
 } from '../utils/snippets';
-import { buildTagSummaries, findBacklinksForNote } from '../utils/knowledge';
+import {
+  buildTagSummaries,
+  buildWorkspaceKnowledgeReport,
+  findBacklinksForNote,
+} from '../utils/knowledge';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 
 const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
@@ -278,6 +293,21 @@ interface SidebarProps {
   onOpenWorkspaceGrepModal?: () => void;
   onOpenDailyNote?: () => void;
   onOpenTemplateModal?: () => void;
+  onOpenUnusedAssets?: () => void;
+  onOpenKnowledgeGraph?: () => void;
+  gitPanelState?: GitPanelState | null;
+  gitBusy?: boolean;
+  gitDiffTarget?: { path: string; staged: boolean; content: string } | null;
+  onCloseGitDiff?: () => void;
+  onRefreshGitPanel?: () => void;
+  onGitStageFiles?: (paths: string[]) => void;
+  onGitUnstageFiles?: (paths: string[]) => void;
+  onGitDiscardFiles?: (paths: string[]) => void;
+  onGitViewDiff?: (path: string, staged: boolean) => void;
+  onGitCommit?: (message: string) => Promise<boolean> | boolean;
+  onGitPush?: () => void;
+  onGitPull?: () => void;
+  onGitAiCommitMessage?: () => Promise<string>;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -337,10 +367,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenWorkspaceGrepModal,
   onOpenDailyNote,
   onOpenTemplateModal,
+  onOpenUnusedAssets,
+  onOpenKnowledgeGraph,
+  gitPanelState,
+  gitBusy = false,
+  gitDiffTarget,
+  onCloseGitDiff,
+  onRefreshGitPanel,
+  onGitStageFiles,
+  onGitUnstageFiles,
+  onGitDiscardFiles,
+  onGitViewDiff,
+  onGitCommit,
+  onGitPush,
+  onGitPull,
+  onGitAiCommitMessage,
 }) => {
   const [fileFilter, setFileFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [aiCommitBusy, setAiCommitBusy] = useState(false);
   const [showReplace, setShowReplace] = useState(false);
   const [replaceQuery, setReplaceQuery] = useState('');
   const [replaceCaseSensitive, setReplaceCaseSensitive] = useState(false);
@@ -646,6 +693,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     [selectedTag, tagSummaries]
   );
 
+  const knowledgeReport = useMemo(() => {
+    const relPaths = entries.filter((e) => !e.isDir).map((e) => e.relativePath);
+    return buildWorkspaceKnowledgeReport(noteIndexEntries, relPaths);
+  }, [noteIndexEntries, entries]);
+
+  const stagedFiles = useMemo(
+    () => (gitPanelState?.files || []).filter((f) => f.staged),
+    [gitPanelState]
+  );
+  const unstagedFiles = useMemo(
+    () => (gitPanelState?.files || []).filter((f) => f.unstaged || f.untracked),
+    [gitPanelState]
+  );
+  const gitChangeCount = gitPanelState?.files?.length ?? Object.keys(gitStatusEntries).length;
+
   const handleNewNote = () => {
     const name = window.prompt(t.sidebar.newFilePrompt, 'note.md');
     if (name && name.trim()) {
@@ -722,6 +784,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         >
           <Puzzle size={14} />
           <span>{t.sidebar.snippets}</span>
+        </button>
+        <button
+          type="button"
+          className={`sidebar-tab-btn ${activeTab === 'git' ? 'is-active' : ''}`}
+          onClick={() => onTabChange('git')}
+          title={t.sidebar.git}
+        >
+          <GitBranch size={14} />
+          <span>{t.sidebar.git}</span>
+          {gitChangeCount > 0 && <span className="sidebar-tab-badge">{gitChangeCount}</span>}
         </button>
       </div>
 
@@ -899,7 +971,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
 
-                {(onOpenDailyNote || onOpenTemplateModal || onOpenWorkspaceGrepModal) && (
+                {(onOpenDailyNote ||
+                  onOpenTemplateModal ||
+                  onOpenWorkspaceGrepModal ||
+                  onOpenUnusedAssets) && (
                   <div className="sidebar-quick-bar">
                     {onOpenDailyNote && (
                       <button
@@ -932,6 +1007,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       >
                         <TextSearch size={12} />
                         <span>{t.sidebar.openWorkspaceGrepBtn}</span>
+                      </button>
+                    )}
+                    {onOpenUnusedAssets && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn"
+                        onClick={onOpenUnusedAssets}
+                        title={t.actions.findUnusedAssets}
+                      >
+                        <Images size={12} />
+                        <span>{t.sidebar.unusedAssetsBtn}</span>
                       </button>
                     )}
                   </div>
@@ -1365,6 +1451,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="muted-msg">{t.sidebar.openFolderForKnowledge}</div>
             ) : (
               <>
+                {onOpenKnowledgeGraph && (
+                  <div className="sidebar-knowledge-graph-launch">
+                    <button
+                      type="button"
+                      className="primary-btn is-full"
+                      onClick={onOpenKnowledgeGraph}
+                    >
+                      <Network size={14} />
+                      <span>{t.sidebar.openKnowledgeGraphBtn}</span>
+                    </button>
+                    <div className="sidebar-knowledge-summary-pills">
+                      <span>{knowledgeReport.nodes.length} notes</span>
+                      <span>{knowledgeReport.edges.length} links</span>
+                      {knowledgeReport.brokenLinks.length > 0 && (
+                        <span className="is-warn">{knowledgeReport.brokenLinks.length} broken</span>
+                      )}
+                      {knowledgeReport.orphanNotes.length > 0 && (
+                        <span>{knowledgeReport.orphanNotes.length} orphan</span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="sidebar-knowledge-block">
                   <div className="sidebar-knowledge-head">
                     <span className="sub-label">
@@ -1397,6 +1506,67 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           {bl.snippet && (
                             <div className="match-snippet">{bl.snippet}</div>
                           )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="sidebar-knowledge-block">
+                  <div className="sidebar-knowledge-head">
+                    <span className="sub-label">
+                      <AlertTriangle size={12} /> {t.sidebar.diagnosticsBrokenLinks} ({knowledgeReport.brokenLinks.length})
+                    </span>
+                  </div>
+                  {knowledgeReport.brokenLinks.length === 0 ? (
+                    <div className="muted-msg">{t.sidebar.noBrokenLinks}</div>
+                  ) : (
+                    <div className="sidebar-backlinks-list">
+                      {knowledgeReport.brokenLinks.slice(0, 50).map((bl, idx) => (
+                        <button
+                          key={`${bl.sourcePath}:${bl.line}:${bl.target}:${idx}`}
+                          type="button"
+                          className="sidebar-backlink-item is-broken"
+                          onClick={() =>
+                            onOpenFileAtLine
+                              ? onOpenFileAtLine(bl.sourcePath, bl.line)
+                              : onOpenWorkspaceFile(bl.sourcePath)
+                          }
+                          title={`${bl.sourceRelativePath}:${bl.line}`}
+                        >
+                          <div className="sidebar-backlink-head">
+                            <span className="sidebar-backlink-title">{bl.target}</span>
+                            <span className="match-line">L{bl.line}</span>
+                          </div>
+                          <div className="sidebar-backlink-path">{bl.sourceRelativePath}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="sidebar-knowledge-block">
+                  <div className="sidebar-knowledge-head">
+                    <span className="sub-label">
+                      <FileQuestion size={12} /> {t.sidebar.diagnosticsOrphanNotes} ({knowledgeReport.orphanNotes.length})
+                    </span>
+                  </div>
+                  {knowledgeReport.orphanNotes.length === 0 ? (
+                    <div className="muted-msg">{t.sidebar.noOrphanNotes}</div>
+                  ) : (
+                    <div className="sidebar-backlinks-list">
+                      {knowledgeReport.orphanNotes.slice(0, 50).map((n) => (
+                        <button
+                          key={n.path}
+                          type="button"
+                          className="sidebar-backlink-item"
+                          onClick={() => onOpenWorkspaceFile(n.path)}
+                          title={n.relativePath}
+                        >
+                          <div className="sidebar-backlink-head">
+                            <span className="sidebar-backlink-title">{n.title || n.name}</span>
+                          </div>
+                          <div className="sidebar-backlink-path">{n.relativePath}</div>
                         </button>
                       ))}
                     </div>
@@ -1471,6 +1641,328 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </>
                   )}
                 </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'git' && (
+          <div className="sidebar-section sidebar-git-section">
+            {!workspaceRoot ? (
+              <div className="muted-msg">{t.gitPanel.openFolderHint}</div>
+            ) : !gitPanelState?.isRepo ? (
+              <div className="muted-msg">{t.gitPanel.notRepoHint}</div>
+            ) : (
+              <>
+                <div className="git-panel-header">
+                  <div className="git-branch-pill" title={gitPanelState.branch || 'HEAD'}>
+                    <GitBranch size={12} />
+                    <span>{gitPanelState.branch || 'HEAD'}</span>
+                    {(gitPanelState.ahead > 0 || gitPanelState.behind > 0) && (
+                      <span className="git-ahead-behind">
+                        {gitPanelState.ahead > 0 ? `↑${gitPanelState.ahead}` : ''}
+                        {gitPanelState.behind > 0 ? ` ↓${gitPanelState.behind}` : ''}
+                      </span>
+                    )}
+                  </div>
+                  <div className="git-header-actions">
+                    {onRefreshGitPanel && (
+                      <button
+                        type="button"
+                        className="icon-btn-sm"
+                        onClick={onRefreshGitPanel}
+                        disabled={gitBusy}
+                        title={t.gitPanel.refreshBtn}
+                      >
+                        <RefreshCw size={12} className={gitBusy ? 'spin' : ''} />
+                      </button>
+                    )}
+                    {onGitPull && gitPanelState.hasRemote && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn"
+                        onClick={onGitPull}
+                        disabled={gitBusy}
+                        title={t.gitPanel.pullBtn}
+                      >
+                        <ArrowDown size={11} />
+                        <span>{t.gitPanel.pullBtn}</span>
+                      </button>
+                    )}
+                    {onGitPush && gitPanelState.hasRemote && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn is-active"
+                        onClick={onGitPush}
+                        disabled={gitBusy}
+                        title={t.gitPanel.pushBtn}
+                      >
+                        <ArrowUp size={11} />
+                        <span>{t.gitPanel.pushBtn}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="git-commit-box">
+                  <textarea
+                    rows={3}
+                    className="textarea-input git-commit-input"
+                    value={commitMessage}
+                    onChange={(e) => setCommitMessage(e.target.value)}
+                    placeholder={t.gitPanel.commitPlaceholder}
+                  />
+                  <div className="git-commit-actions">
+                    {onGitAiCommitMessage && (
+                      <button
+                        type="button"
+                        className="mini-pill-btn"
+                        disabled={aiCommitBusy || gitBusy || gitPanelState.files.length === 0}
+                        onClick={async () => {
+                          setAiCommitBusy(true);
+                          try {
+                            const generated = await onGitAiCommitMessage();
+                            if (generated.trim()) {
+                              setCommitMessage(generated.trim());
+                            }
+                          } finally {
+                            setAiCommitBusy(false);
+                          }
+                        }}
+                      >
+                        {aiCommitBusy ? (
+                          <Loader2 size={11} className="spin" />
+                        ) : (
+                          <Sparkles size={11} />
+                        )}
+                        <span>
+                          {aiCommitBusy ? t.gitPanel.aiGenerating : t.gitPanel.aiCommitBtn}
+                        </span>
+                      </button>
+                    )}
+                    {onGitCommit && (
+                      <button
+                        type="button"
+                        className="primary-btn git-commit-btn"
+                        disabled={
+                          gitBusy || !commitMessage.trim() || stagedFiles.length === 0
+                        }
+                        onClick={async () => {
+                          const ok = await onGitCommit(commitMessage.trim());
+                          if (ok) setCommitMessage('');
+                        }}
+                      >
+                        <Check size={12} />
+                        <span>{gitBusy ? t.gitPanel.committing : t.gitPanel.commitBtn}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {gitDiffTarget && (
+                  <div className="git-diff-card">
+                    <div className="git-diff-card-head">
+                      <span className="git-diff-path" title={gitDiffTarget.path}>
+                        {gitDiffTarget.path} {gitDiffTarget.staged ? '(staged)' : ''}
+                      </span>
+                      {onCloseGitDiff && (
+                        <button
+                          type="button"
+                          className="icon-btn-sm"
+                          onClick={onCloseGitDiff}
+                          title={t.actions.close}
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                    <pre className="git-diff-pre">
+                      {gitDiffTarget.content
+                        ? gitDiffTarget.content.split('\n').map((line, i) => {
+                            const cls = line.startsWith('+') && !line.startsWith('+++')
+                              ? 'is-add'
+                              : line.startsWith('-') && !line.startsWith('---')
+                                ? 'is-del'
+                                : line.startsWith('@@')
+                                  ? 'is-hunk'
+                                  : '';
+                            return (
+                              <span key={i} className={`git-diff-line ${cls}`}>
+                                {line}
+                                {'\n'}
+                              </span>
+                            );
+                          })
+                        : '(empty diff)'}
+                    </pre>
+                  </div>
+                )}
+
+                {gitPanelState.files.length === 0 ? (
+                  <div className="muted-msg">{t.gitPanel.noChanges}</div>
+                ) : (
+                  <>
+                    <div className="git-files-group">
+                      <div className="git-files-group-head">
+                        <span className="sub-label">
+                          {t.gitPanel.stagedTitle.replace('{count}', String(stagedFiles.length))}
+                        </span>
+                        {stagedFiles.length > 0 && onGitUnstageFiles && (
+                          <button
+                            type="button"
+                            className="sidebar-recent-clear"
+                            disabled={gitBusy}
+                            onClick={() => onGitUnstageFiles(stagedFiles.map((f) => f.path))}
+                          >
+                            {t.gitPanel.unstageAllBtn}
+                          </button>
+                        )}
+                      </div>
+                      {stagedFiles.map((f) => (
+                        <div key={`staged:${f.path}`} className="git-file-row">
+                          <button
+                            type="button"
+                            className="git-file-name-btn"
+                            onClick={() =>
+                              workspaceRoot &&
+                              onOpenWorkspaceFile(joinFsPath(workspaceRoot, f.relativePath))
+                            }
+                            title={f.relativePath}
+                          >
+                            <span className="git-file-badge is-staged">{f.indexStatus || 'M'}</span>
+                            <span className="git-file-path">{f.relativePath}</span>
+                          </button>
+                          <div className="git-file-actions">
+                            {onGitViewDiff && (
+                              <button
+                                type="button"
+                                className="icon-btn-sm"
+                                onClick={() => onGitViewDiff(f.path, true)}
+                                title={t.gitPanel.diffBtn}
+                              >
+                                <Eye size={11} />
+                              </button>
+                            )}
+                            {onGitUnstageFiles && (
+                              <button
+                                type="button"
+                                className="icon-btn-sm"
+                                disabled={gitBusy}
+                                onClick={() => onGitUnstageFiles([f.path])}
+                                title={t.gitPanel.unstageBtn}
+                              >
+                                <Minus size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="git-files-group">
+                      <div className="git-files-group-head">
+                        <span className="sub-label">
+                          {t.gitPanel.unstagedTitle.replace('{count}', String(unstagedFiles.length))}
+                        </span>
+                        {unstagedFiles.length > 0 && onGitStageFiles && (
+                          <button
+                            type="button"
+                            className="sidebar-recent-clear"
+                            disabled={gitBusy}
+                            onClick={() => onGitStageFiles(unstagedFiles.map((f) => f.path))}
+                          >
+                            {t.gitPanel.stageAllBtn}
+                          </button>
+                        )}
+                      </div>
+                      {unstagedFiles.map((f) => {
+                        const code = f.untracked ? '?' : f.worktreeStatus || 'M';
+                        return (
+                          <div key={`unstaged:${f.path}`} className="git-file-row">
+                            <button
+                              type="button"
+                              className="git-file-name-btn"
+                              onClick={() =>
+                                workspaceRoot &&
+                                onOpenWorkspaceFile(joinFsPath(workspaceRoot, f.relativePath))
+                              }
+                              title={f.relativePath}
+                            >
+                              <span
+                                className={`git-file-badge ${
+                                  f.untracked ? 'is-untracked' : 'is-unstaged'
+                                }`}
+                              >
+                                {code}
+                              </span>
+                              <span className="git-file-path">{f.relativePath}</span>
+                            </button>
+                            <div className="git-file-actions">
+                              {onGitViewDiff && !f.untracked && (
+                                <button
+                                  type="button"
+                                  className="icon-btn-sm"
+                                  onClick={() => onGitViewDiff(f.path, false)}
+                                  title={t.gitPanel.diffBtn}
+                                >
+                                  <Eye size={11} />
+                                </button>
+                              )}
+                              {onGitDiscardFiles && (
+                                <button
+                                  type="button"
+                                  className="icon-btn-sm is-danger"
+                                  disabled={gitBusy}
+                                  onClick={() => {
+                                    if (
+                                      window.confirm(
+                                        t.gitPanel.discardConfirm.replace('{path}', f.relativePath)
+                                      )
+                                    ) {
+                                      onGitDiscardFiles([f.path]);
+                                    }
+                                  }}
+                                  title={t.gitPanel.discardBtn}
+                                >
+                                  <Undo2 size={11} />
+                                </button>
+                              )}
+                              {onGitStageFiles && (
+                                <button
+                                  type="button"
+                                  className="icon-btn-sm"
+                                  disabled={gitBusy}
+                                  onClick={() => onGitStageFiles([f.path])}
+                                  title={t.gitPanel.stageBtn}
+                                >
+                                  <Plus size={11} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {gitPanelState.recentCommits.length > 0 && (
+                  <div className="git-commits-block">
+                    <div className="sub-label">{t.gitPanel.recentCommitsTitle}</div>
+                    <div className="git-commits-list">
+                      {gitPanelState.recentCommits.map((c) => (
+                        <div key={c.hash} className="git-commit-row">
+                          <div className="git-commit-top">
+                            <code className="git-commit-hash">{c.hash}</code>
+                            <span className="git-commit-date">{c.date}</span>
+                          </div>
+                          <div className="git-commit-msg">{c.message}</div>
+                          <div className="git-commit-author">{c.author}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
