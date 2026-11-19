@@ -1214,47 +1214,61 @@ export const en: Translations = {
   sampleDocument: `---
 title: Welcome to Onigiri Editor — AI-Era Hybrid Editor
 author: Onigiri Editor Team
-tags: [Onigiri Editor, AI, Markdown, DevPreview]
+tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
 ---
 
 # Welcome to Onigiri Editor 🍙
 
-**Onigiri Editor** brings together **bidirectional visual Markdown editing**, **100+ language syntax highlighting**, **auto-detected dev server & built-in Web Browser preview**, and **AI Chat with connection assistance & model selection** in one cross-platform workspace.
+**Onigiri Editor** brings together **bidirectional visual Markdown editing**, **PKM & Knowledge Graph visualization**, **Git source control**, **100+ language syntax highlighting**, **auto-detected dev server & built-in Web Browser preview**, and **AI Chat & inline editing** in one cross-platform workspace.
 
 > [!TIP]
 > - Switch between **Simple**, **Basic**, and **Advanced** anytime (\`⌘ + \\\` / \`Ctrl + \\\`).
-> - Click the top-right **Bot / Panel icon (Options / AI Chat)** for AI Chat, formatting, stats, and snapshots, or press \`⌘ + ,\` / \`Ctrl + ,\` for Settings!
+> - Press \`⌘ + P\` (\`Ctrl + P\`) for **Quick Open** (prefix \`@\` for headings) or \`⌘ + K\` (\`Ctrl + K\`) for the **Command Palette**.
+> - Click the top-right **Bot / Panel icon (Options / AI Chat)** for AI Chat, review, formatting, stats, and snapshots, or \`⌘ + ,\` (\`Ctrl + ,\`) for Settings (including custom Keybindings & JSON backup).
 
 ## Highlights
 
-- [x] **3 Modes**: \`Simple\` (minimal single-pane editor), \`Basic\` (bidirectional preview & AI), and \`Advanced\` (tabs, folder explorer & dev integration)
-- [x] **Bidirectional Editing & Sync Line Markers**: Edit on either pane and see matching line/block markers highlighted in real time
-- [x] **AI Chat & Connection Assistant**: Supports **Codex / Claude Code / Gemini CLI / Antigravity CLI** (with model selection), Cloud APIs, and **Ollama / LM Studio**, plus guided setup when disconnected
-- [x] **Dev Server Auto-Detection & Browser Preview**: Automatically detects **Vite / Next.js / Astro / Nuxt / Laravel / WordPress / PHP / Docker / Python (Django, FastAPI, Flask, Streamlit) / MkDocs / Hugo** projects and previews them in the built-in or external browser
-- [x] **Syntax Highlighting & Smart Line Copy**: Presets + 10 custom token colors across 100+ languages, plus \`⌘+C\` / \`Ctrl+C\` full-line copy with no selection
+- [x] **3 Modes & Dual Editor**: \`Simple\` (minimal single-pane), \`Basic\` (bidirectional preview & AI), and \`Advanced\` (tabs, folder explorer, **Git tab**, **Knowledge Graph** & Side-by-Side split / 2-tab diff compare)
+- [x] **Rich Markdown Writing & Citations**: Line-start \`/\` **Slash Commands**, **clipboard image auto-save (\`assets/\`)**, Sidebar D&D relative links, **Citations / Link Cards / BibTeX & DOI Lookup / Footnotes**, **URL auto-title paste**, **Auto TOC**, and **Slide Presentation Mode**
+- [x] **Knowledge Graph & Workspace Search**: \`[[WikiLinks]]\`, Backlinks & \`#tag\` browser, **interactive Knowledge Graph & broken link diagnostics**, **Unused Image Cleaner**, and **Cross-Folder Regex Grep Replace (\`⌘ + ⇧ + G\`)**
+- [x] **Git Source Control & Project Config**: Stage, unstage, discard, inspect inline diffs, commit with **AI Commit Message**, and Pull/Push from the **Git Sidebar tab**, plus automatic \`.editorconfig\` and \`.onigiri.json\` support
+- [x] **AI Chat, Review & Inline Selection Edit (\`⌘ + ⇧ + E\`)**: Supports **Codex / Claude Code / Gemini CLI / Antigravity CLI**, Cloud APIs, and **Ollama / LM Studio** with per-tab threads, \`.md\` export, rule/AI proofreading, and Diff Preview
+- [x] **Dev Server Auto-Detection & Live Previews**: Detects Vite / Next.js / Astro / Nuxt / Laravel / WordPress / Docker / Python / Hugo projects for built-in or external LAN browser preview, plus **CSV/TSV table**, **JSON/YAML/ENV tools**, and **HTML/SVG preview**
+- [x] **Flexible Export & Customization**: **Word (\`.docx\`)**, HTML, and PDF export, **Mermaid & KaTeX SVG/PNG export**, **Copy as Rich Text**, customizable **Keybindings** (27 commands), and **JSON Settings Backup & Reset**
 
 ### 1. Choose Your Mode
 
 | Mode | Best For | Key Capabilities |
 | :--- | :--- | :--- |
-| **Simple** | Quick notes & fast code edits | Minimal UI, editor-only view, smart line copy, syntax highlighting |
-| **Basic** | Writing & live visual editing | Bidirectional split preview, toolbar, built-in/external browser, AI chat |
-| **Advanced** | Dev workflows & deep docs | Multi-tab, folder explorer, dev server launcher, snapshot diff, HTML/PDF export |
+| **Simple** | Quick notes & fast code edits | Minimal UI, editor-only view, smart line copy, box selection, syntax highlight |
+| **Basic** | Writing & live visual editing | Bidirectional split preview, toolbar, \`/\` commands, citations, browser, AI chat & review |
+| **Advanced** | Dev workflows, PKM & Git | Multi-tab & side-by-side diff, \`[[WikiLinks]]\` & Graph, Git panel, Grep replace, dev server |
 
 ### 2. Workflow Overview (Mermaid)
 
 > [!NOTE]
-> Supports GitHub-style \`[!NOTE]\`, \`[!TIP]\`, \`[!IMPORTANT]\`, \`[!WARNING]\`, and \`[!CAUTION]\` callouts plus live Mermaid diagrams.
+> GitHub-style \`[!NOTE]\`, \`[!TIP]\`, \`[!IMPORTANT]\`, \`[!WARNING]\`, and \`[!CAUTION]\` callouts, Mermaid diagrams, and KaTeX blocks can be exported directly to **SVG or PNG** from the preview.
 
 \`\`\`mermaid
 flowchart LR
-  Write["✍️ Write Markdown / Code"] --> AI["🤖 AI Chat & Cleanup"]
-  AI --> Preview["👁️ Live Preview / Built-in Browser"]
-  Preview --> Server["🚀 Dev Server & External Live Sync"]
-  Server --> Share["📦 HTML / PDF / Rich Copy"]
+  Write["✍️ Write / Cite / Auto-Save Images"] --> Knowledge["🕸️ WikiLinks & Knowledge Graph"]
+  Knowledge --> AI["🤖 AI Edit & Proofread Review"]
+  AI --> Git["🌿 Git Panel & Inline Diff"]
+  Git --> Export["📦 Word (.docx) / HTML / PDF / Slides"]
 \`\`\`
 
-### 3. LaTeX Math & Multi-Language Syntax Highlighting
+### 3. Handy Shortcuts (Customizable in Settings → Keybindings)
+
+| Action | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Quick Open (Files / \`@Headings\`) | \`⌘ + P\` | \`Ctrl + P\` |
+| Command Palette | \`⌘ + K\` | \`Ctrl + K\` |
+| Cross-Folder Grep & Replace | \`⌘ + ⇧ + G\` | \`Ctrl + Shift + G\` |
+| Inline AI Edit on Selection | \`⌘ + ⇧ + E\` | \`Ctrl + Shift + E\` |
+| Toggle / Jump Line Bookmark | \`⌘ + F2\` / \`F2\` | \`Ctrl + F2\` / \`F2\` |
+| Box Selection / Zen Mode | \`Option + Drag\` / \`⌘ + ⇧ + F\` | \`Alt + Drag\` / \`Ctrl + Shift + F\` |
+
+### 4. LaTeX Math & Multi-Language Syntax Highlighting
 
 Scaled Dot-Product Attention:
 
