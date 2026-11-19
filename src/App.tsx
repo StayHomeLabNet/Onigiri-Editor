@@ -2,7 +2,6 @@ import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useStat
 import 'katex/dist/katex.min.css';
 import {
   AlertTriangle,
-  Copy,
   Download,
   Eye,
   ExternalLink,
@@ -204,6 +203,7 @@ import { DataPreviewPane } from './components/DataPreviewPane';
 import { RightBrowserPane } from './components/RightBrowserPane';
 import { SideComparePane, type GitHeadComparisonState } from './components/SideComparePane';
 import { type ProjectSetupActionParams } from './components/ProjectSetupCard';
+import { LanUrlList } from './components/LanUrlList';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import {
   FindReplaceBar,
@@ -7122,28 +7122,19 @@ export function App() {
                       >
                         {externalPreviewUrl &&
                           settings.externalBrowserAllowLan &&
-                          externalPreviewLanUrls.length > 0 &&
-                          externalPreviewLanUrls.map((lanUrl) => (
-                            <button
-                              key={lanUrl}
-                              type="button"
-                              className="mini-pill-btn"
-                              onClick={() => void handleCopyLanUrl(lanUrl)}
-                              title={`${t.actions.copyLanUrl}: ${lanUrl}`}
-                              style={{ maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}
-                            >
-                              <Copy size={11} style={{ flexShrink: 0 }} />
-                              <span
-                                style={{
-                                  minWidth: 0,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                }}
-                              >
-                                LAN: {lanUrl.replace(/^https?:\/\//, '')}
-                              </span>
-                            </button>
-                          ))}
+                          externalPreviewLanUrls.length > 0 && (
+                            <LanUrlList
+                              urls={externalPreviewLanUrls}
+                              label={t.project.lanUrlsLabel}
+                              showTitle={t.project.lanUrlsToggleShowTitle}
+                              hideTitle={t.project.lanUrlsToggleHideTitle}
+                              copyTitlePrefix={t.actions.copyLanUrl}
+                              onCopyUrl={(lanUrl) => void handleCopyLanUrl(lanUrl)}
+                              variant="inline"
+                              chipClassName="mini-pill-btn"
+                              toggleClassName="mini-pill-btn is-lan-toggle"
+                            />
+                          )}
                         <button
                           type="button"
                           className={`mini-pill-btn ${externalPreviewUrl ? 'is-active' : ''}`}

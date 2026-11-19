@@ -545,6 +545,9 @@ export interface Translations {
     lanAccessOff: string;
     lanAccessToggleTitle: string;
     lanUrlCopyTitle: string;
+    lanUrlsLabel: string;
+    lanUrlsToggleShowTitle: string;
+    lanUrlsToggleHideTitle: string;
     externalLanUnavailableHint: string;
   };
   imageModal: {

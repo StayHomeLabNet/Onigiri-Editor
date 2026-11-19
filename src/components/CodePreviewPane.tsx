@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { ClipboardCopy, Copy, ExternalLink, Globe, Info, Loader2, Play, Square, Wifi } from 'lucide-react';
+import { ClipboardCopy, ExternalLink, Globe, Info, Loader2, Play, Square, Wifi } from 'lucide-react';
 import { all, createLowlight } from 'lowlight';
 import type { Translations } from '../i18n/types';
 import type { EditorSettings, Locale, ProjectInfo, ProjectServerStatus } from '../types';
 import { resolveEditorLanguageLabel, resolveHljsLanguage } from '../utils/language';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
+import { LanUrlList } from './LanUrlList';
 
 const lowlight = createLowlight(all);
 
@@ -252,19 +253,17 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
             </span>
             {serverRunningHere &&
               projectServer?.lanUrls &&
-              projectServer.lanUrls.length > 0 &&
-              projectServer.lanUrls.map((lanUrl) => (
-                <button
-                  key={lanUrl}
-                  type="button"
-                  className="project-url-chip is-lan"
-                  onClick={() => onCopyLanUrl?.(lanUrl)}
-                  title={`${t.project.lanUrlCopyTitle}: ${lanUrl}`}
-                >
-                  <Copy size={10} />
-                  <span>LAN: {lanUrl.replace(/^https?:\/\//, '')}</span>
-                </button>
-              ))}
+              projectServer.lanUrls.length > 0 && (
+                <LanUrlList
+                  urls={projectServer.lanUrls}
+                  label={t.project.lanUrlsLabel}
+                  showTitle={t.project.lanUrlsToggleShowTitle}
+                  hideTitle={t.project.lanUrlsToggleHideTitle}
+                  copyTitlePrefix={t.project.lanUrlCopyTitle}
+                  onCopyUrl={onCopyLanUrl}
+                  variant="inline"
+                />
+              )}
           </div>
           <div className="project-bar-actions">
             {onToggleProjectServerLan && (

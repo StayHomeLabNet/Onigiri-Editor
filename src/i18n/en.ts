@@ -617,6 +617,9 @@ export const en: Translations = {
     lanAccessOff: 'LAN: OFF',
     lanAccessToggleTitle: 'Toggle LAN access from other devices on the same local network',
     lanUrlCopyTitle: 'Click to copy LAN URL',
+    lanUrlsLabel: 'LAN URL',
+    lanUrlsToggleShowTitle: 'Show LAN IP addresses',
+    lanUrlsToggleHideTitle: 'Collapse LAN IP addresses',
     externalLanUnavailableHint:
       'The externally running server is bound to localhost only and cannot be reached over LAN. Restart it via Onigiri Editor or launch it externally with --host 0.0.0.0.',
   },

@@ -794,7 +794,7 @@ fn prepare_php_ini_scan_dir_if_needed(php_exe: &str) -> Option<String> {
     }
 }
 
-fn apply_php_env_if_needed(cmd: &mut Command, exe: &str) {
+fn resolve_php_scan_dir_for_exe(exe: &str) -> Option<String> {
     let stem = Path::new(exe)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -807,11 +807,24 @@ fn apply_php_env_if_needed(cmd: &mut Command, exe: &str) {
     } else {
         None
     };
-    if let Some(php) = php_exe {
-        if let Some(scan_dir) = prepare_php_ini_scan_dir_if_needed(&php) {
-            cmd.env("PHP_INI_SCAN_DIR", scan_dir);
-        }
+    php_exe.and_then(|php| prepare_php_ini_scan_dir_if_needed(&php))
+}
+
+fn apply_php_env_if_needed(cmd: &mut Command, exe: &str) {
+    if let Some(scan_dir) = resolve_php_scan_dir_for_exe(exe) {
+        cmd.env("PHP_INI_SCAN_DIR", scan_dir);
     }
+}
+
+fn should_add_artisan_no_reload(args: &[String], has_injected_php_scan_dir: bool) -> bool {
+    let is_artisan_serve = args.first().map(|s| s.as_str()) == Some("artisan")
+        && args.get(1).map(|s| s.as_str()) == Some("serve");
+    if !is_artisan_serve || args.iter().any(|a| a == "--no-reload") {
+        return false;
+    }
+    has_injected_php_scan_dir
+        || env::var_os("PHP_INI_SCAN_DIR").is_some()
+        || env::var_os("PHPRC").is_some()
 }
 
 fn detect_package_manager(root: &Path) -> &'static str {
@@ -3713,7 +3726,7 @@ pub async fn start_project_dev_server(
         return Ok(snapshot);
     }
 
-    let (exe, args, command_label, companion_vite, is_docker_compose) = match runner {
+    let (exe, mut args, command_label, companion_vite, is_docker_compose) = match runner {
         ResolvedRunner::Command {
             exe,
             args,
@@ -3723,6 +3736,11 @@ pub async fn start_project_dev_server(
         } => (exe, args, label, companion_vite, is_docker_compose),
         ResolvedRunner::StaticHttp => unreachable!(),
     };
+
+    let php_scan_dir = resolve_php_scan_dir_for_exe(&exe);
+    if should_add_artisan_no_reload(&args, php_scan_dir.is_some()) {
+        args.push("--no-reload".to_string());
+    }
 
     let mut cmd = build_project_command(&exe, &args);
     cmd.current_dir(&root_path)
@@ -3736,7 +3754,9 @@ pub async fn start_project_dev_server(
     if want_lan {
         cmd.env("HOST", "0.0.0.0");
     }
-    apply_php_env_if_needed(&mut cmd, &exe);
+    if let Some(scan_dir) = php_scan_dir {
+        cmd.env("PHP_INI_SCAN_DIR", scan_dir);
+    }
 
     #[cfg(unix)]
     {
@@ -5259,5 +5279,23 @@ mod tests {
         assert!(build_windows_php_scan_ini_content("", &ext_dir, &["curl"]).is_none());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn adds_no_reload_to_artisan_serve_only_when_php_ini_env_active() {
+        let serve_args = vec![
+            "artisan".to_string(),
+            "serve".to_string(),
+            "--host=127.0.0.1".to_string(),
+            "--port=8000".to_string(),
+        ];
+        assert!(should_add_artisan_no_reload(&serve_args, true));
+
+        let mut already = serve_args.clone();
+        already.push("--no-reload".to_string());
+        assert!(!should_add_artisan_no_reload(&already, true));
+
+        let other_args = vec!["-S".to_string(), "127.0.0.1:8000".to_string()];
+        assert!(!should_add_artisan_no_reload(&other_args, true));
     }
 }

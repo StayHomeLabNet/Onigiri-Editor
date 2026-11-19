@@ -617,6 +617,9 @@ export const ja: Translations = {
     lanAccessOff: 'LAN: OFF',
     lanAccessToggleTitle: '同じローカルネットワーク（LAN）上の他端末からのアクセスを ON / OFF 切り替え',
     lanUrlCopyTitle: 'クリックして LAN アクセス用 URL をコピー',
+    lanUrlsLabel: 'LAN URL',
+    lanUrlsToggleShowTitle: 'LAN IP アドレス一覧を展開して表示',
+    lanUrlsToggleHideTitle: 'LAN IP アドレス一覧を折りたたむ',
     externalLanUnavailableHint:
       '外部で起動中のサーバーが localhost のみにバインドされているため LAN IP で接続できません。Onigiri Editor から再起動するか、外部サーバーを --host 0.0.0.0 付きで起動してください。',
   },

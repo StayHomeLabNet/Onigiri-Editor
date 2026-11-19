@@ -45,7 +45,6 @@ import {
   FileQuestion,
   Check,
   Wifi,
-  Copy,
 } from 'lucide-react';
 import type {
   GitPanelState,
@@ -72,6 +71,7 @@ import {
   findBacklinksForNote,
 } from '../utils/knowledge';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
+import { LanUrlList } from './LanUrlList';
 
 const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
 const JSON_EXT_RE = /\.(json|jsonc)$/i;
@@ -1130,20 +1130,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         projectServer.rootPath === projectInfo.rootPath) &&
                       projectServer.lanUrls &&
                       projectServer.lanUrls.length > 0 && (
-                        <div className="sidebar-project-lan-row">
-                          {projectServer.lanUrls.map((lanUrl) => (
-                            <button
-                              key={lanUrl}
-                              type="button"
-                              className="project-url-chip is-lan"
-                              onClick={() => onCopyLanUrl?.(lanUrl)}
-                              title={`${t.project.lanUrlCopyTitle}: ${lanUrl}`}
-                            >
-                              <Copy size={10} />
-                              <span>LAN: {lanUrl.replace(/^https?:\/\//, '')}</span>
-                            </button>
-                          ))}
-                        </div>
+                        <LanUrlList
+                          urls={projectServer.lanUrls}
+                          label={t.project.lanUrlsLabel}
+                          showTitle={t.project.lanUrlsToggleShowTitle}
+                          hideTitle={t.project.lanUrlsToggleHideTitle}
+                          copyTitlePrefix={t.project.lanUrlCopyTitle}
+                          onCopyUrl={onCopyLanUrl}
+                          variant="block"
+                        />
                       )}
                     {projectServer?.running &&
                       (!projectServer.rootPath ||

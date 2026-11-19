@@ -11,7 +11,6 @@ import {
   AlertCircle,
   Info,
   Wifi,
-  Copy,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
@@ -25,6 +24,7 @@ import {
   openInExternalBrowser,
 } from '../utils/platform';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
+import { LanUrlList } from './LanUrlList';
 
 interface RightBrowserPaneProps {
   t: Translations;
@@ -388,19 +388,17 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             )}
             {projectServer?.running &&
               projectServer.lanUrls &&
-              projectServer.lanUrls.length > 0 &&
-              projectServer.lanUrls.map((lanUrl) => (
-                <button
-                  key={lanUrl}
-                  type="button"
-                  className="project-url-chip is-lan"
-                  onClick={() => onCopyLanUrl?.(lanUrl)}
-                  title={`${t.project.lanUrlCopyTitle}: ${lanUrl}`}
-                >
-                  <Copy size={10} />
-                  <span>LAN: {lanUrl.replace(/^https?:\/\//, '')}</span>
-                </button>
-              ))}
+              projectServer.lanUrls.length > 0 && (
+                <LanUrlList
+                  urls={projectServer.lanUrls}
+                  label={t.project.lanUrlsLabel}
+                  showTitle={t.project.lanUrlsToggleShowTitle}
+                  hideTitle={t.project.lanUrlsToggleHideTitle}
+                  copyTitlePrefix={t.project.lanUrlCopyTitle}
+                  onCopyUrl={onCopyLanUrl}
+                  variant="inline"
+                />
+              )}
             {!projectServer?.running && projectInfo?.devCommandLabel && (
               <span className="browser-project-cmd">{projectInfo.devCommandLabel}</span>
             )}
