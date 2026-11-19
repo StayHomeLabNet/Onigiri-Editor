@@ -298,17 +298,26 @@ fn new_background_command<S: AsRef<std::ffi::OsStr>>(exe: &str, args: &[S]) -> C
 
 /// Extracts the relative Node script path referenced via `%dp0%` / `%~dp0` inside an npm/pnpm `.cmd` shim.
 #[allow(dead_code)]
-fn parse_windows_cmd_shim_rel(content: &str) -> Option<String> {
-    let lower = content.to_ascii_lowercase();
+fn extract_dp0_js_rel(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
     for marker in ["%dp0%", "%~dp0"] {
         let mut search_from = 0usize;
         while let Some(rel_idx) = lower[search_from..].find(marker) {
             let abs_start = search_from + rel_idx + marker.len();
-            let rest = &content[abs_start..];
+            let rest = &text[abs_start..];
             let end_offset = rest
                 .find(|c: char| c == '"' || c == '\'' || c == '\r' || c == '\n')
                 .unwrap_or(rest.len());
-            let candidate = rest[..end_offset].trim();
+            let raw_candidate = rest[..end_offset].trim();
+            let candidate = if ["js", "mjs", "cjs"].iter().any(|ext| {
+                raw_candidate
+                    .to_ascii_lowercase()
+                    .ends_with(&format!(".{}", ext))
+            }) {
+                raw_candidate
+            } else {
+                raw_candidate.split_whitespace().next().unwrap_or("")
+            };
             let candidate_lower = candidate.to_ascii_lowercase();
             if candidate_lower.ends_with(".js")
                 || candidate_lower.ends_with(".mjs")
@@ -322,6 +331,74 @@ fn parse_windows_cmd_shim_rel(content: &str) -> Option<String> {
             search_from = abs_start;
         }
     }
+    None
+}
+
+#[allow(dead_code)]
+fn parse_windows_cmd_shim_rel(content: &str) -> Option<String> {
+    let mut set_vars: Vec<(String, String)> = Vec::new();
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim().trim_start_matches('@').trim_start();
+        let lower = trimmed.to_ascii_lowercase();
+        if !lower.starts_with("set ") && !lower.starts_with("set\t") {
+            continue;
+        }
+        let assign = trimmed[3..].trim();
+        let assign = if assign.starts_with('"') && assign.ends_with('"') && assign.len() >= 2 {
+            &assign[1..assign.len() - 1]
+        } else {
+            assign
+        };
+        if let Some((lhs, rhs)) = assign.split_once('=') {
+            let var_name = lhs.trim().trim_matches('"').to_ascii_uppercase();
+            if !var_name.is_empty() {
+                if let Some(rel) = extract_dp0_js_rel(rhs) {
+                    if let Some(existing) = set_vars.iter_mut().find(|(k, _)| k == &var_name) {
+                        existing.1 = rel;
+                    } else {
+                        set_vars.push((var_name, rel));
+                    }
+                }
+            }
+        }
+    }
+
+    for arg_marker in ["%*", "%1"] {
+        for raw_line in content.lines() {
+            let trimmed = raw_line.trim();
+            if trimmed.is_empty()
+                || trimmed.starts_with("::")
+                || trimmed.to_ascii_lowercase().starts_with("rem ")
+            {
+                continue;
+            }
+            if !trimmed.contains(arg_marker) {
+                continue;
+            }
+            if let Some(rel) = extract_dp0_js_rel(trimmed) {
+                return Some(rel);
+            }
+            let mut rest = trimmed;
+            while let Some(open) = rest.find('%') {
+                let after_open = &rest[open + 1..];
+                if let Some(close) = after_open.find('%') {
+                    let token = &after_open[..close];
+                    if !token.is_empty()
+                        && !token.contains([' ', '\t', '\\', '/', '*', '~'])
+                    {
+                        let upper = token.to_ascii_uppercase();
+                        if let Some((_, rel)) = set_vars.iter().find(|(k, _)| k == &upper) {
+                            return Some(rel.clone());
+                        }
+                    }
+                    rest = &after_open[close + 1..];
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
     None
 }
 
