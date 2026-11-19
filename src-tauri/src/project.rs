@@ -355,6 +355,23 @@ fn extended_path() -> String {
         let program_data =
             env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
 
+        // Respect the user's active PATH and Registry PATH first (excluding WindowsApps stubs),
+        // then fall back to common toolchain install locations.
+        if let Some(current) = env::var_os("PATH") {
+            for entry in env::split_paths(&current) {
+                let lower = entry.to_string_lossy().to_ascii_lowercase();
+                if !lower.ends_with(r"microsoft\windowsapps") {
+                    dirs.push(entry);
+                }
+            }
+        }
+        for reg_dir in windows_registry_path_entries() {
+            let lower = reg_dir.to_string_lossy().to_ascii_lowercase();
+            if !lower.ends_with(r"microsoft\windowsapps") {
+                dirs.push(reg_dir);
+            }
+        }
+
         if !appdata.is_empty() {
             dirs.push(PathBuf::from(&appdata).join("npm"));
             dirs.push(PathBuf::from(&appdata).join("nvm"));
@@ -423,24 +440,14 @@ fn extended_path() -> String {
                 dirs.push(ruby_bin);
             }
         }
-        for reg_dir in windows_registry_path_entries() {
-            let lower = reg_dir.to_string_lossy().to_ascii_lowercase();
-            if !lower.ends_with(r"microsoft\windowsapps") {
-                dirs.push(reg_dir);
-            }
-        }
-    }
-
-    if let Some(current) = env::var_os("PATH") {
-        dirs.extend(env::split_paths(&current));
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        let local_appdata = env::var("LOCALAPPDATA").unwrap_or_default();
         if !local_appdata.is_empty() {
             dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
         }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    if let Some(current) = env::var_os("PATH") {
+        dirs.extend(env::split_paths(&current));
     }
 
     let mut deduped: Vec<PathBuf> = Vec::with_capacity(dirs.len());
@@ -610,6 +617,201 @@ fn find_executable(names: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+fn find_all_executables(name: &str) -> Vec<String> {
+    let mut results: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let path_var = extended_path();
+    for dir in env::split_paths(&path_var) {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(found) = resolve_windows_executable_candidate(&dir, name) {
+                let s = found.to_string_lossy().to_string();
+                if seen.insert(s.to_ascii_lowercase()) {
+                    results.push(s);
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let candidate = dir.join(name);
+            if candidate.exists() && candidate.is_file() {
+                let s = candidate.to_string_lossy().to_string();
+                if seen.insert(s.clone()) {
+                    results.push(s);
+                }
+            }
+        }
+    }
+    results
+}
+
+fn new_sync_background_command(exe: &str, args: &[&str]) -> std::process::Command {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(args);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+fn php_loaded_modules(php_exe: &str, scan_dir: Option<&str>) -> Option<Vec<String>> {
+    let mut cmd = new_sync_background_command(php_exe, &["-m"]);
+    cmd.env("PATH", extended_path())
+        .stdin(std::process::Stdio::null());
+    if let Some(sd) = scan_dir {
+        cmd.env("PHP_INI_SCAN_DIR", sd);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mods = stdout
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('['))
+        .map(|l| l.to_ascii_lowercase())
+        .collect();
+    Some(mods)
+}
+
+fn select_php_executable() -> Option<String> {
+    let candidates = find_all_executables("php");
+    if candidates.len() <= 1 {
+        return candidates.into_iter().next();
+    }
+    for cand in &candidates {
+        if let Some(mods) = php_loaded_modules(cand, None) {
+            if mods.iter().any(|m| m == "pdo_sqlite") {
+                return Some(cand.clone());
+            }
+        }
+    }
+    candidates.into_iter().next()
+}
+
+#[allow(dead_code)]
+fn build_windows_php_scan_ini_content(
+    current_ext_dir: &str,
+    real_ext_dir: &Path,
+    missing: &[&str],
+) -> Option<String> {
+    let mut available_missing: Vec<&str> = Vec::new();
+    for &ext in missing {
+        let dll = real_ext_dir.join(format!("php_{}.dll", ext));
+        if dll.is_file() {
+            available_missing.push(ext);
+        }
+    }
+    let first_ext = *available_missing.first()?;
+    let mut lines: Vec<String> = Vec::new();
+    let trimmed_curr = current_ext_dir.trim();
+    let current_has_dll = !trimmed_curr.is_empty()
+        && Path::new(trimmed_curr)
+            .join(format!("php_{}.dll", first_ext))
+            .is_file();
+    if !current_has_dll {
+        let normalized_ext_dir = real_ext_dir.to_string_lossy().replace('\\', "/");
+        lines.push(format!("extension_dir=\"{}\"", normalized_ext_dir));
+    }
+    for ext in available_missing {
+        lines.push(format!("extension={}", ext));
+    }
+    Some(format!("{}\n", lines.join("\n")))
+}
+
+fn prepare_php_ini_scan_dir_if_needed(php_exe: &str) -> Option<String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = php_exe;
+        return None;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let loaded = php_loaded_modules(php_exe, None)?;
+        let desired = ["pdo_sqlite", "sqlite3", "mbstring", "openssl", "curl", "fileinfo"];
+        let missing: Vec<&str> = desired
+            .iter()
+            .copied()
+            .filter(|ext| !loaded.iter().any(|m| m == ext))
+            .collect();
+        if missing.is_empty() {
+            return None;
+        }
+
+        let mut probe_cmd = new_sync_background_command(
+            php_exe,
+            &["-r", "echo PHP_BINARY . \"\\n\" . ini_get('extension_dir');"],
+        );
+        probe_cmd
+            .env("PATH", extended_path())
+            .stdin(std::process::Stdio::null());
+        let out = probe_cmd.output().ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut lines = text.lines();
+        let php_bin = lines.next().unwrap_or(php_exe).trim();
+        let curr_ext_dir = lines.next().unwrap_or("").trim();
+        let real_ext_dir = Path::new(php_bin).parent()?.join("ext");
+        if !real_ext_dir.is_dir() {
+            return None;
+        }
+        let ini_content = build_windows_php_scan_ini_content(curr_ext_dir, &real_ext_dir, &missing)?;
+
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for b in php_bin.to_ascii_lowercase().as_bytes() {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+        let scan_dir = env::temp_dir()
+            .join("onigiri-php-scan")
+            .join(format!("{:016x}", hash));
+        fs::create_dir_all(&scan_dir).ok()?;
+        let ini_path = scan_dir.join("onigiri-ext.ini");
+        let existing_ini = fs::read_to_string(&ini_path).ok();
+        if existing_ini.as_deref() != Some(ini_content.as_str()) {
+            fs::write(&ini_path, &ini_content).ok()?;
+        }
+
+        if let Some(prev) = env::var_os("PHP_INI_SCAN_DIR") {
+            let mut dirs: Vec<PathBuf> = env::split_paths(&prev).collect();
+            if !dirs.iter().any(|d| d == &scan_dir) {
+                dirs.push(scan_dir);
+            }
+            return env::join_paths(dirs)
+                .ok()
+                .map(|s| s.to_string_lossy().to_string());
+        }
+        Some(scan_dir.to_string_lossy().to_string())
+    }
+}
+
+fn apply_php_env_if_needed(cmd: &mut Command, exe: &str) {
+    let stem = Path::new(exe)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    let php_exe = if stem == "php" {
+        Some(exe.to_string())
+    } else if stem == "composer" {
+        select_php_executable()
+    } else {
+        None
+    };
+    if let Some(php) = php_exe {
+        if let Some(scan_dir) = prepare_php_ini_scan_dir_if_needed(&php) {
+            cmd.env("PHP_INI_SCAN_DIR", scan_dir);
+        }
+    }
 }
 
 fn detect_package_manager(root: &Path) -> &'static str {
@@ -2189,6 +2391,39 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
                         docs_url: None,
                     });
                 }
+
+                if uses_sqlite {
+                    if let Some(php) = select_php_executable() {
+                        let scan_dir = prepare_php_ini_scan_dir_if_needed(&php);
+                        let has_sqlite = php_loaded_modules(&php, scan_dir.as_deref())
+                            .map(|mods| mods.iter().any(|m| m == "pdo_sqlite"))
+                            .unwrap_or(true);
+                        if !has_sqlite {
+                            let hint_cmd = if cfg!(target_os = "windows") {
+                                "php --ini".to_string()
+                            } else if cfg!(target_os = "macos") {
+                                "php -m | grep -i sqlite".to_string()
+                            } else {
+                                "sudo apt-get install -y php-sqlite3".to_string()
+                            };
+                            diags.push(ProjectDiagnostic {
+                                id: "missing-php-sqlite".to_string(),
+                                severity: "warning".to_string(),
+                                title_ja: "PHP の pdo_sqlite 拡張が無効です".to_string(),
+                                title_en: "PHP pdo_sqlite extension is not enabled".to_string(),
+                                description_ja: "Laravel の .env で SQLite が使われていますが、PHP に `pdo_sqlite` ドライバーが見つかりません。`php.ini` で `extension=pdo_sqlite` / `extension=sqlite3` を有効にするか、OS パッケージ（Linux の場合は `php-sqlite3`）をインストールしてください。".to_string(),
+                                description_en: "Laravel is configured to use SQLite in .env, but PHP does not have the `pdo_sqlite` driver enabled. Enable `extension=pdo_sqlite` / `extension=sqlite3` in `php.ini` or install the `php-sqlite3` package.".to_string(),
+                                command_preview: Some(hint_cmd.clone()),
+                                in_app_action: None,
+                                action_target: None,
+                                in_app_label_ja: None,
+                                in_app_label_en: None,
+                                terminal_command: Some(hint_cmd),
+                                docs_url: None,
+                            });
+                        }
+                    }
+                }
             }
         }
 
@@ -3079,7 +3314,7 @@ fn resolve_runner(
     if info.kind == "laravel" {
         let has_artisan = root.join("artisan").is_file();
         if has_artisan {
-            let php = find_executable(&["php"]).ok_or_else(|| {
+            let php = select_php_executable().ok_or_else(|| {
                 "Command not found: php. Please install PHP or start Docker first."
                     .to_string()
             })?;
@@ -3105,7 +3340,7 @@ fn resolve_runner(
     }
 
     if info.kind == "laravel" || info.kind == "php" || info.kind == "wordpress" {
-        let php = find_executable(&["php"]).ok_or_else(|| {
+        let php = select_php_executable().ok_or_else(|| {
             "Command not found: php. Please install PHP or start Docker first."
                 .to_string()
         })?;
@@ -3501,6 +3736,7 @@ pub async fn start_project_dev_server(
     if want_lan {
         cmd.env("HOST", "0.0.0.0");
     }
+    apply_php_env_if_needed(&mut cmd, &exe);
 
     #[cfg(unix)]
     {
@@ -3889,6 +4125,7 @@ async fn run_streaming_setup_command(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    apply_php_env_if_needed(&mut cmd, exe);
 
     let mut child = cmd
         .spawn()
@@ -4370,7 +4607,7 @@ fi
             let (exe, mut args, label) = if let Some(composer) = find_executable(&["composer"]) {
                 (composer, vec!["install".to_string()], "composer install".to_string())
             } else if root.join("composer.phar").is_file() {
-                let php = find_executable(&["php"]).ok_or_else(|| {
+                let php = select_php_executable().ok_or_else(|| {
                     "Command not found: php. Please install PHP first.".to_string()
                 })?;
                 (
@@ -4410,7 +4647,7 @@ fi
             let mut ok = true;
             let mut message = ".env created from .env.example.".to_string();
             if root.join("artisan").is_file() && root.join("vendor").is_dir() {
-                if let Some(php) = find_executable(&["php"]) {
+                if let Some(php) = select_php_executable() {
                     let args = vec!["artisan".to_string(), "key:generate".to_string()];
                     let (key_ok, key_out) = run_streaming_setup_command(
                         &app,
@@ -4986,5 +5223,41 @@ mod tests {
         assert!(!lan_spec.args.contains(&"127.0.0.1".to_string()));
 
         let _ = fs::remove_dir_all(&py);
+    }
+
+    #[test]
+    fn builds_windows_php_scan_ini_for_missing_extensions() {
+        let dir = make_temp_dir("win_php_ext");
+        let ext_dir = dir.join("ext");
+        fs::create_dir_all(&ext_dir).unwrap();
+        fs::write(ext_dir.join("php_pdo_sqlite.dll"), b"").unwrap();
+        fs::write(ext_dir.join("php_mbstring.dll"), b"").unwrap();
+
+        // When current extension_dir doesn't point to real ext_dir, sets extension_dir + extensions
+        let ini = build_windows_php_scan_ini_content(
+            "C:\\php\\ext",
+            &ext_dir,
+            &["pdo_sqlite", "sqlite3", "mbstring"],
+        )
+        .expect("should produce ini content");
+        assert!(ini.contains("extension_dir="));
+        assert!(ini.contains("extension=pdo_sqlite"));
+        assert!(ini.contains("extension=mbstring"));
+        assert!(!ini.contains("extension=sqlite3"));
+
+        // When current extension_dir already matches real ext_dir, omits extension_dir
+        let ini2 = build_windows_php_scan_ini_content(
+            &ext_dir.to_string_lossy(),
+            &ext_dir,
+            &["pdo_sqlite"],
+        )
+        .expect("should produce extension line only");
+        assert!(!ini2.contains("extension_dir="));
+        assert_eq!(ini2, "extension=pdo_sqlite\n");
+
+        // When none of the missing DLLs exist, returns None
+        assert!(build_windows_php_scan_ini_content("", &ext_dir, &["curl"]).is_none());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
