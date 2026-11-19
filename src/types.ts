@@ -278,6 +278,7 @@ export interface EditorSettings {
   externalBrowserPreviewEnabled: boolean;
   externalBrowserPort: number;
   externalBrowserAllowLan: boolean;
+  projectServerAllowLan: boolean;
   restoreSessionEnabled: boolean;
   autoSaveEnabled: boolean;
   showTopBar: boolean;
@@ -390,6 +391,8 @@ export interface ProjectServerStatus {
   running: boolean;
   starting: boolean;
   external?: boolean;
+  allowLan?: boolean;
+  lanUrls?: string[];
   rootPath: string | null;
   kind: string | null;
   url: string | null;

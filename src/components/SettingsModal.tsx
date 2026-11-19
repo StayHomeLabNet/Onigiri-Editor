@@ -29,6 +29,7 @@ import type {
   Locale,
   OeditLineCopyTrigger,
   PreviewTheme,
+  ProjectServerStatus,
   SettingsResetSelection,
   StoredDataSummary,
   SyntaxColorMap,
@@ -108,6 +109,7 @@ interface SettingsModalProps {
   externalPreviewLanUrls?: string[];
   onToggleExternalPreview: () => void;
   onCopyLanUrl?: (url: string) => void;
+  projectServer?: ProjectServerStatus | null;
   dataSummary?: StoredDataSummary;
   onResetSelectedSettings?: (selection: SettingsResetSelection) => Promise<void> | void;
   onClearSelectedUserData?: (
@@ -166,6 +168,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   externalPreviewLanUrls = [],
   onToggleExternalPreview,
   onCopyLanUrl,
+  projectServer,
   dataSummary,
   onResetSelectedSettings,
   onClearSelectedUserData,
@@ -1473,6 +1476,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="ai-hint-text">
                     {t.settingsModal.externalPreviewCrossPlatformNote}
                   </div>
+                </div>
+
+                <div className="settings-card">
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.projectServerAllowLan)}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          projectServerAllowLan: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.projectServerAllowLan}</span>
+                  </label>
+                  <div className="ai-hint-text">
+                    {t.inspector.settingsLabels.projectServerAllowLanHint}
+                  </div>
+                  {projectServer?.running && projectServer.url && (
+                    <div className="lan-url-list">
+                      <div className="lan-url-row">
+                        <span className="lan-url-badge">Local</span>
+                        <code>{projectServer.url}</code>
+                      </div>
+                      {settings.projectServerAllowLan &&
+                        (projectServer.lanUrls ?? []).map((lanUrl) => (
+                          <div key={lanUrl} className="lan-url-row">
+                            <span className="lan-url-badge is-lan">LAN</span>
+                            <code>{lanUrl}</code>
+                            {onCopyLanUrl && (
+                              <button
+                                type="button"
+                                className="mini-pill-btn"
+                                onClick={() => onCopyLanUrl(lanUrl)}
+                                title={t.project.lanUrlCopyTitle}
+                              >
+                                <Copy size={11} />
+                                <span>{t.actions.copyLanUrl}</span>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      {settings.projectServerAllowLan &&
+                        projectServer.external &&
+                        (!projectServer.lanUrls || projectServer.lanUrls.length === 0) && (
+                          <div className="ai-hint-text">{t.project.externalLanUnavailableHint}</div>
+                        )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

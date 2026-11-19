@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v130-の更新内容">v1.3.0 の更新内容</a> ・
+    <a href="#v131-の更新内容">v1.3.1 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.3.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.3.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、日本語環境では日本語 UI・日本語ネイティブメニューで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
 
-現在のバージョン: `v1.3.0`
+現在のバージョン: `v1.3.1`
 
 ## 主な機能
 
@@ -54,10 +54,10 @@
   - AI による「**本文を置換**」「**選択範囲を編集**」（適用前スナップショット自動保存オプション付き）および「**フォルダーへ書き込み**」の実行前に、行単位の **Diff プレビューモーダル** で変更内容を確認できます。
 - **プロジェクト別セッション復元・`.editorconfig` / `.onigiri.json`・ショートカット編集＆JSON バックアップ**: 作業フォルダーごとに開いていたタブ・未保存ドラフト・カーソル＆スクロール位置・折りたたみ状態・ブックマーク・言語固定・最近の履歴・ウィンドウ位置/サイズを保持・復元し、**`.editorconfig` / `.onigiri.json` の自動適用**、**全 27 コマンドのショートカットカスタマイズ**、**設定・AI・スニペット・テンプレート・キーバインドの JSON バックアップ書き出し／復元**、さらに選択可能な **設定初期化＆キャッシュ削除** に対応しています。
 - **外部ファイル変更検知・自動リロード／競合バナー**: 外部ツールや AI CLI によるファイル変更・削除を監視し、未編集タブは自動反映、未保存編集がある場合は **ディスクから再読み込み** / **差分を比較** / **自分の編集を維持** の選択バナーを表示します。
-- **開発サーバー診断＆2パターンの Web ブラウザ連携**:
-  - Vite / Next.js / Laravel / WordPress / Docker Compose / Python / Hugo / 静的サイトを自動検出し、起動前チェックと環境構築ガイドを表示します。
+- **開発サーバー診断＆2パターンの Web ブラウザ連携（LAN 共有対応）**:
+  - Vite / Next.js / Astro / Nuxt / Laravel / WordPress / PHP / Django / FastAPI / Flask / Streamlit / Hugo / MkDocs / Docker Compose / 静的サイトを自動検出し、起動前チェックと環境構築ガイドを表示します。
   - **パターン1（内蔵 Web ブラウザ）**: 右ペインを Tauri マルチ WebView の本格ブラウザへ切替
-  - **パターン2（外部ライブプレビュー）**: ローカル HTTP サーバー（`127.0.0.1` または LAN `0.0.0.0`）で Chrome / Safari 等へリアルタイム自動更新プレビューを配信
+  - **パターン2（外部ライブプレビュー＆プロジェクト LAN 共有）**: ローカル HTTP サーバー（`127.0.0.1` または LAN `0.0.0.0`）でのライブ配信に加え、**プロジェクト開発サーバーの LAN 公開（`LAN: ON / OFF` トグル、`0.0.0.0` バインド自動設定、LAN URL ワンクリックコピー）** により同一 Wi-Fi 上のスマホや他 PC から実機確認できます。
 - **その他の便利機能＆アップデート確認**: **クイックオープン（`⌘P` / `@見出し`）**、キーボードマクロの記録・再生（`⌘⇧M` / `F8`）、書式ツールバーの編集／拡大縮小ボタン＆ステータスバー表示倍率ポップオーバー（`25%`〜`400%`）、スマート行コピー（`⌘C` / `Ctrl+C`）、Mermaid 図・KaTeX 数式・コールアウト、YAML Frontmatter エディタ、AI 出力整形＆表フォーマット（TSV 表変換貼付対応）、推定 AI トークン数計測、**リッチテキストコピー**＆HTML スマート貼付、検索・置換、コマンドパレット（`⌘K` / `Ctrl+K`）、集中モード（`⌘⇧F` / `Ctrl+Shift+F`）、**自己完結型 Word（`.docx`） / HTML（画像埋め込み対応）** / ソースコード印刷・PDF 書き出し、さらに **アプリ内アップデート確認（GitHub Releases）** を搭載。
 - **初回起動時の OS 言語自動判定**: 日本語 OS なら日本語、その他の言語環境なら英語で起動します（設定画面・トップバーからいつでも手動切替可能）。
 
@@ -99,7 +99,13 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.3.0 の更新内容
+## v1.3.1 の更新内容
+
+- **プロジェクト開発サーバーの LAN 公開（`LAN: ON / OFF`）**: 左サイドバー・内蔵 Web ブラウザ・Web ページプレビュー・コードプレビューの各ヘッダーに **`LAN: ON / OFF`** クイック切替を追加しました（**設定 → AI・ブラウザ → プロジェクト開発サーバーへの LAN アクセスを許可** からも変更可）。オンにすると内蔵静的サーバー、PHP、Laravel、Django、Streamlit、FastAPI/uvicorn、Flask、Hugo、MkDocs、Vite、VitePress、SvelteKit、Astro、Nuxt、Docusaurus、Next.js（`-H 0.0.0.0`）を自動的に `0.0.0.0` バインドで起動し、稼働中の切り替えも自動再起動で即反映します。
+- **LAN URL ワンクリックコピー＆外部起動サーバーの疎通確認**: ローカルネットワークの IPv4 アドレス（およびサーバー出力中の LAN URL）を自動検出してクリックコピー可能な **`LAN: <IP>:<port>/`** チップを表示し、外部起動済みサーバー接続時は `localhost` 限定バインドかどうかを自動判定して案内ヒントを表示します。
+
+<details>
+<summary>以前のリリース: v1.3.0</summary>
 
 - **未保存ドキュメント保存時の一時画像自動移行**: 未保存状態で貼り付けた画像（`onigiri-markdown-images` 一時フォルダ）を含むドキュメントを初めて保存（保存／名前を付けて保存）する際、保存先フォルダー配下の `assets/` へ画像を自動移動し、Markdown 内のリンクを `./assets/...` に書き換えるよう改善しました（キャッシュ削除によるリンク切れを防止）。
 - **HTML / Word（`.docx`）書き出し時のローカル画像埋め込み**:
@@ -110,6 +116,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **コード分割・遅延ロードによる起動高速化**: Vite の `manualChunks` 分割（Mermaid / CodeMirror / TipTap / KaTeX / Markdown / Highlight / Icons）、Mermaid・`docxExport` の動的 import 化、および主要 17 モーダルの `React.lazy` + `Suspense` 化により初期バンドルサイズを大幅に削減しました。
 - **アプリ内アップデート確認＆Tauri CSP 強化**: 起動時（設定で切替可）・**ヘルプ → アップデートを確認…**・コマンドパレット・バージョン情報・設定画面から GitHub Releases の最新バージョンを確認して通知バナーから OS 対応インストーラーを開けるようにし、CSP から `'unsafe-eval'` を削除しました。
 - **モジュール分割・オンラインマニュアル更新＆Vitest/CI 自動テスト導入**: Rust / TypeScript / CSS の肥大化ファイルを機能別モジュールへ整理し、**ヘルプ → オンラインマニュアル** の遷移先を更新、Vitest フロントエンド単体テストと GitHub Actions リリース時テスト実行を追加しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.2.1</summary>

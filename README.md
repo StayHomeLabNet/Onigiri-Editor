@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v130">What's New in v1.3.0</a> ・
+    <a href="#whats-new-in-v131">What's New in v1.3.1</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.3.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.3.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.3.0`
+Current version: `v1.3.1`
 
 ## Key Features
 
@@ -54,10 +54,10 @@ Current version: `v1.3.0`
   - Shows a **line-by-line Diff Preview Modal** before applying AI document/selection replacements (with optional pre-apply snapshot) or workspace file writes.
 - **Project-Scoped Session Restore, `.editorconfig` / `.onigiri.json`, Keybindings & Backup**: Saves and restores open tabs, unsaved drafts, cursor & scroll positions, folding state, bookmarks, language overrides, recent history, and window geometry per workspace folder across restarts; auto-applies hierarchical **`.editorconfig`** & **`.onigiri.json`** project rules; lets you customize shortcuts across 27 commands (**Settings → Keybindings**); and supports selective **JSON Settings / AI / Snippets / Templates / Keybindings Backup Export & Import** plus granular **Factory Reset & Cache Cleaner**.
 - **External File Change Detection & Conflict Banner**: Watches open files on disk (including changes from external editors or AI CLIs)—auto-reloading clean tabs or displaying a conflict banner with **Reload**, **Compare Diff**, and **Keep Mine** actions when unsaved edits exist.
-- **Web Dev & Dual Browser Preview**:
-  - Auto-detects Vite, Next.js, Laravel, WordPress, Docker Compose, Python, Hugo, and static projects, runs pre-flight environment diagnostics, and offers guided setup.
+- **Web Dev & Dual Browser Preview (with LAN Sharing)**:
+  - Auto-detects Vite, Next.js, Astro, Nuxt, Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, Hugo, MkDocs, Docker Compose, and static projects, runs pre-flight environment diagnostics, and offers guided setup.
   - **Pattern 1**: Native multi-WebView **Embedded Web Browser** in the right pane (`Settings` toggleable).
-  - **Pattern 2**: **External Live Browser Preview** over local HTTP (`127.0.0.1` or LAN `0.0.0.0`) with real-time auto-reload.
+  - **Pattern 2**: **External Live Browser Preview** (`127.0.0.1` or LAN `0.0.0.0`) with real-time auto-reload, plus **Project Dev Server LAN Access** (`LAN: ON / OFF` toggle, `0.0.0.0` binding, and one-click LAN URL copy chips) to preview projects on phones or other PCs over local Wi-Fi.
 - **Productivity Extras & Update Checker**: **Quick Open (`⌘P` / `@headings`)**, Keyboard macro recording & playback (`⌘⇧M` / `F8`), Format Toolbar edit/zoom controls & Status Bar zoom popover (`25%`–`400%`), Smart Line Copy (`⌘C` / `Ctrl+C`), Mermaid diagrams, KaTeX math, GitHub callouts, YAML Frontmatter editor, AI output cleanup & table formatter, estimated LLM token counter, **Copy as Rich Text** & HTML/TSV smart paste, Find & Replace, Command Palette (`⌘K` / `Ctrl+K`), Zen Mode (`⌘⇧F` / `Ctrl+Shift+F`), **Self-Contained Word (`.docx`) / HTML** (embedded local images) / PDF export, and **In-App Update Checker** via GitHub Releases.
 - **OS-Aware First-Launch Language**: Automatically launches in Japanese when the OS language is Japanese, and English for all other languages (manual switch available anytime in Settings or TopBar).
 
@@ -99,7 +99,13 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.3.0
+## What's New in v1.3.1
+
+- **Project Dev Server LAN Access (`LAN: ON / OFF`)**: Added a quick **`LAN: ON / OFF`** toggle across the **Sidebar** project panel, **Built-in Web Browser**, **Web Page Preview**, and **Code Preview** headers (plus **Settings → AI & Browser → Allow LAN access to Project Dev Server**). When enabled, project dev servers automatically bind to `0.0.0.0` across built-in static servers, PHP, Laravel, Django, Streamlit, FastAPI/uvicorn, Flask, Hugo, MkDocs, Vite, VitePress, SvelteKit, Astro, Nuxt, Docusaurus, and Next.js (`-H 0.0.0.0`), restarting cleanly when toggled mid-session.
+- **One-Click LAN URL Copy Chips & External Server Probe**: Discovers local LAN IPv4 addresses (and server-printed LAN URLs), renders clickable **`LAN: <ip>:<port>/`** copy chips in the UI, and probes externally running dev servers to warn clearly when a server is bound to `localhost` only.
+
+<details>
+<summary>Previous release: v1.3.0</summary>
 
 - **Auto-Migrate Temp Pasted Images on Save**: When screenshots or images pasted into an unsaved document (`onigiri-markdown-images` temp folder) are saved to disk for the first time (Save / Save As), Onigiri Editor automatically moves those images into the configured `assets/` folder beside the document and rewrites the Markdown links (`./assets/...`), preventing broken images after cache cleanup.
 - **Embedded Local Images in HTML & Word (`.docx`) Exports**:
@@ -110,6 +116,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **Faster Startup via Code Splitting & Lazy Loading**: Configured Vite `manualChunks` (`vendor-mermaid`, `vendor-codemirror`, `vendor-tiptap`, `vendor-katex`, `vendor-markdown`, `vendor-highlight`, `vendor-icons`), converted Mermaid rendering and `docxExport` to dynamic imports, and lazy-loaded 17 modals with `<Suspense>` to slash initial JS payload size.
 - **In-App Update Checker & Tightened Tauri CSP**: Added GitHub Releases update checks on startup (configurable), from **Help → Check for Updates...**, Command Palette, **About**, and **Settings**, with an update banner linking to the matching OS installer; tightened Tauri Content Security Policy to remove `'unsafe-eval'`.
 - **Modularized Architecture & Automated Vitest + CI Suite**: Split oversized backend/frontend files into focused modules (`images.rs`, `updates.rs`, `session.ts`, `imageCache.ts`, `exportHelpers.ts`, `cmTheme.ts`, `src/styles/*.css`), updated **Help → Online Manual** URL, and added Vitest frontend unit tests wired into GitHub Actions release builds.
+
+</details>
 
 <details>
 <summary>Previous release: v1.2.1</summary>

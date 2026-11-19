@@ -72,6 +72,8 @@ pub struct ProjectServerStatus {
     pub running: bool,
     pub starting: bool,
     pub external: bool,
+    pub allow_lan: bool,
+    pub lan_urls: Vec<String>,
     pub root_path: Option<String>,
     pub kind: Option<String>,
     pub url: Option<String>,
@@ -816,16 +818,22 @@ struct PythonWebSpec {
 }
 
 fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
+    detect_python_web_with_host(root, false)
+}
+
+fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWebSpec> {
+    let bind_host = if allow_lan { "0.0.0.0" } else { "127.0.0.1" };
     if root.join("manage.py").is_file() {
+        let addr = format!("{}:8000", bind_host);
         return Some(PythonWebSpec {
             kind: "django",
             dev_script: "python-django",
             default_url: "http://127.0.0.1:8000",
-            command_label: "python manage.py runserver 127.0.0.1:8000".to_string(),
+            command_label: format!("python manage.py runserver {}", addr),
             args: vec![
                 "manage.py".to_string(),
                 "runserver".to_string(),
-                "127.0.0.1:8000".to_string(),
+                addr,
             ],
             uses_uv_ok: true,
         });
@@ -854,7 +862,10 @@ fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
             kind: "streamlit",
             dev_script: "python-streamlit",
             default_url: "http://localhost:8501",
-            command_label: format!("streamlit run {} --server.headless true --server.port 8501", entry),
+            command_label: format!(
+                "streamlit run {} --server.headless true --server.address {} --server.port 8501",
+                entry, bind_host
+            ),
             args: vec![
                 "-m".to_string(),
                 "streamlit".to_string(),
@@ -862,6 +873,8 @@ fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
                 entry.to_string(),
                 "--server.headless".to_string(),
                 "true".to_string(),
+                "--server.address".to_string(),
+                bind_host.to_string(),
                 "--server.port".to_string(),
                 "8501".to_string(),
             ],
@@ -883,14 +896,14 @@ fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
             kind: "fastapi",
             dev_script: "python-fastapi",
             default_url: "http://127.0.0.1:8000",
-            command_label: format!("uvicorn {} --reload --host 127.0.0.1 --port 8000", module),
+            command_label: format!("uvicorn {} --reload --host {} --port 8000", module, bind_host),
             args: vec![
                 "-m".to_string(),
                 "uvicorn".to_string(),
                 module.to_string(),
                 "--reload".to_string(),
                 "--host".to_string(),
-                "127.0.0.1".to_string(),
+                bind_host.to_string(),
                 "--port".to_string(),
                 "8000".to_string(),
             ],
@@ -907,7 +920,10 @@ fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
             kind: "flask",
             dev_script: "python-flask",
             default_url: "http://127.0.0.1:5000",
-            command_label: format!("flask --app {} run --debug --host 127.0.0.1 --port 5000", entry),
+            command_label: format!(
+                "flask --app {} run --debug --host {} --port 5000",
+                entry, bind_host
+            ),
             args: vec![
                 "-m".to_string(),
                 "flask".to_string(),
@@ -916,7 +932,7 @@ fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
                 "run".to_string(),
                 "--debug".to_string(),
                 "--host".to_string(),
-                "127.0.0.1".to_string(),
+                bind_host.to_string(),
                 "--port".to_string(),
                 "5000".to_string(),
             ],
@@ -2677,6 +2693,88 @@ fn extract_local_url(line: &str) -> Option<String> {
     None
 }
 
+fn extract_lan_url(line: &str) -> Option<String> {
+    let clean = strip_ansi(line);
+    for prefix in ["http://", "https://"] {
+        let mut rest = clean.as_str();
+        while let Some(idx) = rest.find(prefix) {
+            let slice = &rest[idx..];
+            let end = slice
+                .find(|c: char| {
+                    c.is_whitespace() || matches!(c, '"' | '\'' | ')' | ']' | '>' | '`')
+                })
+                .unwrap_or(slice.len());
+            let candidate = slice[..end].trim_end_matches(['.', ',', ';']).to_string();
+            if let Ok(parsed) = url::Url::parse(&candidate) {
+                if let Some(url::Host::Ipv4(ipv4)) = parsed.host() {
+                    if !ipv4.is_loopback() && !ipv4.is_unspecified() && !ipv4.is_link_local() {
+                        let normalized = if candidate.ends_with('/') {
+                            candidate
+                        } else {
+                            format!("{}/", candidate)
+                        };
+                        return Some(normalized);
+                    }
+                }
+            }
+            rest = &slice[prefix.len()..];
+        }
+    }
+    None
+}
+
+fn merge_lan_url(urls: &mut Vec<String>, candidate: String) {
+    let norm_cand = candidate.trim_end_matches('/');
+    if urls.iter().any(|u| u.trim_end_matches('/') == norm_cand) {
+        return;
+    }
+    urls.push(candidate);
+}
+
+fn build_lan_urls_for_url(url_str: &str) -> Vec<String> {
+    let Ok(parsed) = url::Url::parse(url_str) else {
+        return Vec::new();
+    };
+    let Some(port) = parsed.port_or_known_default() else {
+        return Vec::new();
+    };
+    let scheme = parsed.scheme();
+    crate::live_preview::detect_lan_ipv4s()
+        .into_iter()
+        .map(|ip| format!("{}://{}:{}/", scheme, ip, port))
+        .collect()
+}
+
+fn compute_project_lan_urls(allow_lan: bool, url_opt: Option<&str>) -> Vec<String> {
+    if !allow_lan {
+        return Vec::new();
+    }
+    url_opt.map(build_lan_urls_for_url).unwrap_or_default()
+}
+
+async fn probe_lan_reachable(url_str: &str, timeout_ms: u64) -> Vec<String> {
+    let Ok(parsed) = url::Url::parse(url_str) else {
+        return Vec::new();
+    };
+    let Some(port) = parsed.port_or_known_default() else {
+        return Vec::new();
+    };
+    let scheme = parsed.scheme();
+    let dur = Duration::from_millis(timeout_ms);
+    let mut reachable = Vec::new();
+    for ip in crate::live_preview::detect_lan_ipv4s() {
+        if let Ok(Ok(_)) = tokio::time::timeout(
+            dur,
+            tokio::net::TcpStream::connect((ip.as_str(), port)),
+        )
+        .await
+        {
+            reachable.push(format!("{}://{}:{}/", scheme, ip, port));
+        }
+    }
+    reachable
+}
+
 fn guess_static_mime(path: &Path) -> &'static str {
     let ext = path
         .extension()
@@ -2817,6 +2915,8 @@ async fn kill_existing_server(guard: &mut ProjectServerInner) {
     guard.status.running = false;
     guard.status.starting = false;
     guard.status.external = false;
+    guard.status.allow_lan = false;
+    guard.status.lan_urls.clear();
 }
 
 pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
@@ -2860,6 +2960,8 @@ pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
         guard.status.running = false;
         guard.status.starting = false;
         guard.status.external = false;
+        guard.status.allow_lan = false;
+        guard.status.lan_urls.clear();
     };
 }
 
@@ -2874,13 +2976,76 @@ enum ResolvedRunner {
     StaticHttp,
 }
 
+fn read_package_script_cmd(root: &Path, script_name: &str) -> Option<String> {
+    let raw = fs::read_to_string(root.join("package.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    json["scripts"][script_name]
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+fn append_node_lan_args(
+    args: &mut Vec<String>,
+    pm: &str,
+    kind: &str,
+    script_cmd: Option<&str>,
+) {
+    let raw_cmd = script_cmd.unwrap_or("");
+    let cmd_lower = raw_cmd.to_ascii_lowercase();
+    let already_has_host = cmd_lower.split_whitespace().any(|tok| {
+        tok == "--host"
+            || tok.starts_with("--host=")
+            || tok == "--hostname"
+            || tok.starts_with("--hostname=")
+            || tok.starts_with("host=")
+    }) || raw_cmd
+        .split_whitespace()
+        .any(|tok| tok == "-H" || tok.starts_with("-H="));
+
+    if already_has_host {
+        return;
+    }
+
+    let extra: Vec<&str> = if kind == "next"
+        || cmd_lower.contains("next dev")
+        || cmd_lower.contains("next start")
+    {
+        vec!["-H", "0.0.0.0"]
+    } else if matches!(
+        kind,
+        "vite" | "vitepress" | "sveltekit" | "astro" | "nuxt" | "docusaurus"
+    ) || cmd_lower.contains("vite")
+        || cmd_lower.contains("astro")
+        || cmd_lower.contains("nuxt")
+        || cmd_lower.contains("docusaurus")
+        || cmd_lower.contains("svelte-kit")
+    {
+        vec!["--host", "0.0.0.0"]
+    } else {
+        Vec::new()
+    };
+
+    if extra.is_empty() {
+        return;
+    }
+
+    if pm == "npm" {
+        args.push("--".to_string());
+    }
+    for flag in extra {
+        args.push(flag.to_string());
+    }
+}
+
 fn resolve_runner(
     root_path: &str,
     info: &ProjectInfo,
     script_name: Option<String>,
+    allow_lan: bool,
 ) -> Result<ResolvedRunner, String> {
     let root = Path::new(root_path);
     let chosen_script = script_name.or_else(|| info.dev_script.clone());
+    let bind_host = if allow_lan { "0.0.0.0" } else { "127.0.0.1" };
 
     if info.kind == "static" || chosen_script.as_deref() == Some("static-http") {
         return Ok(ResolvedRunner::StaticHttp);
@@ -2917,13 +3082,13 @@ fn resolve_runner(
                 args: vec![
                     "artisan".to_string(),
                     "serve".to_string(),
-                    "--host=127.0.0.1".to_string(),
+                    format!("--host={}", bind_host),
                     "--port=8000".to_string(),
                 ],
                 label: if with_vite {
                     "php artisan serve + vite".to_string()
                 } else {
-                    "php artisan serve --host=127.0.0.1 --port=8000".to_string()
+                    format!("php artisan serve --host={} --port=8000", bind_host)
                 },
                 companion_vite: with_vite,
                 is_docker_compose: false,
@@ -2941,21 +3106,23 @@ fn resolve_runner(
         } else {
             "."
         };
+        let addr = format!("{}:8000", bind_host);
         return Ok(ResolvedRunner::Command {
             exe: php,
             args: vec![
                 "-S".to_string(),
-                "127.0.0.1:8000".to_string(),
+                addr.clone(),
                 "-t".to_string(),
                 docroot.to_string(),
             ],
-            label: format!("php -S 127.0.0.1:8000 -t {}", docroot),
+            label: format!("php -S {} -t {}", addr, docroot),
             companion_vite: false,
             is_docker_compose: false,
         });
     }
 
     if info.kind == "mkdocs" {
+        let addr = format!("{}:8000", bind_host);
         for rel in [
             ".venv/bin/mkdocs",
             ".venv/Scripts/mkdocs.exe",
@@ -2966,12 +3133,8 @@ fn resolve_runner(
             if p.is_file() {
                 return Ok(ResolvedRunner::Command {
                     exe: p.to_string_lossy().to_string(),
-                    args: vec![
-                        "serve".to_string(),
-                        "-a".to_string(),
-                        "127.0.0.1:8000".to_string(),
-                    ],
-                    label: "mkdocs serve -a 127.0.0.1:8000".to_string(),
+                    args: vec!["serve".to_string(), "-a".to_string(), addr.clone()],
+                    label: format!("mkdocs serve -a {}", addr),
                     companion_vite: false,
                     is_docker_compose: false,
                 });
@@ -2980,12 +3143,8 @@ fn resolve_runner(
         if let Some(mk) = find_executable(&["mkdocs"]) {
             return Ok(ResolvedRunner::Command {
                 exe: mk,
-                args: vec![
-                    "serve".to_string(),
-                    "-a".to_string(),
-                    "127.0.0.1:8000".to_string(),
-                ],
-                label: "mkdocs serve -a 127.0.0.1:8000".to_string(),
+                args: vec!["serve".to_string(), "-a".to_string(), addr.clone()],
+                label: format!("mkdocs serve -a {}", addr),
                 companion_vite: false,
                 is_docker_compose: false,
             });
@@ -2996,12 +3155,12 @@ fn resolve_runner(
                 "mkdocs".to_string(),
                 "serve".to_string(),
                 "-a".to_string(),
-                "127.0.0.1:8000".to_string(),
+                addr.clone(),
             ]);
             return Ok(ResolvedRunner::Command {
                 exe: py_exe,
                 args: prefix_args,
-                label: "python -m mkdocs serve -a 127.0.0.1:8000".to_string(),
+                label: format!("python -m mkdocs serve -a {}", addr),
                 companion_vite: false,
                 is_docker_compose: false,
             });
@@ -3012,15 +3171,21 @@ fn resolve_runner(
     if info.kind == "hugo" {
         let hugo = find_executable(&["hugo"])
             .ok_or_else(|| "Command not found: hugo. Please install Hugo (e.g. brew install hugo).".to_string())?;
+        let mut args = vec![
+            "server".to_string(),
+            "-D".to_string(),
+            "--port".to_string(),
+            "1313".to_string(),
+        ];
+        if allow_lan {
+            args.push("--bind".to_string());
+            args.push("0.0.0.0".to_string());
+        }
+        let label = format!("hugo {}", args.join(" "));
         return Ok(ResolvedRunner::Command {
             exe: hugo,
-            args: vec![
-                "server".to_string(),
-                "-D".to_string(),
-                "--port".to_string(),
-                "1313".to_string(),
-            ],
-            label: "hugo server -D --port 1313".to_string(),
+            args,
+            label,
             companion_vite: false,
             is_docker_compose: false,
         });
@@ -3028,37 +3193,49 @@ fn resolve_runner(
 
     if info.kind == "jekyll" {
         if let Some(bundle) = find_executable(&["bundle"]) {
+            let mut args = vec![
+                "exec".to_string(),
+                "jekyll".to_string(),
+                "serve".to_string(),
+                "--port".to_string(),
+                "4000".to_string(),
+            ];
+            if allow_lan {
+                args.push("--host".to_string());
+                args.push("0.0.0.0".to_string());
+            }
+            let label = format!("bundle {}", args.join(" "));
             return Ok(ResolvedRunner::Command {
                 exe: bundle,
-                args: vec![
-                    "exec".to_string(),
-                    "jekyll".to_string(),
-                    "serve".to_string(),
-                    "--port".to_string(),
-                    "4000".to_string(),
-                ],
-                label: "bundle exec jekyll serve --port 4000".to_string(),
+                args,
+                label,
                 companion_vite: false,
                 is_docker_compose: false,
             });
         }
         let jekyll = find_executable(&["jekyll"])
             .ok_or_else(|| "Command not found: bundle / jekyll. Please install Ruby Bundler & Jekyll.".to_string())?;
+        let mut args = vec![
+            "serve".to_string(),
+            "--port".to_string(),
+            "4000".to_string(),
+        ];
+        if allow_lan {
+            args.push("--host".to_string());
+            args.push("0.0.0.0".to_string());
+        }
+        let label = format!("jekyll {}", args.join(" "));
         return Ok(ResolvedRunner::Command {
             exe: jekyll,
-            args: vec![
-                "serve".to_string(),
-                "--port".to_string(),
-                "4000".to_string(),
-            ],
-            label: "jekyll serve --port 4000".to_string(),
+            args,
+            label,
             companion_vite: false,
             is_docker_compose: false,
         });
     }
 
     if matches!(info.kind.as_str(), "django" | "fastapi" | "flask" | "streamlit") {
-        let spec = detect_python_web(root)
+        let spec = detect_python_web_with_host(root, allow_lan)
             .ok_or_else(|| "Python web entry file not found in project root.".to_string())?;
         let (py_exe, mut prefix_args) = if spec.uses_uv_ok {
             find_python_runner(root)
@@ -3090,10 +3267,16 @@ fn resolve_runner(
             pm_static, pm_static
         )
     })?;
+    let mut args = vec!["run".to_string(), sc.clone()];
+    if allow_lan {
+        let script_cmd = read_package_script_cmd(root, &sc);
+        append_node_lan_args(&mut args, pm_static, &info.kind, script_cmd.as_deref());
+    }
+    let label = format!("{} {}", pm_static, args.join(" "));
     Ok(ResolvedRunner::Command {
         exe,
-        args: vec!["run".to_string(), sc.clone()],
-        label: format!("{} run {}", pm_static, sc),
+        args,
+        label,
         companion_vite: false,
         is_docker_compose: false,
     })
@@ -3105,22 +3288,51 @@ pub async fn start_project_dev_server(
     state: State<'_, ProjectServerState>,
     root_path: String,
     script_name: Option<String>,
+    allow_lan: Option<bool>,
 ) -> Result<ProjectServerStatus, String> {
     let _start_guard = state.start_lock.lock().await;
     let info = inspect_root_dir(Path::new(&root_path))?;
+    let want_lan = allow_lan.unwrap_or(false);
 
-    // 1. If we already manage a live server for this exact root_path, reuse it without spawning a duplicate.
+    // 1. If we already manage a live server for this exact root_path, reuse it when LAN mode matches
+    // (or refresh LAN URLs for externally-managed servers).
     {
-        let guard = state.inner.lock().await;
-        if guard.status.running
-            && guard.status.root_path.as_deref() == Some(root_path.as_str())
-        {
-            if let Some(ref existing_url) = guard.status.url {
-                if probe_local_http(existing_url, 400).await || guard.status.starting {
-                    return Ok(guard.status.clone());
+        let existing_snap = {
+            let guard = state.inner.lock().await;
+            if guard.status.running
+                && guard.status.root_path.as_deref() == Some(root_path.as_str())
+            {
+                Some(guard.status.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(existing) = existing_snap {
+            if existing.external {
+                if let Some(ref existing_url) = existing.url {
+                    if probe_local_http(existing_url, 400).await {
+                        let lan_urls = if want_lan {
+                            probe_lan_reachable(existing_url, 250).await
+                        } else {
+                            Vec::new()
+                        };
+                        let mut guard = state.inner.lock().await;
+                        guard.status.allow_lan = !lan_urls.is_empty();
+                        guard.status.lan_urls = lan_urls;
+                        let snap = guard.status.clone();
+                        drop(guard);
+                        let _ = app.emit("project-server-update", snap.clone());
+                        return Ok(snap);
+                    }
                 }
-            } else if guard.status.starting {
-                return Ok(guard.status.clone());
+            } else if existing.allow_lan == want_lan {
+                if let Some(ref existing_url) = existing.url {
+                    if probe_local_http(existing_url, 400).await || existing.starting {
+                        return Ok(existing);
+                    }
+                } else if existing.starting {
+                    return Ok(existing);
+                }
             }
         }
     }
@@ -3142,12 +3354,19 @@ pub async fn start_project_dev_server(
 
         for candidate in &candidate_urls {
             if probe_local_http(candidate, 500).await {
+                let lan_urls = if want_lan {
+                    probe_lan_reachable(candidate, 250).await
+                } else {
+                    Vec::new()
+                };
                 let mut guard = state.inner.lock().await;
                 kill_existing_server(&mut guard).await;
                 guard.status = ProjectServerStatus {
                     running: true,
                     starting: false,
                     external: true,
+                    allow_lan: !lan_urls.is_empty(),
+                    lan_urls,
                     root_path: Some(root_path.clone()),
                     kind: Some(info.kind.clone()),
                     url: Some(candidate.clone()),
@@ -3176,6 +3395,8 @@ pub async fn start_project_dev_server(
                             running: false,
                             starting: false,
                             external: false,
+                            allow_lan: false,
+                            lan_urls: Vec::new(),
                             root_path: Some(root_path.clone()),
                             kind: Some(info.kind.clone()),
                             url: None,
@@ -3198,17 +3419,19 @@ pub async fn start_project_dev_server(
         kill_existing_server(&mut guard).await;
     }
 
-    let runner = resolve_runner(&root_path, &info, script_name)?;
+    let runner = resolve_runner(&root_path, &info, script_name, want_lan)?;
 
     if matches!(runner, ResolvedRunner::StaticHttp) {
-        let listener = match TcpListener::bind("127.0.0.1:4173").await {
+        let bind_host = if want_lan { "0.0.0.0" } else { "127.0.0.1" };
+        let listener = match TcpListener::bind(format!("{}:4173", bind_host)).await {
             Ok(l) => l,
-            Err(_) => TcpListener::bind("127.0.0.1:0")
+            Err(_) => TcpListener::bind(format!("{}:0", bind_host))
                 .await
                 .map_err(|e| format!("Failed to start built-in static server: {}", e))?,
         };
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let url = format!("http://127.0.0.1:{}", port);
+        let lan_urls = compute_project_lan_urls(want_lan, Some(&url));
         let root_buf = PathBuf::from(&root_path);
         let task = tokio::spawn(async move {
             loop {
@@ -3232,6 +3455,8 @@ pub async fn start_project_dev_server(
                 running: true,
                 starting: false,
                 external: false,
+                allow_lan: want_lan,
+                lan_urls,
                 root_path: Some(root_path.clone()),
                 kind: Some("static".to_string()),
                 url: Some(url.clone()),
@@ -3265,6 +3490,10 @@ pub async fn start_project_dev_server(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
+    if want_lan {
+        cmd.env("HOST", "0.0.0.0");
+    }
+
     #[cfg(unix)]
     {
         cmd.process_group(0);
@@ -3282,7 +3511,14 @@ pub async fn start_project_dev_server(
     let (aux_child, aux_pid) = if companion_vite {
         let pm = detect_package_manager(Path::new(&root_path));
         if let Some(pm_exe) = find_executable(&[pm]) {
-            let vite_args = vec!["run".to_string(), "dev".to_string()];
+            let mut vite_args = vec!["run".to_string(), "dev".to_string()];
+            if want_lan {
+                if pm == "npm" {
+                    vite_args.push("--".to_string());
+                }
+                vite_args.push("--host".to_string());
+                vite_args.push("0.0.0.0".to_string());
+            }
             let mut vcmd = build_project_command(&pm_exe, &vite_args);
             vcmd.current_dir(&root_path)
                 .env("PATH", extended_path())
@@ -3291,6 +3527,9 @@ pub async fn start_project_dev_server(
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
+            if want_lan {
+                vcmd.env("HOST", "0.0.0.0");
+            }
             #[cfg(unix)]
             {
                 vcmd.process_group(0);
@@ -3320,6 +3559,8 @@ pub async fn start_project_dev_server(
             running: true,
             starting: true,
             external: false,
+            allow_lan: want_lan,
+            lan_urls: Vec::new(),
             root_path: Some(root_path.clone()),
             kind: Some(info.kind.clone()),
             url: None,
@@ -3347,6 +3588,11 @@ pub async fn start_project_dev_server(
                 } else {
                     extract_local_url(&clean)
                 };
+                let maybe_lan = if want_lan && !is_docker_compose {
+                    extract_lan_url(&clean)
+                } else {
+                    None
+                };
                 {
                     let mut guard = shared_out.lock().await;
                     if guard.generation != gen_id {
@@ -3356,6 +3602,9 @@ pub async fn start_project_dev_server(
                     if guard.status.logs.len() > 80 {
                         let excess = guard.status.logs.len() - 80;
                         guard.status.logs.drain(0..excess);
+                    }
+                    if let Some(lan_u) = maybe_lan {
+                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
                     }
                     if maybe_url.is_none() {
                         let snap = guard.status.clone();
@@ -3372,12 +3621,16 @@ pub async fn start_project_dev_server(
                         }
                         tokio::time::sleep(Duration::from_millis(120)).await;
                     }
+                    let computed_lan = compute_project_lan_urls(want_lan, Some(&u));
                     let mut guard = shared_out.lock().await;
                     if guard.generation != gen_id {
                         break;
                     }
                     guard.status.url = Some(u);
                     guard.status.starting = false;
+                    for lan_u in computed_lan {
+                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                    }
                     let snap = guard.status.clone();
                     drop(guard);
                     let _ = app_out.emit("project-server-update", snap);
@@ -3401,6 +3654,11 @@ pub async fn start_project_dev_server(
                 } else {
                     extract_local_url(&clean)
                 };
+                let maybe_lan = if want_lan && !is_docker_compose {
+                    extract_lan_url(&clean)
+                } else {
+                    None
+                };
                 {
                     let mut guard = shared_err.lock().await;
                     if guard.generation != gen_id {
@@ -3410,6 +3668,9 @@ pub async fn start_project_dev_server(
                     if guard.status.logs.len() > 80 {
                         let excess = guard.status.logs.len() - 80;
                         guard.status.logs.drain(0..excess);
+                    }
+                    if let Some(lan_u) = maybe_lan {
+                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
                     }
                     if maybe_url.is_none() {
                         let snap = guard.status.clone();
@@ -3426,12 +3687,16 @@ pub async fn start_project_dev_server(
                         }
                         tokio::time::sleep(Duration::from_millis(120)).await;
                     }
+                    let computed_lan = compute_project_lan_urls(want_lan, Some(&u));
                     let mut guard = shared_err.lock().await;
                     if guard.generation != gen_id {
                         break;
                     }
                     guard.status.url = Some(u);
                     guard.status.starting = false;
+                    for lan_u in computed_lan {
+                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                    }
                     let snap = guard.status.clone();
                     drop(guard);
                     let _ = app_err.emit("project-server-update", snap);
@@ -3476,6 +3741,8 @@ pub async fn start_project_dev_server(
                             guard.status.running = false;
                             guard.status.starting = false;
                             guard.status.external = false;
+                            guard.status.allow_lan = false;
+                            guard.status.lan_urls.clear();
                             if !exit_status.success() {
                                 guard.status.error = Some(format!(
                                     "Dev server exited with code {}",
@@ -3498,10 +3765,14 @@ pub async fn start_project_dev_server(
             if should_probe_fallback {
                 if let Some(ref fb) = fallback_url {
                     if probe_local_http(fb, 350).await {
+                        let computed_lan = compute_project_lan_urls(want_lan, Some(fb));
                         let mut guard = shared_wait.lock().await;
                         if guard.generation == gen_id && guard.status.url.is_none() {
                             guard.status.url = Some(fb.clone());
                             guard.status.starting = false;
+                            for lan_u in computed_lan {
+                                merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                            }
                             if is_docker_compose {
                                 guard.status.external = true;
                             }
@@ -3519,6 +3790,8 @@ pub async fn start_project_dev_server(
                 if guard.generation == gen_id && guard.status.url.is_none() {
                     guard.status.running = false;
                     guard.status.starting = false;
+                    guard.status.allow_lan = false;
+                    guard.status.lan_urls.clear();
                     guard.status.error = Some("Docker container started, but HTTP did not respond in time.".to_string());
                     let snap = guard.status.clone();
                     drop(guard);
@@ -3541,6 +3814,8 @@ pub async fn stop_project_dev_server(
     kill_existing_server(&mut guard).await;
     guard.status.url = None;
     guard.status.error = None;
+    guard.status.allow_lan = false;
+    guard.status.lan_urls.clear();
     let snap = guard.status.clone();
     drop(guard);
     let _ = app.emit("project-server-update", snap.clone());
@@ -4629,5 +4904,79 @@ mod tests {
             "C:\\Users\\Alice\\AppData\\Local\\Microsoft\\WinGet\\Links;C:\\Program Files\\PHP\\v8.4"
         );
         assert_eq!(parse_reg_query_path_output("ERROR: Not found"), None);
+    }
+
+    #[test]
+    fn extracts_and_merges_project_lan_urls() {
+        assert_eq!(
+            extract_lan_url("┃ Local    http://localhost:4321/"),
+            None
+        );
+        assert_eq!(
+            extract_lan_url("┃ Network  http://192.168.1.30:4321/"),
+            Some("http://192.168.1.30:4321/".to_string())
+        );
+        assert_eq!(
+            extract_lan_url("  ➜  Network: http://10.0.0.12:5173"),
+            Some("http://10.0.0.12:5173/".to_string())
+        );
+        assert_eq!(extract_lan_url("Listening on http://0.0.0.0:8000/"), None);
+        assert_eq!(extract_lan_url("Link-local http://169.254.1.2:3000/"), None);
+
+        let mut urls = Vec::new();
+        merge_lan_url(&mut urls, "http://192.168.1.30:4321/".to_string());
+        merge_lan_url(&mut urls, "http://192.168.1.30:4321".to_string());
+        merge_lan_url(&mut urls, "http://192.168.50.10:4321/".to_string());
+        assert_eq!(
+            urls,
+            vec![
+                "http://192.168.1.30:4321/".to_string(),
+                "http://192.168.50.10:4321/".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn appends_node_lan_flags_appropriately() {
+        // Astro with npm -> inserts `-- --host 0.0.0.0`
+        let mut npm_astro = vec!["run".to_string(), "dev".to_string()];
+        append_node_lan_args(&mut npm_astro, "npm", "astro", Some("astro dev"));
+        assert_eq!(npm_astro, vec!["run", "dev", "--", "--host", "0.0.0.0"]);
+
+        // Vite with pnpm -> inserts `--host 0.0.0.0` without `--`
+        let mut pnpm_vite = vec!["run".to_string(), "dev".to_string()];
+        append_node_lan_args(&mut pnpm_vite, "pnpm", "vite", Some("vite"));
+        assert_eq!(pnpm_vite, vec!["run", "dev", "--host", "0.0.0.0"]);
+
+        // Next.js with npm -> inserts `-- -H 0.0.0.0`
+        let mut npm_next = vec!["run".to_string(), "dev".to_string()];
+        append_node_lan_args(&mut npm_next, "npm", "next", Some("next dev"));
+        assert_eq!(npm_next, vec!["run", "dev", "--", "-H", "0.0.0.0"]);
+
+        // Script already specifies `--host` -> does not duplicate
+        let mut existing_host = vec!["run".to_string(), "dev".to_string()];
+        append_node_lan_args(&mut existing_host, "npm", "astro", Some("astro dev --host"));
+        assert_eq!(existing_host, vec!["run", "dev"]);
+    }
+
+    #[test]
+    fn python_web_spec_binds_localhost_or_lan_by_flag() {
+        let py = make_temp_dir("py_lan_host");
+        fs::write(
+            py.join("pyproject.toml"),
+            "[project]\ndependencies = [\"fastapi\", \"uvicorn\"]\n",
+        )
+        .unwrap();
+        fs::write(py.join("main.py"), "from fastapi import FastAPI\napp = FastAPI()\n").unwrap();
+
+        let local_spec = detect_python_web_with_host(&py, false).unwrap();
+        assert!(local_spec.args.contains(&"127.0.0.1".to_string()));
+        assert!(!local_spec.args.contains(&"0.0.0.0".to_string()));
+
+        let lan_spec = detect_python_web_with_host(&py, true).unwrap();
+        assert!(lan_spec.args.contains(&"0.0.0.0".to_string()));
+        assert!(!lan_spec.args.contains(&"127.0.0.1".to_string()));
+
+        let _ = fs::remove_dir_all(&py);
     }
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { ClipboardCopy, ExternalLink, Globe, Info, Loader2, Play, Square } from 'lucide-react';
+import { ClipboardCopy, Copy, ExternalLink, Globe, Info, Loader2, Play, Square, Wifi } from 'lucide-react';
 import { all, createLowlight } from 'lowlight';
 import type { Translations } from '../i18n/types';
 import type { EditorSettings, Locale, ProjectInfo, ProjectServerStatus } from '../types';
@@ -21,6 +21,7 @@ interface CodePreviewPaneProps {
   onOpenBuiltinBrowser?: () => void;
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
+  projectServerAllowLan?: boolean;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -29,6 +30,8 @@ interface CodePreviewPaneProps {
   onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
   onStopProjectServer?: () => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
+  onToggleProjectServerLan?: () => void;
+  onCopyLanUrl?: (url: string) => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
   onRecheckProjectEnv?: () => void;
 }
@@ -122,6 +125,7 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   onOpenBuiltinBrowser,
   projectInfo,
   projectServer,
+  projectServerAllowLan = false,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -130,6 +134,8 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   onStartProjectAndBrowse,
   onStopProjectServer,
   onOpenProjectUrl,
+  onToggleProjectServerLan,
+  onCopyLanUrl,
   onAssistProjectSetup,
   onRecheckProjectEnv,
 }) => {
@@ -244,8 +250,33 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
               <strong>{projectInfo!.name}</strong>
               {activeUrl ? ` • ${activeUrl}` : ` • ${projectInfo!.devCommandLabel}`}
             </span>
+            {serverRunningHere &&
+              projectServer?.lanUrls &&
+              projectServer.lanUrls.length > 0 && (
+                <button
+                  type="button"
+                  className="project-url-chip is-lan"
+                  onClick={() => onCopyLanUrl?.(projectServer.lanUrls![0])}
+                  title={`${t.project.lanUrlCopyTitle}: ${projectServer.lanUrls[0]}`}
+                >
+                  <Copy size={10} />
+                  <span>LAN: {projectServer.lanUrls[0].replace(/^https?:\/\//, '')}</span>
+                </button>
+              )}
           </div>
           <div className="project-bar-actions">
+            {onToggleProjectServerLan && (
+              <button
+                type="button"
+                className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
+                onClick={onToggleProjectServerLan}
+                title={t.project.lanAccessToggleTitle}
+                aria-pressed={projectServerAllowLan}
+              >
+                <Wifi size={11} />
+                <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
+              </button>
+            )}
             {serverRunningHere && activeUrl ? (
               <>
                 {onOpenProjectUrl && (

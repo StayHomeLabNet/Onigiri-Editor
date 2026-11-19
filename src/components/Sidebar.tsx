@@ -44,6 +44,8 @@ import {
   AlertTriangle,
   FileQuestion,
   Check,
+  Wifi,
+  Copy,
 } from 'lucide-react';
 import type {
   GitPanelState,
@@ -272,6 +274,7 @@ interface SidebarProps {
   onInsertSnippet: (content: string) => void;
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
+  projectServerAllowLan?: boolean;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -280,6 +283,8 @@ interface SidebarProps {
   onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
   onStopProjectServer?: () => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
+  onToggleProjectServerLan?: () => void;
+  onCopyLanUrl?: (url: string) => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
   onRecheckProjectEnv?: () => void;
   gitStatusEntries?: Record<string, string>;
@@ -346,6 +351,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onInsertSnippet,
   projectInfo,
   projectServer,
+  projectServerAllowLan = false,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -354,6 +360,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onStartProjectAndBrowse,
   onStopProjectServer,
   onOpenProjectUrl,
+  onToggleProjectServerLan,
+  onCopyLanUrl,
   onAssistProjectSetup,
   onRecheckProjectEnv,
   gitStatusEntries = {},
@@ -1101,8 +1109,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </button>
                           )
                         )}
+                        {onToggleProjectServerLan && (
+                          <button
+                            type="button"
+                            className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
+                            onClick={onToggleProjectServerLan}
+                            title={t.project.lanAccessToggleTitle}
+                            aria-pressed={projectServerAllowLan}
+                          >
+                            <Wifi size={10} />
+                            <span>
+                              {projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}
+                            </span>
+                          </button>
+                        )}
                       </div>
                     )}
+                    {projectServer?.running &&
+                      (!projectServer.rootPath ||
+                        projectServer.rootPath === projectInfo.rootPath) &&
+                      projectServer.lanUrls &&
+                      projectServer.lanUrls.length > 0 && (
+                        <div className="sidebar-project-lan-row">
+                          {projectServer.lanUrls.map((lanUrl) => (
+                            <button
+                              key={lanUrl}
+                              type="button"
+                              className="project-url-chip is-lan"
+                              onClick={() => onCopyLanUrl?.(lanUrl)}
+                              title={`${t.project.lanUrlCopyTitle}: ${lanUrl}`}
+                            >
+                              <Copy size={10} />
+                              <span>LAN: {lanUrl.replace(/^https?:\/\//, '')}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    {projectServer?.running &&
+                      (!projectServer.rootPath ||
+                        projectServer.rootPath === projectInfo.rootPath) &&
+                      projectServerAllowLan &&
+                      projectServer.external &&
+                      (!projectServer.lanUrls || projectServer.lanUrls.length === 0) && (
+                        <div className="ai-hint-text">{t.project.externalLanUnavailableHint}</div>
+                      )}
                     <ProjectSetupCard
                       t={t}
                       locale={locale}

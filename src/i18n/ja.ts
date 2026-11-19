@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const ja: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.3.0',
+  versionLabel: 'v1.3.1',
   modes: {
     simple: 'シンプル',
     basic: '標準',
@@ -328,6 +328,9 @@ export const ja: Translations = {
       externalBrowserAllowLan: '同じローカルネットワーク（LAN）上の他端末からのアクセスを許可する',
       externalBrowserAllowLanHint:
         '※ 有効にすると 0.0.0.0 で待ち受け、同じ Wi-Fi / LAN 内のスマートフォンや他PCからもプレビューを開けます（OSのファイアウォール許可が必要な場合があります）。',
+      projectServerAllowLan: 'プロジェクト開発サーバーを同じ LAN 内の他端末からアクセス許可する',
+      projectServerAllowLanHint:
+        '※ 有効にすると 0.0.0.0（--host 0.0.0.0 / -H 0.0.0.0 等）で起動し、同じネットワーク内の他PC・スマホから http://<LAN IP>:<ポート>/ でアクセスできます（起動中に切り替えると自動で再起動します／OSファイアウォール許可が必要な場合があります）。',
       restoreSessionEnabled: '起動時に前回のタブ・フォルダー・編集内容を復元する',
       autoSaveEnabled: '保存済みファイルを自動保存する（1.5秒ごと・外部競合時は停止）',
       showTopBar: '上部ヘッダーバーを表示する',
@@ -610,6 +613,12 @@ export const ja: Translations = {
       'Windows のヒント: セットアップ後は「環境を再チェック」を押してください。新しく PATH に追加されたツールが認識されない場合はアプリを一度再起動してください（winget 未導入時は公式サイトを開きます）。',
     platformNoteLinux:
       'Linux のヒント: パッケージ導入や Docker 起動時は端末内で sudo パスワードの入力が必要です。ネイティブ Docker Engine を使う場合はユーザーを docker グループへ追加（sudo usermod -aG docker $USER）して再ログインしてください。',
+    lanAccessOn: 'LAN: ON',
+    lanAccessOff: 'LAN: OFF',
+    lanAccessToggleTitle: '同じローカルネットワーク（LAN）上の他端末からのアクセスを ON / OFF 切り替え',
+    lanUrlCopyTitle: 'クリックして LAN アクセス用 URL をコピー',
+    externalLanUnavailableHint:
+      '外部で起動中のサーバーが localhost のみにバインドされているため LAN IP で接続できません。Onigiri Editor から再起動するか、外部サーバーを --host 0.0.0.0 付きで起動してください。',
   },
   imageModal: {
     title: '画像を挿入',
@@ -827,6 +836,8 @@ export const ja: Translations = {
     copiedLanUrl: 'LAN プレビュー URL をコピーしました',
     devServerStarted: '開発サーバーを起動しました',
     devServerStopped: '開発サーバーを停止しました',
+    devServerLanEnabled: '開発サーバーの LAN アクセスを ON にしました',
+    devServerLanDisabled: '開発サーバーの LAN アクセスを OFF にしました',
     macroRecordStarted: 'マクロの記録を開始しました（■ または ⌘+⇧+M で停止）',
     macroRecordStopped: 'マクロを記録しました（{n} ステップ）',
     macroRecordEmpty: '記録された操作がなかったため、以前のマクロを保持しました',

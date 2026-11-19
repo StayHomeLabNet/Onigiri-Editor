@@ -13,6 +13,7 @@ import {
   Copy,
   Image as ImageIcon,
   Code2,
+  Wifi,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
@@ -28,6 +29,7 @@ interface WebPagePreviewPaneProps {
   content: string;
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
+  projectServerAllowLan?: boolean;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -36,6 +38,8 @@ interface WebPagePreviewPaneProps {
   onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
   onStopProjectServer?: () => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
+  onToggleProjectServerLan?: () => void;
+  onCopyLanUrl?: (url: string) => void;
   onServeDistPreview?: (target: 'builtin' | 'external') => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
   onRecheckProjectEnv?: () => void;
@@ -142,6 +146,7 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
   content,
   projectInfo,
   projectServer,
+  projectServerAllowLan = false,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -150,6 +155,8 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
   onStartProjectAndBrowse,
   onStopProjectServer,
   onOpenProjectUrl,
+  onToggleProjectServerLan,
+  onCopyLanUrl,
   onServeDistPreview,
   onAssistProjectSetup,
   onRecheckProjectEnv,
@@ -521,8 +528,33 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                 <strong>{projectInfo.name}</strong>
                 {activeServerUrl ? ` • ${activeServerUrl}` : ` • ${projectInfo.devCommandLabel}`}
               </span>
+              {serverRunningHere &&
+                projectServer?.lanUrls &&
+                projectServer.lanUrls.length > 0 && (
+                  <button
+                    type="button"
+                    className="project-url-chip is-lan"
+                    onClick={() => onCopyLanUrl?.(projectServer.lanUrls![0])}
+                    title={`${t.project.lanUrlCopyTitle}: ${projectServer.lanUrls[0]}`}
+                  >
+                    <Copy size={10} />
+                    <span>LAN: {projectServer.lanUrls[0].replace(/^https?:\/\//, '')}</span>
+                  </button>
+                )}
             </div>
             <div className="project-bar-actions">
+              {onToggleProjectServerLan && (
+                <button
+                  type="button"
+                  className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
+                  onClick={onToggleProjectServerLan}
+                  title={t.project.lanAccessToggleTitle}
+                  aria-pressed={projectServerAllowLan}
+                >
+                  <Wifi size={11} />
+                  <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
+                </button>
+              )}
               {serverRunningHere && activeServerUrl ? (
                 <>
                   {onOpenProjectUrl && (
@@ -618,6 +650,42 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                 {activeServerUrl && <span className="project-url-text">{activeServerUrl}</span>}
               </div>
             )}
+
+            {onToggleProjectServerLan && (
+              <div className="sidebar-project-lan-row">
+                <button
+                  type="button"
+                  className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
+                  onClick={onToggleProjectServerLan}
+                  title={t.project.lanAccessToggleTitle}
+                  aria-pressed={projectServerAllowLan}
+                >
+                  <Wifi size={12} />
+                  <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
+                </button>
+                {serverRunningHere &&
+                  projectServer?.lanUrls &&
+                  projectServer.lanUrls.map((lanUrl) => (
+                    <button
+                      key={lanUrl}
+                      type="button"
+                      className="project-url-chip is-lan"
+                      onClick={() => onCopyLanUrl?.(lanUrl)}
+                      title={`${t.project.lanUrlCopyTitle}: ${lanUrl}`}
+                    >
+                      <Copy size={10} />
+                      <span>{lanUrl}</span>
+                    </button>
+                  ))}
+              </div>
+            )}
+
+            {serverRunningHere &&
+              projectServerAllowLan &&
+              projectServer?.external &&
+              (!projectServer.lanUrls || projectServer.lanUrls.length === 0) && (
+                <div className="ai-hint-text">{t.project.externalLanUnavailableHint}</div>
+              )}
 
             <div className="project-launcher-actions">
               {serverRunningHere && activeServerUrl ? (

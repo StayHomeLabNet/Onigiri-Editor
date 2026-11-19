@@ -324,6 +324,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   externalBrowserPreviewEnabled: true,
   externalBrowserPort: 49123,
   externalBrowserAllowLan: false,
+  projectServerAllowLan: false,
   restoreSessionEnabled: true,
   autoSaveEnabled: false,
   showTopBar: true,
@@ -4705,6 +4706,8 @@ export function App() {
           running: true,
           starting: false,
           external: true,
+          allowLan: false,
+          lanUrls: [],
           rootPath: info.rootPath,
           kind: info.kind,
           url: info.defaultUrl,
@@ -4741,6 +4744,8 @@ export function App() {
               running: true,
               starting: false,
               external: true,
+              allowLan: false,
+              lanUrls: [],
               rootPath: info.rootPath,
               kind: info.kind,
               url: info.defaultUrl,
@@ -4954,7 +4959,11 @@ export function App() {
       }
       try {
         pendingBrowseTargetRef.current = target;
-        const st = await startProjectDevServer(root, projectInfo?.devScript);
+        const st = await startProjectDevServer(
+          root,
+          projectInfo?.devScript,
+          settings.projectServerAllowLan
+        );
         setProjectServer(st);
         if (st.url && pendingBrowseTargetRef.current) {
           const dest = pendingBrowseTargetRef.current;
@@ -4971,12 +4980,80 @@ export function App() {
       projectInfo,
       projectServer,
       workspaceRoot,
+      settings.projectServerAllowLan,
       handleOpenProjectUrl,
       notify,
       t.toasts.devServerStarted,
       t.toasts.errorPrefix,
     ]
   );
+
+  const handleToggleProjectServerLan = useCallback(() => {
+    setSettings((s) => {
+      const nextAllowLan = !s.projectServerAllowLan;
+      return { ...s, projectServerAllowLan: nextAllowLan };
+    });
+  }, []);
+
+  // Rebind/restart project dev server cleanly when LAN access setting changes while running
+  const lastProjectLanRef = useRef(settings.projectServerAllowLan);
+  useEffect(() => {
+    const prev = lastProjectLanRef.current;
+    lastProjectLanRef.current = settings.projectServerAllowLan;
+    if (prev === settings.projectServerAllowLan || !isTauri()) return;
+    if (!projectServer?.running || !projectServer.rootPath) {
+      notify(
+        settings.projectServerAllowLan
+          ? t.toasts.devServerLanEnabled
+          : t.toasts.devServerLanDisabled
+      );
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const scriptArg =
+          projectInfo?.rootPath === projectServer.rootPath ? projectInfo.devScript : undefined;
+        const st = await startProjectDevServer(
+          projectServer.rootPath!,
+          scriptArg,
+          settings.projectServerAllowLan
+        );
+        if (!cancelled) {
+          setProjectServer(st);
+          if (settings.projectServerAllowLan) {
+            if (st.lanUrls && st.lanUrls.length > 0) {
+              notify(`${t.toasts.devServerLanEnabled}: ${st.lanUrls[0]}`);
+            } else if (st.external) {
+              notify(t.project.externalLanUnavailableHint);
+            } else {
+              notify(t.toasts.devServerLanEnabled);
+            }
+          } else {
+            notify(t.toasts.devServerLanDisabled);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    settings.projectServerAllowLan,
+    projectServer?.running,
+    projectServer?.rootPath,
+    projectInfo?.rootPath,
+    projectInfo?.devScript,
+    notify,
+    t.toasts.devServerLanEnabled,
+    t.toasts.devServerLanDisabled,
+    t.toasts.errorPrefix,
+    t.project.externalLanUnavailableHint,
+  ]);
 
   const handleStopProjectServer = useCallback(async () => {
     try {
@@ -6583,6 +6660,7 @@ export function App() {
             onInsertSnippet={(content) => getActiveEditorTarget()?.insertText(content)}
             projectInfo={projectInfo}
             projectServer={projectServer}
+            projectServerAllowLan={settings.projectServerAllowLan}
             setupBusy={projectSetupBusy}
             setupActionId={projectSetupActionId}
             setupLogs={projectSetupLogs}
@@ -6591,6 +6669,8 @@ export function App() {
             onStartProjectAndBrowse={handleStartProjectAndBrowse}
             onStopProjectServer={handleStopProjectServer}
             onOpenProjectUrl={handleOpenProjectUrl}
+            onToggleProjectServerLan={handleToggleProjectServerLan}
+            onCopyLanUrl={handleCopyLanUrl}
             onAssistProjectSetup={handleAssistProjectSetup}
             onRecheckProjectEnv={handleRefreshProjectInfo}
             gitStatusEntries={gitStatusEntries}
@@ -7107,6 +7187,7 @@ export function App() {
                       content={activeTab.content}
                       projectInfo={projectInfo}
                       projectServer={projectServer}
+                      projectServerAllowLan={settings.projectServerAllowLan}
                       setupBusy={projectSetupBusy}
                       setupActionId={projectSetupActionId}
                       setupLogs={projectSetupLogs}
@@ -7115,6 +7196,8 @@ export function App() {
                       onStartProjectAndBrowse={handleStartProjectAndBrowse}
                       onStopProjectServer={handleStopProjectServer}
                       onOpenProjectUrl={handleOpenProjectUrl}
+                      onToggleProjectServerLan={handleToggleProjectServerLan}
+                      onCopyLanUrl={handleCopyLanUrl}
                       onServeDistPreview={handleServeDistPreview}
                       onAssistProjectSetup={handleAssistProjectSetup}
                       onRecheckProjectEnv={handleRefreshProjectInfo}
@@ -7147,6 +7230,7 @@ export function App() {
                       }}
                       projectInfo={projectInfo}
                       projectServer={projectServer}
+                      projectServerAllowLan={settings.projectServerAllowLan}
                       setupBusy={projectSetupBusy}
                       setupActionId={projectSetupActionId}
                       setupLogs={projectSetupLogs}
@@ -7155,6 +7239,8 @@ export function App() {
                       onStartProjectAndBrowse={handleStartProjectAndBrowse}
                       onStopProjectServer={handleStopProjectServer}
                       onOpenProjectUrl={handleOpenProjectUrl}
+                      onToggleProjectServerLan={handleToggleProjectServerLan}
+                      onCopyLanUrl={handleCopyLanUrl}
                       onAssistProjectSetup={handleAssistProjectSetup}
                       onRecheckProjectEnv={handleRefreshProjectInfo}
                     />
@@ -7197,6 +7283,7 @@ export function App() {
                     visible={nativeBrowserVisible}
                     projectInfo={projectInfo}
                     projectServer={projectServer}
+                    projectServerAllowLan={settings.projectServerAllowLan}
                     setupBusy={projectSetupBusy}
                     setupActionId={projectSetupActionId}
                     setupLogs={projectSetupLogs}
@@ -7204,6 +7291,8 @@ export function App() {
                     recheckingEnv={projectRechecking}
                     onStartProjectServer={() => handleStartProjectAndBrowse('builtin')}
                     onStopProjectServer={handleStopProjectServer}
+                    onToggleProjectServerLan={handleToggleProjectServerLan}
+                    onCopyLanUrl={handleCopyLanUrl}
                     onAssistProjectSetup={handleAssistProjectSetup}
                     onRecheckProjectEnv={handleRefreshProjectInfo}
                   />
@@ -7381,6 +7470,7 @@ export function App() {
           externalPreviewLanUrls={externalPreviewLanUrls}
           onToggleExternalPreview={handleToggleExternalPreview}
           onCopyLanUrl={handleCopyLanUrl}
+          projectServer={projectServer}
           dataSummary={storedDataSummary}
           onResetSelectedSettings={handleResetSelectedSettings}
           onClearSelectedUserData={handleClearSelectedUserData}

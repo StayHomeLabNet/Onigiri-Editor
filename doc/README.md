@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.0)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.1)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -201,10 +201,11 @@ Right-click inside the editor to access:
 
 ## 8. Dev Server Integration & Dual Browser Preview
 
-When you open a project folder (`⌘⇧O` / `Ctrl+Shift+O`) or project file, Onigiri Editor automatically detects Vite, Next.js, Astro, Nuxt (including serving built `dist/` folders), Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, MkDocs, Hugo, Docker Compose, or static HTML projects, runs pre-flight environment diagnostics, and provides:
+When you open a project folder (`⌘⇧O` / `Ctrl+Shift+O`) or project file, Onigiri Editor automatically detects Vite, VitePress, SvelteKit, Astro, Nuxt (including serving built `dist/` folders), Docusaurus, Next.js, Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, MkDocs, Hugo, Docker Compose, or static HTML projects, runs pre-flight environment diagnostics, and provides:
 
 - **Pattern 1 (Built-in Web Browser)**: Multi-WebView right-pane browser (`Settings → AI & Browser`) with Back/Forward/Reload/URL bar and **Open in External Browser**.
 - **Pattern 2 (External Browser Live Preview + LAN)**: Local HTTP live-reload server (`127.0.0.1`, or `0.0.0.0` with **LAN sharing** to preview on phones/other PCs on the same Wi-Fi).
+- **Project Dev Server LAN Access (`LAN: ON / OFF`)**: Toggle **`LAN: ON / OFF`** directly in the Sidebar project bar, Built-in Web Browser, Web Page Preview, Code Preview, or **Settings → AI & Browser → Allow LAN access to Project Dev Server**. When enabled, supported dev servers bind to `0.0.0.0` (`--host 0.0.0.0` / `-H 0.0.0.0` / `-S 0.0.0.0:8000`) and display clickable **`LAN: <ip>:<port>/`** copy chips (toggling mid-run restarts the server automatically; OS firewall approval may be prompted; externally started `localhost`-only servers show a LAN-unreachable hint).
 
 ---
 
@@ -245,7 +246,7 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
   - **Editor & Line Copy**: Line Numbers, Word Wrap & Column Width, Column Ruler, Visible Symbols, Matching Brackets, Auto-Close Brackets, Default Encoding/EOL, Active Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, **Auto-fetch webpage title on URL paste (`autoTitleOnUrlPaste`)**, Smart Line Copy, and **Project Config (`.editorconfig` / `.onigiri.json`)** status & quick creation.
   - **Syntax Colors**: 7 presets + 10 per-token color pickers.
   - **Keybindings**: Interactive shortcut editor for 27 commands with search filter, conflict detection, clear, individual reset, and Reset All (dynamically reflected in Command Palette badges).
-  - **AI & Browser**: AI Folder Access, Built-in Browser toggle & default URL, External Live Preview toggle, port, and LAN sharing.
+  - **AI & Browser**: AI Folder Access, Built-in Browser toggle & default URL, External Live Preview toggle, port & LAN sharing, and **Allow LAN access to Project Dev Server** (`projectServerAllowLan`).
   - **Reset & Data**: **Export / Import JSON Backup** (selectively save/restore App & Editor settings, AI config & presets with optional API key exclusion, Custom Snippets, Templates, and Keybindings with merge/replace), **Reset Settings to Defaults**, and **Clear User Data & Caches** (also clears the LRU in-memory image cache).
 
 ---

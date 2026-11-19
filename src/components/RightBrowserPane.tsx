@@ -10,6 +10,8 @@ import {
   Loader2,
   AlertCircle,
   Info,
+  Wifi,
+  Copy,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
@@ -32,6 +34,7 @@ interface RightBrowserPaneProps {
   visible: boolean;
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
+  projectServerAllowLan?: boolean;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -39,6 +42,8 @@ interface RightBrowserPaneProps {
   recheckingEnv?: boolean;
   onStartProjectServer?: () => void;
   onStopProjectServer?: () => void;
+  onToggleProjectServerLan?: () => void;
+  onCopyLanUrl?: (url: string) => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
   onRecheckProjectEnv?: () => void;
 }
@@ -60,6 +65,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   visible,
   projectInfo,
   projectServer,
+  projectServerAllowLan = false,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -67,6 +73,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   recheckingEnv,
   onStartProjectServer,
   onStopProjectServer,
+  onToggleProjectServerLan,
+  onCopyLanUrl,
   onAssistProjectSetup,
   onRecheckProjectEnv,
 }) => {
@@ -378,11 +386,36 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                 {projectServer.url}
               </button>
             )}
+            {projectServer?.running &&
+              projectServer.lanUrls &&
+              projectServer.lanUrls.length > 0 && (
+                <button
+                  type="button"
+                  className="project-url-chip is-lan"
+                  onClick={() => onCopyLanUrl?.(projectServer.lanUrls![0])}
+                  title={`${t.project.lanUrlCopyTitle}: ${projectServer.lanUrls[0]}`}
+                >
+                  <Copy size={10} />
+                  <span>LAN: {projectServer.lanUrls[0].replace(/^https?:\/\//, '')}</span>
+                </button>
+              )}
             {!projectServer?.running && projectInfo?.devCommandLabel && (
               <span className="browser-project-cmd">{projectInfo.devCommandLabel}</span>
             )}
           </div>
           <div className="browser-project-actions">
+            {onToggleProjectServerLan && (
+              <button
+                type="button"
+                className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
+                onClick={onToggleProjectServerLan}
+                title={t.project.lanAccessToggleTitle}
+                aria-pressed={projectServerAllowLan}
+              >
+                <Wifi size={11} />
+                <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
+              </button>
+            )}
             {projectServer?.running ? (
               <button
                 type="button"

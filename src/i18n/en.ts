@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.3.0',
+  versionLabel: 'v1.3.1',
   modes: {
     simple: 'Simple',
     basic: 'Basic',
@@ -328,6 +328,9 @@ export const en: Translations = {
       externalBrowserAllowLan: 'Allow access from other devices on the local network (LAN)',
       externalBrowserAllowLanHint:
         'Listens on 0.0.0.0 so phones or other computers on the same Wi-Fi/LAN can open the live preview (your OS firewall may prompt to allow incoming connections).',
+      projectServerAllowLan: 'Allow LAN access to Project Dev Server (other devices on Wi-Fi / LAN)',
+      projectServerAllowLanHint:
+        'Binds to 0.0.0.0 (--host / -H 0.0.0.0) so other computers or phones on the same network can open http://<LAN-IP>:<port>/ (toggling while running restarts the server; OS firewall approval may be required).',
       restoreSessionEnabled: 'Restore previous tabs, folder & unsaved drafts on startup',
       autoSaveEnabled: 'Auto-save modified files to disk (1.5s delay, pauses on conflict)',
       showTopBar: 'Show top header bar',
@@ -610,6 +613,12 @@ export const en: Translations = {
       'Windows tip: Click "Re-check Environment" after setup. If a newly added tool on PATH is not recognized yet, restart Onigiri Editor once (if winget is missing, the official download page opens instead).',
     platformNoteLinux:
       'Linux tip: Installing packages or starting Docker in Terminal prompts for your sudo password. For native Docker Engine, add your user to the docker group (sudo usermod -aG docker $USER) and re-login.',
+    lanAccessOn: 'LAN: ON',
+    lanAccessOff: 'LAN: OFF',
+    lanAccessToggleTitle: 'Toggle LAN access from other devices on the same local network',
+    lanUrlCopyTitle: 'Click to copy LAN URL',
+    externalLanUnavailableHint:
+      'The externally running server is bound to localhost only and cannot be reached over LAN. Restart it via Onigiri Editor or launch it externally with --host 0.0.0.0.',
   },
   imageModal: {
     title: 'Insert Image',
@@ -827,6 +836,8 @@ export const en: Translations = {
     copiedLanUrl: 'Copied LAN preview URL',
     devServerStarted: 'Project dev server started',
     devServerStopped: 'Project dev server stopped',
+    devServerLanEnabled: 'Project dev server LAN access enabled',
+    devServerLanDisabled: 'Project dev server LAN access disabled',
     macroRecordStarted: 'Macro recording started (click ■ or press ⌘+⇧+M to stop)',
     macroRecordStopped: 'Macro recorded ({n} steps)',
     macroRecordEmpty: 'No actions recorded; kept previous macro',

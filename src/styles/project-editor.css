@@ -138,6 +138,32 @@
   background: rgba(16, 185, 129, 0.2);
 }
 
+.project-url-chip.is-lan {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: rgba(59, 130, 246, 0.38);
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+}
+
+.project-url-chip.is-lan:hover {
+  background: rgba(59, 130, 246, 0.22);
+}
+
+.sidebar-project-lan-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+.mini-pill-btn.is-lan-on {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(16, 185, 129, 0.14);
+  color: #10b981;
+}
+
 .project-launcher-stage {
   flex: 1;
   min-height: 0;

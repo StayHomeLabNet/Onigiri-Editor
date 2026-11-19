@@ -814,7 +814,8 @@ export async function inspectProjectForPath(path: string): Promise<ProjectInfo |
 
 export async function startProjectDevServer(
   rootPath: string,
-  scriptName?: string | null
+  scriptName?: string | null,
+  allowLan?: boolean
 ): Promise<ProjectServerStatus> {
   if (!isTauri()) {
     throw new Error('Project dev server requires the desktop application');
@@ -823,6 +824,7 @@ export async function startProjectDevServer(
   return invoke<ProjectServerStatus>('start_project_dev_server', {
     rootPath,
     scriptName: scriptName || null,
+    allowLan: Boolean(allowLan),
   });
 }
 
@@ -832,6 +834,8 @@ export async function stopProjectDevServer(): Promise<ProjectServerStatus> {
       running: false,
       starting: false,
       external: false,
+      allowLan: false,
+      lanUrls: [],
       rootPath: null,
       kind: null,
       url: null,

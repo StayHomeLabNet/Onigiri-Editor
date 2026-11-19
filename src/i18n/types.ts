@@ -325,6 +325,8 @@ export interface Translations {
       externalBrowserPort: string;
       externalBrowserAllowLan: string;
       externalBrowserAllowLanHint: string;
+      projectServerAllowLan: string;
+      projectServerAllowLanHint: string;
       restoreSessionEnabled: string;
       autoSaveEnabled: string;
       showTopBar: string;
@@ -539,6 +541,11 @@ export interface Translations {
     platformNoteMacos: string;
     platformNoteWindows: string;
     platformNoteLinux: string;
+    lanAccessOn: string;
+    lanAccessOff: string;
+    lanAccessToggleTitle: string;
+    lanUrlCopyTitle: string;
+    externalLanUnavailableHint: string;
   };
   imageModal: {
     title: string;
@@ -743,6 +750,8 @@ export interface Translations {
     copiedLanUrl: string;
     devServerStarted: string;
     devServerStopped: string;
+    devServerLanEnabled: string;
+    devServerLanDisabled: string;
     macroRecordStarted: string;
     macroRecordStopped: string;
     macroRecordEmpty: string;
