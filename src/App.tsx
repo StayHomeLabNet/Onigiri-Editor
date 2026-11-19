@@ -7108,7 +7108,18 @@ export function App() {
                     )}
 
                     {settings.externalBrowserPreviewEnabled && (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          justifyContent: 'flex-end',
+                          gap: 6,
+                          minWidth: 0,
+                          maxWidth: '100%',
+                          marginLeft: 'auto',
+                        }}
+                      >
                         {externalPreviewUrl &&
                           settings.externalBrowserAllowLan &&
                           externalPreviewLanUrls.length > 0 && (
@@ -7117,9 +7128,18 @@ export function App() {
                               className="mini-pill-btn"
                               onClick={() => void handleCopyLanUrl(externalPreviewLanUrls[0])}
                               title={`${t.actions.copyLanUrl}: ${externalPreviewLanUrls[0]}`}
+                              style={{ maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}
                             >
-                              <Copy size={11} />
-                              <span>LAN: {externalPreviewLanUrls[0].replace(/^https?:\/\//, '')}</span>
+                              <Copy size={11} style={{ flexShrink: 0 }} />
+                              <span
+                                style={{
+                                  minWidth: 0,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                LAN: {externalPreviewLanUrls[0].replace(/^https?:\/\//, '')}
+                              </span>
                             </button>
                           )}
                         <button

@@ -27,12 +27,13 @@
 }
 
 .right-pane-header {
-  height: 36px;
-  padding: 0 10px;
+  min-height: 36px;
+  padding: 4px 10px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px 8px;
   background: var(--bg-app);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
