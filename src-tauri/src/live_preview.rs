@@ -439,25 +439,139 @@ fn resolve_asset_candidate(
     None
 }
 
+fn is_virtual_or_vpn_interface(name: &str, is_p2p: bool, ip: std::net::Ipv4Addr) -> bool {
+    if is_p2p {
+        return true;
+    }
+    let octets = ip.octets();
+    // CGNAT / Tailscale range (100.64.0.0/10)
+    if octets[0] == 100 && (64..=127).contains(&octets[1]) {
+        return true;
+    }
+    let lower = name.to_ascii_lowercase();
+    [
+        "utun",
+        "tun",
+        "tap",
+        "wg",
+        "wireguard",
+        "tailscale",
+        "zerotier",
+        "docker",
+        "br-",
+        "virbr",
+        "veth",
+        "vmnet",
+        "vboxnet",
+        "vethernet",
+        "wsl",
+        "hyper-v",
+        "hamachi",
+        "radmin",
+        "openvpn",
+        "nordlynx",
+        "proton",
+        "loopback",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+}
+
+fn lan_subnet_rank(ip: std::net::Ipv4Addr) -> u8 {
+    let octets = ip.octets();
+    if octets[0] == 192 && octets[1] == 168 {
+        0
+    } else if octets[0] == 10 {
+        1
+    } else if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+        2
+    } else {
+        3
+    }
+}
+
+fn detect_default_route_ipv4() -> Option<std::net::Ipv4Addr> {
+    let sock = UdpSocket::bind("0.0.0.0:0").ok()?;
+    sock.connect("1.1.1.1:80").ok()?;
+    let addr = sock.local_addr().ok()?;
+    match addr.ip() {
+        IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() => {
+            Some(v4)
+        }
+        _ => None,
+    }
+}
+
 pub fn detect_lan_ipv4s() -> Vec<String> {
-    let mut ips = Vec::new();
-    for target in ["1.1.1.1:80", "192.168.1.1:80", "10.0.0.1:80", "172.16.0.1:80"] {
-        if let Ok(sock) = UdpSocket::bind("0.0.0.0:0") {
-            if sock.connect(target).is_ok() {
-                if let Ok(addr) = sock.local_addr() {
-                    if let IpAddr::V4(v4) = addr.ip() {
-                        if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() {
-                            let s = v4.to_string();
-                            if !ips.contains(&s) {
-                                ips.push(s);
+    let default_ip = detect_default_route_ipv4();
+    let mut candidates: Vec<(bool, u8, bool, usize, String)> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    if let Ok(ifaces) = if_addrs::get_if_addrs() {
+        let has_oper_up = ifaces.iter().any(|iface| {
+            matches!(iface.addr, if_addrs::IfAddr::V4(ref v4) if !v4.ip.is_loopback() && !v4.ip.is_unspecified() && !v4.ip.is_link_local())
+                && iface.is_oper_up()
+        });
+
+        for (idx, iface) in ifaces.into_iter().enumerate() {
+            if has_oper_up && !iface.is_oper_up() {
+                continue;
+            }
+            let if_addrs::IfAddr::V4(ref v4_info) = iface.addr else {
+                continue;
+            };
+            let ip = v4_info.ip;
+            if ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_link_local()
+                || ip.is_multicast()
+                || ip.is_broadcast()
+            {
+                continue;
+            }
+            let s = ip.to_string();
+            if !seen.insert(s.clone()) {
+                continue;
+            }
+            let virtual_or_vpn = is_virtual_or_vpn_interface(&iface.name, iface.is_p2p(), ip);
+            let rank = lan_subnet_rank(ip);
+            let not_default = default_ip != Some(ip);
+            candidates.push((virtual_or_vpn, rank, not_default, idx, s));
+        }
+    }
+
+    if candidates.is_empty() {
+        let mut fallback = Vec::new();
+        for (idx, target) in [
+            "1.1.1.1:80",
+            "192.168.1.1:80",
+            "192.168.0.1:80",
+            "10.0.0.1:80",
+            "172.16.0.1:80",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if let Ok(sock) = UdpSocket::bind("0.0.0.0:0") {
+                if sock.connect(target).is_ok() {
+                    if let Ok(addr) = sock.local_addr() {
+                        if let IpAddr::V4(v4) = addr.ip() {
+                            if !v4.is_loopback() && !v4.is_unspecified() && !v4.is_link_local() {
+                                let s = v4.to_string();
+                                if seen.insert(s.clone()) {
+                                    fallback.push((false, lan_subnet_rank(v4), default_ip != Some(v4), idx, s));
+                                }
                             }
                         }
                     }
                 }
             }
         }
+        candidates = fallback;
     }
-    ips
+
+    candidates.sort_by_key(|c| (c.0, c.1, c.2, c.3));
+    candidates.into_iter().map(|c| c.4).collect()
 }
 
 fn build_preview_status(port: Option<u16>, allow_lan: bool) -> ExternalPreviewStatus {
@@ -769,5 +883,42 @@ mod tests {
             stop_server_locked(&state, &mut ctrl_guard).await;
         }
         assert!(state.port.read().await.is_none());
+    }
+
+    #[test]
+    fn lan_interface_prioritization_and_detection_works() {
+        use std::net::Ipv4Addr;
+
+        assert_eq!(lan_subnet_rank(Ipv4Addr::new(192, 168, 68, 222)), 0);
+        assert_eq!(lan_subnet_rank(Ipv4Addr::new(10, 10, 1, 222)), 1);
+        assert_eq!(lan_subnet_rank(Ipv4Addr::new(172, 20, 10, 2)), 2);
+
+        assert!(!is_virtual_or_vpn_interface(
+            "Wi-Fi",
+            false,
+            Ipv4Addr::new(192, 168, 68, 222)
+        ));
+        assert!(is_virtual_or_vpn_interface(
+            "utun4",
+            true,
+            Ipv4Addr::new(10, 5, 0, 2)
+        ));
+        assert!(is_virtual_or_vpn_interface(
+            "vEthernet (WSL)",
+            false,
+            Ipv4Addr::new(172, 24, 0, 1)
+        ));
+        assert!(is_virtual_or_vpn_interface(
+            "Ethernet",
+            false,
+            Ipv4Addr::new(100, 100, 10, 1)
+        ));
+
+        for ip_str in detect_lan_ipv4s() {
+            let parsed: Ipv4Addr = ip_str.parse().unwrap();
+            assert!(!parsed.is_loopback());
+            assert!(!parsed.is_unspecified());
+            assert!(!parsed.is_link_local());
+        }
     }
 }

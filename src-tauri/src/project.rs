@@ -2759,20 +2759,28 @@ async fn probe_lan_reachable(url_str: &str, timeout_ms: u64) -> Vec<String> {
     let Some(port) = parsed.port_or_known_default() else {
         return Vec::new();
     };
-    let scheme = parsed.scheme();
+    let scheme = parsed.scheme().to_string();
     let dur = Duration::from_millis(timeout_ms);
-    let mut reachable = Vec::new();
-    for ip in crate::live_preview::detect_lan_ipv4s() {
-        if let Ok(Ok(_)) = tokio::time::timeout(
-            dur,
-            tokio::net::TcpStream::connect((ip.as_str(), port)),
-        )
-        .await
-        {
-            reachable.push(format!("{}://{}:{}/", scheme, ip, port));
+    let ips = crate::live_preview::detect_lan_ipv4s();
+    let mut join_set = tokio::task::JoinSet::new();
+    for (idx, ip) in ips.into_iter().enumerate() {
+        let scheme_clone = scheme.clone();
+        join_set.spawn(async move {
+            let ok = matches!(
+                tokio::time::timeout(dur, tokio::net::TcpStream::connect((ip.as_str(), port))).await,
+                Ok(Ok(_))
+            );
+            (idx, ok, format!("{}://{}:{}/", scheme_clone, ip, port))
+        });
+    }
+    let mut results: Vec<(usize, String)> = Vec::new();
+    while let Some(res) = join_set.join_next().await {
+        if let Ok((idx, true, url)) = res {
+            results.push((idx, url));
         }
     }
-    reachable
+    results.sort_by_key(|(idx, _)| *idx);
+    results.into_iter().map(|(_, url)| url).collect()
 }
 
 fn guess_static_mime(path: &Path) -> &'static str {

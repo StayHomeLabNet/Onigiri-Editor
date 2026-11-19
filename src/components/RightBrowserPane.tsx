@@ -388,17 +388,19 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             )}
             {projectServer?.running &&
               projectServer.lanUrls &&
-              projectServer.lanUrls.length > 0 && (
+              projectServer.lanUrls.length > 0 &&
+              projectServer.lanUrls.map((lanUrl) => (
                 <button
+                  key={lanUrl}
                   type="button"
                   className="project-url-chip is-lan"
-                  onClick={() => onCopyLanUrl?.(projectServer.lanUrls![0])}
-                  title={`${t.project.lanUrlCopyTitle}: ${projectServer.lanUrls[0]}`}
+                  onClick={() => onCopyLanUrl?.(lanUrl)}
+                  title={`${t.project.lanUrlCopyTitle}: ${lanUrl}`}
                 >
                   <Copy size={10} />
-                  <span>LAN: {projectServer.lanUrls[0].replace(/^https?:\/\//, '')}</span>
+                  <span>LAN: {lanUrl.replace(/^https?:\/\//, '')}</span>
                 </button>
-              )}
+              ))}
             {!projectServer?.running && projectInfo?.devCommandLabel && (
               <span className="browser-project-cmd">{projectInfo.devCommandLabel}</span>
             )}

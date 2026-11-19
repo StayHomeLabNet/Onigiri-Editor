@@ -28,6 +28,7 @@ url = "2"
 encoding_rs = "0.8"
 chardetng = "0.1"
 regex = "1"
+if-addrs = "0.15"
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 tauri-plugin-single-instance = "2"

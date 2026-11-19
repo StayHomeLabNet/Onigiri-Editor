@@ -7122,12 +7122,14 @@ export function App() {
                       >
                         {externalPreviewUrl &&
                           settings.externalBrowserAllowLan &&
-                          externalPreviewLanUrls.length > 0 && (
+                          externalPreviewLanUrls.length > 0 &&
+                          externalPreviewLanUrls.map((lanUrl) => (
                             <button
+                              key={lanUrl}
                               type="button"
                               className="mini-pill-btn"
-                              onClick={() => void handleCopyLanUrl(externalPreviewLanUrls[0])}
-                              title={`${t.actions.copyLanUrl}: ${externalPreviewLanUrls[0]}`}
+                              onClick={() => void handleCopyLanUrl(lanUrl)}
+                              title={`${t.actions.copyLanUrl}: ${lanUrl}`}
                               style={{ maxWidth: '100%', minWidth: 0, overflow: 'hidden' }}
                             >
                               <Copy size={11} style={{ flexShrink: 0 }} />
@@ -7138,10 +7140,10 @@ export function App() {
                                   textOverflow: 'ellipsis',
                                 }}
                               >
-                                LAN: {externalPreviewLanUrls[0].replace(/^https?:\/\//, '')}
+                                LAN: {lanUrl.replace(/^https?:\/\//, '')}
                               </span>
                             </button>
-                          )}
+                          ))}
                         <button
                           type="button"
                           className={`mini-pill-btn ${externalPreviewUrl ? 'is-active' : ''}`}
