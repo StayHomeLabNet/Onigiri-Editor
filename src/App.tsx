@@ -221,6 +221,16 @@ import type { EncodingModalMode } from './components/EncodingModal';
 import type { FolderSwitchGuardMode } from './components/FolderSwitchGuardModal';
 import type { DiffPreviewRequest } from './components/AiDiffPreviewModal';
 
+function formatErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err.trim()) return err;
+  if (err && typeof err === 'object' && 'message' in err) {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+  }
+  return String(err);
+}
+
 const CommandPalette = lazy(() =>
   import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette }))
 );
@@ -1376,7 +1386,7 @@ export function App() {
           void refreshWorkspaceRef.current(workspaceRootRef.current);
         }
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [activeTab, isSideEditorActive, insertImageIntoActivePane, notify, t.toasts.errorPrefix]
@@ -1406,7 +1416,7 @@ export function App() {
         pushRecentFile(res.path);
         return created;
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         return null;
       }
     },
@@ -1697,7 +1707,7 @@ export function App() {
         );
         notify(t.toasts.reloadedExternal);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [notify, t.toasts.errorPrefix, t.toasts.reloadedExternal]
@@ -1824,7 +1834,7 @@ export function App() {
                   savedAnyImage = true;
                 } catch (err) {
                   dropHelpersRef.current.notify(
-                    `${dropHelpersRef.current.errorPrefix} ${(err as Error).message}`
+                    `${dropHelpersRef.current.errorPrefix} ${formatErrorMessage(err)}`
                   );
                 }
               } else if (
@@ -1929,7 +1939,7 @@ export function App() {
       }
       pushRecentFile(opened.path);
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     }
   }, [
     runWithHiddenNativeBrowser,
@@ -2076,7 +2086,7 @@ export function App() {
           browserNavAction('reload').catch(() => {});
         }
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       } finally {
         if (prevPath) savingPathsRef.current.delete(prevPath);
         if (targetTab.filePath) savingPathsRef.current.delete(targetTab.filePath);
@@ -2153,7 +2163,7 @@ export function App() {
         );
         notify(`${t.encoding.reopenedToast} (${getEncodingShortLabel(res.encoding)})`);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [
@@ -2364,7 +2374,7 @@ export function App() {
       try {
         await revealInFileManager(path);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [notify, t.toasts.errorPrefix]
@@ -2393,7 +2403,7 @@ export function App() {
           headContent: res.content,
         });
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [mode, layout, handleModeChange, notify, t.encoding.noFileToReopen, t.toasts.errorPrefix]
@@ -2422,7 +2432,7 @@ export function App() {
             .catch(() => {});
         }
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [notify, t.toasts.errorPrefix, refreshGitStatus]
@@ -2508,7 +2518,7 @@ export function App() {
             setActiveTabId(created.id);
             pushRecentFile(fullPath);
           } catch (err) {
-            notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+            notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
           }
         }
       } else {
@@ -2750,7 +2760,7 @@ export function App() {
       if (!dir) return;
       await activateWorkspaceDir(dir);
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     }
   }, [
     runWithHiddenNativeBrowser,
@@ -2825,7 +2835,7 @@ export function App() {
         await proceedOpenFolderPicker();
       }
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     } finally {
       setStoppingServerForSwitch(false);
     }
@@ -2860,7 +2870,7 @@ export function App() {
         setActiveTabId(created.id);
         pushRecentFile(fullPath);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [
@@ -2897,7 +2907,7 @@ export function App() {
         setSideTabId(created.id);
         setSidePaneMode('edit');
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [handleOpenTabToSide, pushRecentFile, layout, notify, t.toasts.errorPrefix]
@@ -2923,7 +2933,7 @@ export function App() {
         setActiveTabId(created.id);
         pushRecentFile(fullPath);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [
@@ -2953,7 +2963,7 @@ export function App() {
         await createWorkspaceFolder(workspaceRoot, relPath);
         await refreshWorkspace(workspaceRoot);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [workspaceRoot, refreshWorkspace, notify, t.toasts.errorPrefix]
@@ -2984,7 +2994,7 @@ export function App() {
         await refreshWorkspace(workspaceRoot);
         notify(t.toasts.renamedSuccess);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [workspaceRoot, refreshWorkspace, notify, t.toasts.renamedSuccess, t.toasts.errorPrefix]
@@ -2999,7 +3009,7 @@ export function App() {
         await openPathInTab(dupPath);
         notify(t.toasts.duplicatedSuccess);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [workspaceRoot, refreshWorkspace, openPathInTab, notify, t.toasts.duplicatedSuccess, t.toasts.errorPrefix]
@@ -3025,7 +3035,7 @@ export function App() {
         await refreshWorkspace(workspaceRoot);
         notify(t.toasts.deletedSuccess);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [workspaceRoot, refreshWorkspace, notify, t.sidebar.deleteConfirm, t.toasts.deletedSuccess, t.toasts.errorPrefix]
@@ -3105,7 +3115,7 @@ export function App() {
             .replace('{count}', String(res.replacements))
         );
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [
@@ -3245,7 +3255,7 @@ export function App() {
         setActiveTabId(created.id);
         pushRecentFile(createdPath);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
       return;
     }
@@ -3313,7 +3323,7 @@ export function App() {
           setActiveTabId(created.id);
           pushRecentFile(fullPath);
         } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         }
         return;
       }
@@ -3496,7 +3506,7 @@ export function App() {
       );
       if (ok) notify(t.toasts.exportedSuccess);
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     }
   }, [
     activeTab.content,
@@ -3599,7 +3609,7 @@ export function App() {
       await openPathInTab(createdPath);
       notify(t.projectConfig.createdOnigiriJsonToast);
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     }
   }, [
     settings.imageAssetFolder,
@@ -3820,7 +3830,7 @@ export function App() {
         await gitStageFiles(root, paths);
         await refreshGitStatus(root);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       } finally {
         setGitPanelBusy(false);
       }
@@ -3837,7 +3847,7 @@ export function App() {
         await gitUnstageFiles(root, paths);
         await refreshGitStatus(root);
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       } finally {
         setGitPanelBusy(false);
       }
@@ -3856,7 +3866,7 @@ export function App() {
         await refreshWorkspace(root);
         await syncOpenTabsWithDisk();
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       } finally {
         setGitPanelBusy(false);
       }
@@ -3872,7 +3882,7 @@ export function App() {
         const content = await gitGetDiff(root, staged, filePath);
         setGitDiffTarget({ path: filePath, staged, content });
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [notify, t.toasts.errorPrefix]
@@ -3890,7 +3900,7 @@ export function App() {
         notify(t.gitPanel.committedToast);
         return true;
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         return false;
       } finally {
         setGitPanelBusy(false);
@@ -3908,7 +3918,7 @@ export function App() {
       await refreshGitStatus(root);
       notify(t.gitPanel.pushedToast);
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     } finally {
       setGitPanelBusy(false);
     }
@@ -3925,7 +3935,7 @@ export function App() {
       await syncOpenTabsWithDisk();
       notify(t.gitPanel.pulledToast);
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     } finally {
       setGitPanelBusy(false);
     }
@@ -4562,7 +4572,7 @@ export function App() {
         notify(t.toasts.externalPreviewStarted);
       }
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     }
   }, [
     externalPreviewUrl,
@@ -4610,7 +4620,7 @@ export function App() {
         }
       } catch (err) {
         if (!cancelled) {
-          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         }
       }
     })();
@@ -4810,7 +4820,7 @@ export function App() {
         try {
           await openInExternalBrowser(targetUrl);
         } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         }
         return;
       }
@@ -4902,7 +4912,7 @@ export function App() {
         try {
           await assistProjectSetup(params);
         } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         }
         return;
       }
@@ -4934,7 +4944,7 @@ export function App() {
           }
         }
       } catch (err) {
-        const msg = (err as Error).message;
+        const msg = formatErrorMessage(err);
         setProjectSetupFeedback({ ok: false, text: msg });
         notify(`${t.toasts.errorPrefix} ${msg}`);
       } finally {
@@ -4973,7 +4983,21 @@ export function App() {
         }
       } catch (err) {
         pendingBrowseTargetRef.current = null;
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        const msg = formatErrorMessage(err);
+        setProjectServer((prev) => ({
+          running: false,
+          starting: false,
+          external: false,
+          allowLan: settings.projectServerAllowLan,
+          lanUrls: [],
+          rootPath: root,
+          kind: projectInfo?.kind ?? prev?.kind ?? null,
+          url: null,
+          commandLabel: projectInfo?.devCommandLabel ?? prev?.commandLabel ?? null,
+          logs: prev?.rootPath === root && prev.logs.length > 0 ? prev.logs : [msg],
+          error: msg,
+        }));
+        notify(`${t.toasts.errorPrefix} ${msg}`);
       }
     },
     [
@@ -5035,7 +5059,35 @@ export function App() {
         }
       } catch (err) {
         if (!cancelled) {
-          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          const msg = formatErrorMessage(err);
+          const failedRoot = projectServer.rootPath ?? null;
+          setProjectServer((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  running: false,
+                  starting: false,
+                  external: false,
+                  lanUrls: [],
+                  url: null,
+                  error: msg,
+                  logs: prev.logs.length > 0 ? prev.logs : [msg],
+                }
+              : {
+                  running: false,
+                  starting: false,
+                  external: false,
+                  allowLan: settings.projectServerAllowLan,
+                  lanUrls: [],
+                  rootPath: failedRoot,
+                  kind: projectInfo?.kind ?? null,
+                  url: null,
+                  commandLabel: projectInfo?.devCommandLabel ?? null,
+                  logs: [msg],
+                  error: msg,
+                }
+          );
+          notify(`${t.toasts.errorPrefix} ${msg}`);
         }
       }
     })();
@@ -5062,7 +5114,7 @@ export function App() {
       setProjectServer(st);
       notify(t.toasts.devServerStopped);
     } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     }
   }, [notify, t.toasts.devServerStopped, t.toasts.errorPrefix]);
 
@@ -5105,7 +5157,7 @@ export function App() {
           notify(t.toasts.externalPreviewStarted);
         }
       } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
     [
@@ -5127,7 +5179,7 @@ export function App() {
 
   const handleOpenOnlineManual = useCallback(() => {
     void openInExternalBrowser(ONLINE_MANUAL_URL).catch((err) => {
-      notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     });
   }, [notify, t.toasts.errorPrefix]);
 
@@ -5225,7 +5277,7 @@ export function App() {
         try {
           await resetWindowState();
         } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         }
       }
       notify(t.settingsModal.dataManagement.resetDoneToast);
@@ -5317,7 +5369,7 @@ export function App() {
         try {
           cacheRes = await clearAppCaches();
         } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${(err as Error).message}`);
+          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
         }
       }
 

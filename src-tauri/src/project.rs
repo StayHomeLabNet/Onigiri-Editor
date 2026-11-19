@@ -410,8 +410,26 @@ fn extended_path() -> String {
                 r"scoop\apps\php\current",
                 r".config\herd\bin",
                 r".config\herd-lite\bin",
+                r".fnm\aliases\default",
+                r".volta\bin",
             ] {
                 dirs.push(PathBuf::from(&user_profile).join(rel));
+            }
+        }
+        if !appdata.is_empty() {
+            dirs.push(PathBuf::from(&appdata).join(r"fnm\aliases\default"));
+            push_sorted_subdirs_desc(&mut dirs, &PathBuf::from(&appdata).join("nvm"), Some("v"));
+        }
+        if !local_appdata.is_empty() {
+            dirs.push(PathBuf::from(&local_appdata).join(r"fnm\aliases\default"));
+            dirs.push(PathBuf::from(&local_appdata).join(r"Programs\nodejs"));
+            dirs.push(PathBuf::from(&local_appdata).join(r"mise\shims"));
+        }
+        for var in ["NVM_SYMLINK", "NVM_HOME"] {
+            if let Ok(val) = env::var(var) {
+                if !val.trim().is_empty() {
+                    dirs.push(PathBuf::from(val));
+                }
             }
         }
         dirs.push(PathBuf::from(&program_data).join(r"chocolatey\bin"));
@@ -440,6 +458,9 @@ fn extended_path() -> String {
                 dirs.push(ruby_bin);
             }
         }
+        let sys_root = env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+        dirs.push(PathBuf::from(&sys_root).join("System32"));
+        dirs.push(PathBuf::from(&sys_root));
         if !local_appdata.is_empty() {
             dirs.push(PathBuf::from(&local_appdata).join(r"Microsoft\WindowsApps"));
         }
@@ -537,11 +558,48 @@ fn resolve_windows_cmd_shim(bin: &str, args: &[String]) -> Option<(String, Vec<S
     Some((node_exe, full_args))
 }
 
+#[allow(dead_code)]
+fn quote_windows_cmd_token(token: &str) -> String {
+    if token.is_empty() {
+        return "\"\"".to_string();
+    }
+    let clean = token.replace(['\r', '\n'], " ");
+    if clean.contains([' ', '\t', '"', '&', '|', '<', '>', '^', '(', ')', '%'])
+        || !clean.is_ascii()
+    {
+        format!("\"{}\"", clean.replace('"', "\\\""))
+    } else {
+        clean
+    }
+}
+
+#[allow(dead_code)]
+fn format_windows_cmd_line(bin: &str, args: &[String]) -> String {
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(format!("\"{}\"", bin.replace('"', "")));
+    for arg in args {
+        parts.push(quote_windows_cmd_token(arg));
+    }
+    parts.join(" ")
+}
+
 fn build_project_command(bin: &str, args: &[String]) -> Command {
     #[cfg(target_os = "windows")]
     {
         if let Some((node_exe, node_args)) = resolve_windows_cmd_shim(bin, args) {
             return new_background_command(&node_exe, &node_args);
+        }
+        let lower = bin.to_ascii_lowercase();
+        if lower.ends_with(".cmd") || lower.ends_with(".bat") {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let comspec = env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string());
+            let mut std_cmd = std::process::Command::new(comspec);
+            std_cmd
+                .args(["/d", "/s", "/c"])
+                .raw_arg(format!("\"{}\"", format_windows_cmd_line(bin, args)))
+                .creation_flags(CREATE_NO_WINDOW);
+            return Command::from(std_cmd);
         }
     }
     new_background_command(bin, args)
@@ -2915,6 +2973,32 @@ fn strip_ansi(input: &str) -> String {
     out
 }
 
+fn decode_process_output_bytes_with_fallback(bytes: &[u8], shift_jis_fallback: bool) -> String {
+    let trimmed = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
+    if let Ok(utf8) = std::str::from_utf8(trimmed) {
+        return utf8.to_string();
+    }
+    if shift_jis_fallback {
+        let (cow, _, _) = encoding_rs::SHIFT_JIS.decode(trimmed);
+        return cow.into_owned();
+    }
+    String::from_utf8_lossy(trimmed).into_owned()
+}
+
+fn decode_process_output_bytes(bytes: &[u8]) -> String {
+    decode_process_output_bytes_with_fallback(bytes, cfg!(target_os = "windows"))
+}
+
+async fn read_next_line_lossy<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Option<String> {
+    let mut buf = Vec::new();
+    match reader.read_until(b'\n', &mut buf).await {
+        Ok(0) => None,
+        Ok(_) => Some(decode_process_output_bytes(&buf)),
+        Err(_) => None,
+    }
+}
+
 fn extract_local_url(line: &str) -> Option<String> {
     let clean = strip_ansi(line);
     for prefix in ["http://", "https://"] {
@@ -3538,6 +3622,34 @@ fn resolve_runner(
     })
 }
 
+async fn emit_project_server_failure(
+    app: &AppHandle,
+    state: &State<'_, ProjectServerState>,
+    root_path: &str,
+    info: &ProjectInfo,
+    command_label: Option<String>,
+    msg: &str,
+) {
+    let mut guard = state.inner.lock().await;
+    kill_existing_server(&mut guard).await;
+    guard.status = ProjectServerStatus {
+        running: false,
+        starting: false,
+        external: false,
+        allow_lan: false,
+        lan_urls: Vec::new(),
+        root_path: Some(root_path.to_string()),
+        kind: Some(info.kind.clone()),
+        url: None,
+        command_label,
+        logs: vec![msg.to_string()],
+        error: Some(msg.to_string()),
+    };
+    let snap = guard.status.clone();
+    drop(guard);
+    let _ = app.emit("project-server-update", snap);
+}
+
 #[tauri::command]
 pub async fn start_project_dev_server(
     app: AppHandle,
@@ -3547,7 +3659,14 @@ pub async fn start_project_dev_server(
     allow_lan: Option<bool>,
 ) -> Result<ProjectServerStatus, String> {
     let _start_guard = state.start_lock.lock().await;
-    let info = inspect_root_dir(Path::new(&root_path))?;
+    let mut effective_root = root_path.clone();
+    let mut info = inspect_root_dir(Path::new(&effective_root))?;
+    if info.kind == "none" {
+        if let Some(sub) = find_monorepo_subproject(Path::new(&effective_root)) {
+            effective_root = sub.root_path.clone();
+            info = sub;
+        }
+    }
     let want_lan = allow_lan.unwrap_or(false);
 
     // 1. If we already manage a live server for this exact root_path, reuse it when LAN mode matches
@@ -3556,7 +3675,7 @@ pub async fn start_project_dev_server(
         let existing_snap = {
             let guard = state.inner.lock().await;
             if guard.status.running
-                && guard.status.root_path.as_deref() == Some(root_path.as_str())
+                && guard.status.root_path.as_deref() == Some(effective_root.as_str())
             {
                 Some(guard.status.clone())
             } else {
@@ -3597,11 +3716,11 @@ pub async fn start_project_dev_server(
     // connect to it instead of launching a second server (skip for built-in static server).
     if info.kind != "static" {
         let mut candidate_urls: Vec<String> = if info.kind == "laravel" {
-            laravel_candidate_urls(Path::new(&root_path))
+            laravel_candidate_urls(Path::new(&effective_root))
         } else {
             info.default_url.iter().cloned().collect()
         };
-        for p in parse_compose_ports(Path::new(&root_path)) {
+        for p in parse_compose_ports(Path::new(&effective_root)) {
             let u = format!("http://localhost:{}", p);
             if !candidate_urls.iter().any(|x| x == &u) {
                 candidate_urls.push(u);
@@ -3623,7 +3742,7 @@ pub async fn start_project_dev_server(
                     external: true,
                     allow_lan: !lan_urls.is_empty(),
                     lan_urls,
-                    root_path: Some(root_path.clone()),
+                    root_path: Some(effective_root.clone()),
                     kind: Some(info.kind.clone()),
                     url: Some(candidate.clone()),
                     command_label: info.dev_command_label.clone(),
@@ -3645,24 +3764,15 @@ pub async fn start_project_dev_server(
                             "Port {} is already occupied by an unresponsive process. Stop that process or restart it before starting the dev server.",
                             port
                         );
-                        let mut guard = state.inner.lock().await;
-                        kill_existing_server(&mut guard).await;
-                        guard.status = ProjectServerStatus {
-                            running: false,
-                            starting: false,
-                            external: false,
-                            allow_lan: false,
-                            lan_urls: Vec::new(),
-                            root_path: Some(root_path.clone()),
-                            kind: Some(info.kind.clone()),
-                            url: None,
-                            command_label: info.dev_command_label.clone(),
-                            logs: vec![msg.clone()],
-                            error: Some(msg.clone()),
-                        };
-                        let snap = guard.status.clone();
-                        drop(guard);
-                        let _ = app.emit("project-server-update", snap);
+                        emit_project_server_failure(
+                            &app,
+                            &state,
+                            &effective_root,
+                            &info,
+                            info.dev_command_label.clone(),
+                            &msg,
+                        )
+                        .await;
                         return Err(msg);
                     }
                 }
@@ -3675,20 +3785,47 @@ pub async fn start_project_dev_server(
         kill_existing_server(&mut guard).await;
     }
 
-    let runner = resolve_runner(&root_path, &info, script_name, want_lan)?;
+    let runner = match resolve_runner(&effective_root, &info, script_name, want_lan) {
+        Ok(r) => r,
+        Err(msg) => {
+            emit_project_server_failure(
+                &app,
+                &state,
+                &effective_root,
+                &info,
+                info.dev_command_label.clone(),
+                &msg,
+            )
+            .await;
+            return Err(msg);
+        }
+    };
 
     if matches!(runner, ResolvedRunner::StaticHttp) {
         let bind_host = if want_lan { "0.0.0.0" } else { "127.0.0.1" };
         let listener = match TcpListener::bind(format!("{}:4173", bind_host)).await {
             Ok(l) => l,
-            Err(_) => TcpListener::bind(format!("{}:0", bind_host))
-                .await
-                .map_err(|e| format!("Failed to start built-in static server: {}", e))?,
+            Err(_) => match TcpListener::bind(format!("{}:0", bind_host)).await {
+                Ok(l) => l,
+                Err(e) => {
+                    let msg = format!("Failed to start built-in static server: {}", e);
+                    emit_project_server_failure(
+                        &app,
+                        &state,
+                        &effective_root,
+                        &info,
+                        info.dev_command_label.clone(),
+                        &msg,
+                    )
+                    .await;
+                    return Err(msg);
+                }
+            },
         };
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let url = format!("http://127.0.0.1:{}", port);
         let lan_urls = compute_project_lan_urls(want_lan, Some(&url));
-        let root_buf = PathBuf::from(&root_path);
+        let root_buf = PathBuf::from(&effective_root);
         let task = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -3713,11 +3850,11 @@ pub async fn start_project_dev_server(
                 external: false,
                 allow_lan: want_lan,
                 lan_urls,
-                root_path: Some(root_path.clone()),
+                root_path: Some(effective_root.clone()),
                 kind: Some("static".to_string()),
                 url: Some(url.clone()),
                 command_label: Some(format!("Built-in Static HTTP ({})", url)),
-                logs: vec![format!("Serving {} at {}", root_path, url)],
+                logs: vec![format!("Serving {} at {}", effective_root, url)],
                 error: None,
             };
             guard.status.clone()
@@ -3743,7 +3880,7 @@ pub async fn start_project_dev_server(
     }
 
     let mut cmd = build_project_command(&exe, &args);
-    cmd.current_dir(&root_path)
+    cmd.current_dir(&effective_root)
         .env("PATH", extended_path())
         .env("BROWSER", "none")
         .env("FORCE_COLOR", "0")
@@ -3763,9 +3900,22 @@ pub async fn start_project_dev_server(
         cmd.process_group(0);
     }
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start {}: {}", command_label, e))?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = format!("Failed to start {}: {}", command_label, e);
+            emit_project_server_failure(
+                &app,
+                &state,
+                &effective_root,
+                &info,
+                Some(command_label),
+                &msg,
+            )
+            .await;
+            return Err(msg);
+        }
+    };
 
     let pid = child.id();
     let stdout = child.stdout.take();
@@ -3773,7 +3923,7 @@ pub async fn start_project_dev_server(
 
     // Optionally spawn companion Vite dev server for Laravel projects with node_modules & @vite
     let (aux_child, aux_pid) = if companion_vite {
-        let pm = detect_package_manager(Path::new(&root_path));
+        let pm = detect_package_manager(Path::new(&effective_root));
         if let Some(pm_exe) = find_executable(&[pm]) {
             let mut vite_args = vec!["run".to_string(), "dev".to_string()];
             if want_lan {
@@ -3784,7 +3934,7 @@ pub async fn start_project_dev_server(
                 vite_args.push("0.0.0.0".to_string());
             }
             let mut vcmd = build_project_command(&pm_exe, &vite_args);
-            vcmd.current_dir(&root_path)
+            vcmd.current_dir(&effective_root)
                 .env("PATH", extended_path())
                 .env("BROWSER", "none")
                 .env("FORCE_COLOR", "0")
@@ -3825,7 +3975,7 @@ pub async fn start_project_dev_server(
             external: false,
             allow_lan: want_lan,
             lan_urls: Vec::new(),
-            root_path: Some(root_path.clone()),
+            root_path: Some(effective_root.clone()),
             kind: Some(info.kind.clone()),
             url: None,
             command_label: Some(command_label.clone()),
@@ -3841,8 +3991,8 @@ pub async fn start_project_dev_server(
     let app_out = app.clone();
     if let Some(out) = stdout {
         tokio::spawn(async move {
-            let mut lines = BufReader::new(out).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let mut reader = BufReader::new(out);
+            while let Some(line) = read_next_line_lossy(&mut reader).await {
                 let clean = strip_ansi(&line);
                 if clean.trim().is_empty() {
                     continue;
@@ -3907,8 +4057,8 @@ pub async fn start_project_dev_server(
     let app_err = app.clone();
     if let Some(err) = stderr {
         tokio::spawn(async move {
-            let mut lines = BufReader::new(err).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let mut reader = BufReader::new(err);
+            while let Some(line) = read_next_line_lossy(&mut reader).await {
                 let clean = strip_ansi(&line);
                 if clean.trim().is_empty() {
                     continue;
@@ -4015,6 +4165,11 @@ pub async fn start_project_dev_server(
                                         .map(|c| c.to_string())
                                         .unwrap_or_else(|| "signal".to_string())
                                 ));
+                            } else if guard.status.url.is_none() {
+                                guard.status.error = Some(
+                                    "Dev server exited (code 0) before listening on a local URL. Check logs below."
+                                        .to_string(),
+                                );
                             }
                             let snap = guard.status.clone();
                             drop(guard);
@@ -4023,7 +4178,7 @@ pub async fn start_project_dev_server(
                         }
                     }
                 }
-                guard.status.starting && guard.status.url.is_none() && ticks <= 60
+                guard.status.starting && guard.status.url.is_none() && ticks <= 120
             };
 
             if should_probe_fallback {
@@ -4049,19 +4204,34 @@ pub async fn start_project_dev_server(
                         }
                     }
                 }
-            } else if compose_started && ticks > 60 {
+            } else if ticks > 120 {
                 let mut guard = shared_wait.lock().await;
-                if guard.generation == gen_id && guard.status.url.is_none() {
-                    guard.status.running = false;
+                if guard.generation == gen_id
+                    && guard.status.url.is_none()
+                    && (compose_started || guard.status.starting)
+                {
+                    if compose_started {
+                        guard.status.running = false;
+                        guard.status.allow_lan = false;
+                        guard.status.lan_urls.clear();
+                    }
                     guard.status.starting = false;
-                    guard.status.allow_lan = false;
-                    guard.status.lan_urls.clear();
-                    guard.status.error = Some("Docker container started, but HTTP did not respond in time.".to_string());
+                    if guard.status.error.is_none() {
+                        guard.status.error = Some(if compose_started {
+                            "Docker container started, but HTTP did not respond in time.".to_string()
+                        } else {
+                            "Dev server did not expose a local URL within 60 seconds. Check logs below.".to_string()
+                        });
+                    }
                     let snap = guard.status.clone();
                     drop(guard);
                     let _ = app_wait.emit("project-server-update", snap);
+                    if compose_started {
+                        break;
+                    }
+                } else if compose_started {
+                    break;
                 }
-                break;
             }
         }
     });
@@ -4161,8 +4331,8 @@ async fn run_streaming_setup_command(
         let act_c = action.to_string();
         let buf_c = collected.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(out).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let mut reader = BufReader::new(out);
+            while let Some(line) = read_next_line_lossy(&mut reader).await {
                 let clean = strip_ansi(&line);
                 if clean.trim().is_empty() {
                     continue;
@@ -4186,8 +4356,8 @@ async fn run_streaming_setup_command(
         let act_c = action.to_string();
         let buf_c = collected.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(err).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
+            let mut reader = BufReader::new(err);
+            while let Some(line) = read_next_line_lossy(&mut reader).await {
                 let clean = strip_ansi(&line);
                 if clean.trim().is_empty() {
                     continue;
@@ -5298,4 +5468,35 @@ mod tests {
         let other_args = vec!["-S".to_string(), "127.0.0.1:8000".to_string()];
         assert!(!should_add_artisan_no_reload(&other_args, true));
     }
+
+    #[test]
+    fn formats_windows_cmd_lines_with_spaces_and_non_ascii() {
+        assert_eq!(quote_windows_cmd_token("dev"), "dev");
+        assert_eq!(quote_windows_cmd_token(""), "\"\"");
+        assert_eq!(quote_windows_cmd_token("ドキュメント"), "\"ドキュメント\"");
+        assert_eq!(quote_windows_cmd_token("a b"), "\"a b\"");
+
+        let line = format_windows_cmd_line(
+            "C:\\Program Files\\nodejs\\npm.cmd",
+            &["run".to_string(), "dev".to_string(), "C:\\ドキュメント\\app".to_string()],
+        );
+        assert_eq!(
+            line,
+            "\"C:\\Program Files\\nodejs\\npm.cmd\" run dev \"C:\\ドキュメント\\app\""
+        );
+    }
+
+    #[test]
+    fn decodes_utf8_and_shift_jis_process_output_lines() {
+        assert_eq!(
+            decode_process_output_bytes_with_fallback("Local: http://localhost:5173/\r\n".as_bytes(), true),
+            "Local: http://localhost:5173/"
+        );
+        let (encoded, _, _) = encoding_rs::SHIFT_JIS.encode("ドキュメント\\Repos\\Shift-for-Retail\r\n");
+        assert_eq!(
+            decode_process_output_bytes_with_fallback(encoded.as_ref(), true),
+            "ドキュメント\\Repos\\Shift-for-Retail"
+        );
+    }
 }
+
