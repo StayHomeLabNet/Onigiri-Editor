@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.2.0)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.2.1)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -88,8 +88,9 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 
 - **Edit & Display Zoom**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
 - **Images & Clipboard Auto-Save**:
-  - Paste screenshots (`⌘V` / `Ctrl+V`) or drag & drop image files directly onto the editor/preview to auto-save PNG/image assets to your configured **Image Asset Folder** (default `assets`, falls back to workspace root for unsaved tabs) and insert `![image](assets/...)`.
-  - Drag files or images from the left **Sidebar tree** into the editor to automatically compute and insert a relative Markdown link or image tag.
+  - Paste screenshots (`⌘V` / `Ctrl+V`) or drag & drop image files directly onto the editor or visual preview to auto-save PNG/image assets to your configured **Image Asset Folder** (default `assets`, falls back to workspace root for unsaved tabs) and insert `![image](assets/...)`.
+  - When dropping images into an unsaved tab without an open workspace folder, Onigiri Editor automatically formats local/Windows paths with forward slashes and angle brackets (`<C:/.../my image.png>`) and resolves spaces, parentheses, Japanese/Unicode folders, and `file:///` URIs cleanly in Markdown Preview and Slide Mode.
+  - Drag files or images from the left **Sidebar tree** into either the code editor or visual preview to automatically compute and insert a relative Markdown link or image tag.
 - **Extended Blocks & SVG / PNG Export**:
   - **Math (KaTeX)**: Inline (`$ ... $`) and block (`$$ ... $$`) LaTeX math rendering with **Copy LaTeX**, **Save SVG**, and **Save PNG** actions.
   - **Mermaid Diagrams**: Live rendering for `` ```mermaid `` code blocks with **Copy SVG**, **Save SVG**, and **Save PNG** export (plus zoom modal export).

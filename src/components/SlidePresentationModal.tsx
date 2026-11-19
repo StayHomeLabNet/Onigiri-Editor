@@ -20,6 +20,7 @@ interface SlidePresentationModalProps {
   title: string;
   markdown: string;
   docPath?: string;
+  workspaceRoot?: string | null;
   theme: ThemeId;
   onClose: () => void;
 }
@@ -32,6 +33,7 @@ export const SlidePresentationModal: React.FC<SlidePresentationModalProps> = ({
   title,
   markdown,
   docPath,
+  workspaceRoot,
   theme,
   onClose,
 }) => {
@@ -45,8 +47,8 @@ export const SlidePresentationModal: React.FC<SlidePresentationModalProps> = ({
 
   const isDark = theme === 'dark' || theme === 'midnight';
   const baseDir = useMemo(
-    () => (docPath ? docPath.replace(/[/\\][^/\\]+$/, '') : undefined),
-    [docPath]
+    () => (docPath ? docPath.replace(/[/\\][^/\\]+$/, '') : workspaceRoot || undefined),
+    [docPath, workspaceRoot]
   );
 
   useEffect(() => {

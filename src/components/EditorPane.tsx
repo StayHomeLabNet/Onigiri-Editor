@@ -1898,7 +1898,11 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                   }
                 }
                 const files = Array.from(event.dataTransfer?.files || []);
-                const imgFile = files.find((f) => f.type.startsWith('image/'));
+                const imgFile = files.find(
+                  (f) =>
+                    f.type.startsWith('image/') ||
+                    /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(f.name)
+                );
                 if (imgFile && callbacksRef.current.onImagePasteOrDrop) {
                   event.preventDefault();
                   callbacksRef.current.onImagePasteOrDrop(imgFile);

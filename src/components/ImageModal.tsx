@@ -7,6 +7,8 @@ interface ImageModalProps {
   t: Translations;
   open: boolean;
   docPath?: string;
+  workspaceRoot?: string | null;
+  imageAssetFolder?: string;
   onClose: () => void;
   onInsert: (src: string, alt: string) => void;
 }
@@ -15,6 +17,8 @@ export const ImageModal: React.FC<ImageModalProps> = ({
   t,
   open,
   docPath,
+  workspaceRoot,
+  imageAssetFolder,
   onClose,
   onInsert,
 }) => {
@@ -40,13 +44,13 @@ export const ImageModal: React.FC<ImageModalProps> = ({
       setPreviewUrl('');
       return;
     }
-    resolveImageSrc(src.trim(), docPath).then((resolved) => {
+    resolveImageSrc(src.trim(), docPath || workspaceRoot).then((resolved) => {
       if (active) setPreviewUrl(resolved);
     });
     return () => {
       active = false;
     };
-  }, [src, docPath]);
+  }, [src, docPath, workspaceRoot]);
 
   if (!open) return null;
 
@@ -56,7 +60,7 @@ export const ImageModal: React.FC<ImageModalProps> = ({
     let finalSrc = picked.path;
     if (!picked.dataUrl) {
       try {
-        finalSrc = await saveImageAsset(picked.path, docPath);
+        finalSrc = await saveImageAsset(picked.path, docPath, workspaceRoot, imageAssetFolder);
       } catch {
         finalSrc = picked.path;
       }

@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v120-の更新内容">v1.2.0 の更新内容</a> ・
+    <a href="#v121-の更新内容">v1.2.1 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.2.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、日本語環境では日本語 UI・日本語ネイティブメニューで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
 
-現在のバージョン: `v1.2.0`
+現在のバージョン: `v1.2.1`
 
 ## 主な機能
 
@@ -96,13 +96,22 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.2.0 の更新内容
+## v1.2.1 の更新内容
+
+- **画像ドロップ＆マークダウンプレビュー表示の修正（Windows パス・空白・日本語フォルダ対応）**: スペース・括弧・日本語などのマルチバイト文字・Windows のドライブ文字やバックスラッシュ（`C:\...\素材\KIWI WHITE.png`）を含む画像ファイルを未保存ドキュメント等へドロップ／挿入した際に、プレビューで画像ではなく生テキストのまま表示されたり `src` が除去されたりする問題を修正しました。挿入時のリンク整形（`<C:/...>`）、手動入力されたローカル画像パスの自動正規化、`rehype-sanitize` の `src`/`href` プロトコル許可、および Rust 側の UTF-8 パーセントデコード・`file:///` Windows URI 解決を強化しています。
+- **未保存タブ・ビジュアルプレビュー D&D の改善**: ワークスペースを開いた状態の未保存タブでも相対パス画像を解決できるよう `PreviewPane` / `ImageModal` / `SlidePresentationModal` に `workspaceRoot` フォールバックを追加し、サイドバーからビジュアルプレビューへの直接ドロップおよび TipTap ⇔ CodeMirror 間の往復変換を安定化しました。
+- **初期ウェルカムドキュメント（`ようこそ.md` / `Welcome.md`）の刷新**: v1.2 系の新機能（Git パネル・ナレッジグラフ・引用/脚注・Word `.docx` / 図表書き出し・ショートカット設定・JSON バックアップ）をすぐに試せる内容へ更新しました。
+
+<details>
+<summary>以前のリリース: v1.2.0</summary>
 
 - **Git ソース管理パネル**: サイドバーに **Git** タブ（変更数バッジ・ブランチ/先行遅延表示付き）を追加。ステージ / 戻す / 破棄、インライン unified Diff ビューア、コミット、**AI コミットメッセージ生成**、Pull / Push、最近のコミット履歴をアプリ内で完結できます。
 - **ナレッジグラフ＆リンク切れ診断**: ノート間の相関をインタラクティブなグラフで可視化し、検索・`#タグ` 絞り込み・孤立ノート表示・リンク切れのワンクリック行ジャンプに対応しました。
 - **Word（`.docx`）・Mermaid/KaTeX SVG/PNG 書き出し＆リッチテキストコピー**: Markdown をネイティブに `.docx` 書き出し、Mermaid 図や KaTeX 数式ブロックを `.svg` / `.png` 保存、選択範囲や本文全体を Notion / Google Docs / Slack 向けリッチテキストとしてコピーできます。
 - **引用・脚注・BibTeX / DOI 検索＆URL タイトル自動取得**: モーダルからリンクカード・自動採番脚注（`[^N]`）・BibTeX（APA / Markdown）・Crossref DOI 検索を挿入でき、選択中テキストへの URL 貼り付けリンク化や、空選択時のページタイトル自動取得（`autoTitleOnUrlPaste`）に対応しました。
 - **未使用画像整理・`.editorconfig` / `.onigiri.json`・ショートカット編集＆JSON バックアップ**: 参照されていない孤立画像の一括削除、階層的 `.editorconfig` / `.onigiri.json` 設定適用、全 27 コマンドのショートカットカスタマイズ UI、設定/AI/スニペット/テンプレート/キーバインドの JSON バックアップ書き出し・復元、および設定初期化・キャッシュ削除機能を搭載しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.1.0</summary>

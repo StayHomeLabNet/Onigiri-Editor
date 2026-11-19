@@ -176,7 +176,10 @@ export async function openImageFileDialog(): Promise<{ path: string; name: strin
 const imageDataUrlCache = new Map<string, string>();
 
 export async function resolveImageSrc(src: string, baseDir?: string | null): Promise<string> {
-  const trimmed = (src || '').trim();
+  let trimmed = (src || '').trim();
+  if (trimmed.startsWith('<') && trimmed.endsWith('>') && trimmed.length >= 2) {
+    trimmed = trimmed.slice(1, -1).trim();
+  }
   if (!trimmed) return '';
   if (
     trimmed.startsWith('http://') ||

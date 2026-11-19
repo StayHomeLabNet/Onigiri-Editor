@@ -15,6 +15,11 @@ import TurndownService from 'turndown';
 import { gfm as turndownGfm } from 'turndown-plugin-gfm';
 import type { AiCleanOptions, DocumentStats, HeadingItem, ThemeId } from '../types';
 import { resolveEffectiveLanguageId } from './language';
+import {
+  decodeLocalHrefIfNeeded,
+  formatMarkdownImageSyntax,
+  formatMarkdownLinkDestination,
+} from './paths';
 
 const CALLOUT_TYPES = new Set(['note', 'tip', 'important', 'warning', 'caution']);
 
@@ -196,9 +201,20 @@ function rehypeEditableTransform() {
   };
 }
 
+const WINDOWS_DRIVE_SCHEMES = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
 const editableSanitizeSchema = {
   ...defaultSchema,
   tagNames: [...(defaultSchema.tagNames || []), 'input', 'div', 'span'],
+  protocols: {
+    ...defaultSchema.protocols,
+    src: ['http', 'https', 'data', 'blob', 'file', ...WINDOWS_DRIVE_SCHEMES],
+    href: [
+      ...(defaultSchema.protocols?.href || ['http', 'https', 'irc', 'ircs', 'mailto', 'xmpp']),
+      'file',
+      ...WINDOWS_DRIVE_SCHEMES,
+    ],
+  },
   attributes: {
     ...defaultSchema.attributes,
     '*': [...(defaultSchema.attributes?.['*'] || []), 'className', 'id'],
@@ -225,6 +241,127 @@ const editableSanitizeSchema = {
   },
 };
 
+function isEscapedAt(line: string, index: number): boolean {
+  let backslashes = 0;
+  for (let i = index - 1; i >= 0 && line[i] === '\\'; i--) {
+    backslashes++;
+  }
+  return backslashes % 2 === 1;
+}
+
+function shouldNormalizeRawImageDest(dest: string): boolean {
+  if (!dest || dest.startsWith('<')) return false;
+  if (/^(?:https?:|data:|blob:)/i.test(dest)) return false;
+  if (!/[\s\\()]/.test(dest)) return false;
+  return (
+    /^(?:[A-Za-z]:[\\/]|\\\\|file:\/\/|\.{0,2}[\\/]|\/)/.test(dest) ||
+    dest.includes('\\') ||
+    /\.(?:png|jpe?g|gif|webp|svg|bmp|ico|avif|tiff?)$/i.test(dest)
+  );
+}
+
+function normalizeImageDestinationsInLine(line: string): string {
+  if (!line.includes('![')) return line;
+  let out = '';
+  let i = 0;
+  while (i < line.length) {
+    // Skip inline code spans
+    if (line[i] === '`') {
+      let tickLen = 1;
+      while (i + tickLen < line.length && line[i + tickLen] === '`') tickLen++;
+      const closeIdx = line.indexOf('`'.repeat(tickLen), i + tickLen);
+      if (closeIdx >= 0) {
+        out += line.slice(i, closeIdx + tickLen);
+        i = closeIdx + tickLen;
+        continue;
+      }
+      out += line.slice(i, i + tickLen);
+      i += tickLen;
+      continue;
+    }
+
+    if (line[i] === '!' && line[i + 1] === '[' && !isEscapedAt(line, i)) {
+      let j = i + 2;
+      let bracketDepth = 1;
+      while (j < line.length && bracketDepth > 0) {
+        if (line[j] === '\\') {
+          j += 2;
+          continue;
+        }
+        if (line[j] === '[') bracketDepth++;
+        else if (line[j] === ']') bracketDepth--;
+        j++;
+      }
+      if (bracketDepth === 0 && line[j] === '(') {
+        let k = j + 1;
+        let parenDepth = 1;
+        while (k < line.length && parenDepth > 0) {
+          const ch = line[k];
+          if (ch === '(') parenDepth++;
+          else if (ch === ')') parenDepth--;
+          k++;
+        }
+        if (parenDepth === 0) {
+          const inner = line.slice(j + 1, k - 1);
+          const trimmed = inner.trim();
+          const titleMatch = trimmed.match(/^(.+?)\s+("[^"]*"|'[^']*')$/);
+          const urlCandidate = (titleMatch ? titleMatch[1] : trimmed).trim();
+          const titleSuffix = titleMatch ? ` ${titleMatch[2]}` : '';
+          if (shouldNormalizeRawImageDest(urlCandidate)) {
+            const formatted = formatMarkdownLinkDestination(urlCandidate);
+            out += line.slice(i, j + 1) + formatted + titleSuffix + ')';
+            i = k;
+            continue;
+          }
+        }
+      }
+    }
+
+    out += line[i];
+    i++;
+  }
+  return out;
+}
+
+export function preprocessMarkdownImageDestinations(markdown: string): string {
+  if (!markdown || !markdown.includes('![')) return markdown;
+  const lines = markdown.split(/\r?\n/);
+  let inFrontmatter = false;
+  let inFence = false;
+  let fenceChar = '';
+  let changed = false;
+
+  const processed = lines.map((line, idx) => {
+    if (idx === 0 && line.trim() === '---') {
+      inFrontmatter = true;
+      return line;
+    }
+    if (inFrontmatter) {
+      if (line.trim() === '---' || line.trim() === '...') {
+        inFrontmatter = false;
+      }
+      return line;
+    }
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0];
+      if (!inFence) {
+        inFence = true;
+        fenceChar = marker;
+      } else if (marker === fenceChar) {
+        inFence = false;
+      }
+      return line;
+    }
+    if (inFence) return line;
+    const next = normalizeImageDestinationsInLine(line);
+    if (next !== line) changed = true;
+    return next;
+  });
+
+  return changed ? processed.join('\n') : markdown;
+}
+
 const staticProcessor = unified()
   .use(remarkParse)
   .use(remarkFrontmatter, ['yaml'])
@@ -250,12 +387,14 @@ const editableProcessor = unified()
   .use(rehypeStringify);
 
 export async function renderMarkdownToHtml(markdown: string): Promise<string> {
-  const file = await staticProcessor.process(markdown);
+  const prepared = preprocessMarkdownImageDestinations(markdown);
+  const file = await staticProcessor.process(prepared);
   return String(file);
 }
 
 export async function renderMarkdownToEditableHtml(markdown: string): Promise<string> {
-  const file = await editableProcessor.process(markdown);
+  const prepared = preprocessMarkdownImageDestinations(markdown);
+  const file = await editableProcessor.process(prepared);
   return String(file);
 }
 
@@ -290,7 +429,7 @@ export interface BlockLineRange {
 export function getMarkdownBlockLineRanges(markdown: string): BlockLineRange[] {
   const { body, bodyStartLine } = splitFrontmatter(markdown);
   if (!body.trim()) return [];
-  const tree: any = blockRangeParser.parse(body);
+  const tree: any = blockRangeParser.parse(preprocessMarkdownImageDestinations(body));
   const offset = bodyStartLine - 1;
   const children: any[] = Array.isArray(tree?.children) ? tree.children : [];
   const ranges: BlockLineRange[] = [];
@@ -420,11 +559,12 @@ visualTurndown.addRule('tiptapImage', {
   filter: 'img',
   replacement(_content, node) {
     const el = node as HTMLElement;
-    const src = el.getAttribute('data-orig-src') || el.getAttribute('src') || '';
-    const alt = (el.getAttribute('alt') || '').replace(/\]/g, '\\]');
+    const rawSrc = el.getAttribute('data-orig-src') || el.getAttribute('src') || '';
+    const src = decodeLocalHrefIfNeeded(rawSrc);
+    const alt = el.getAttribute('alt') || '';
     const title = el.getAttribute('title');
     if (!src) return '';
-    return title ? `![${alt}](${src} "${title}")` : `![${alt}](${src})`;
+    return formatMarkdownImageSyntax(src, alt, title);
   },
 });
 

@@ -106,10 +106,79 @@ export function buildMarkdownDropLink(params: {
     rel = normalizeSlashes(targetPath);
   }
 
-  const encodedPath = /\s/.test(rel) ? rel.replace(/ /g, '%20') : rel;
+  const encodedPath = formatMarkdownLinkDestination(rel);
   if (IMAGE_EXT_RE.test(targetName)) {
-    const stem = targetName.replace(/\.[^.]+$/, '') || 'image';
-    return `![${stem}](${encodedPath})`;
+    const stem = (targetName.replace(/\.[^.]+$/, '') || 'image').replace(/[\r\n]+/g, ' ');
+    const safeAlt = stem.replace(/([[\]])/g, '\\$1');
+    return `![${safeAlt}](${encodedPath})`;
   }
-  return `[${targetName}](${encodedPath})`;
+  const safeName = targetName.replace(/[\r\n]+/g, ' ').replace(/([[\]])/g, '\\$1');
+  return `[${safeName}](${encodedPath})`;
 }
+
+const REMOTE_OR_SPECIAL_URI_RE = /^(?:https?:|data:|blob:|mailto:|tel:|ircs?:|xmpp:|#)/i;
+
+export function stripMarkdownAngleBrackets(raw: string): string {
+  const trimmed = (raw || '').trim();
+  if (trimmed.startsWith('<') && trimmed.endsWith('>') && trimmed.length >= 2) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+export function normalizeLocalMarkdownPath(rawPath: string): string {
+  const unbracketed = stripMarkdownAngleBrackets(rawPath);
+  if (!unbracketed || REMOTE_OR_SPECIAL_URI_RE.test(unbracketed)) {
+    return unbracketed;
+  }
+  return unbracketed.replace(/\\/g, '/');
+}
+
+export function decodeLocalHrefIfNeeded(rawHref: string): string {
+  const cleaned = stripMarkdownAngleBrackets(rawHref);
+  if (!cleaned || REMOTE_OR_SPECIAL_URI_RE.test(cleaned)) {
+    return cleaned;
+  }
+  if (!/%[0-9A-Fa-f]{2}/.test(cleaned)) {
+    return cleaned;
+  }
+  try {
+    return decodeURIComponent(cleaned);
+  } catch {
+    return cleaned;
+  }
+}
+
+export function formatMarkdownLinkDestination(rawDest: string): string {
+  const cleaned = stripMarkdownAngleBrackets(rawDest);
+  if (!cleaned) return '';
+  if (REMOTE_OR_SPECIAL_URI_RE.test(cleaned)) {
+    if (/[\s()]/.test(cleaned)) {
+      const safe = cleaned.replace(/</g, '%3C').replace(/>/g, '%3E');
+      return `<${safe}>`;
+    }
+    return cleaned;
+  }
+  const normalized = cleaned.replace(/\\/g, '/');
+  if (/[\s()<>[\]]/.test(normalized)) {
+    const safe = normalized.replace(/</g, '%3C').replace(/>/g, '%3E');
+    return `<${safe}>`;
+  }
+  return normalized;
+}
+
+export function formatMarkdownImageSyntax(
+  src: string,
+  alt = '',
+  title?: string | null
+): string {
+  const dest = formatMarkdownLinkDestination(src);
+  if (!dest) return '';
+  const safeAlt = (alt || '').replace(/[\r\n]+/g, ' ').replace(/([[\]])/g, '\\$1');
+  if (title && title.trim()) {
+    const safeTitle = title.replace(/[\r\n]+/g, ' ').replace(/"/g, '\\"');
+    return `![${safeAlt}](${dest} "${safeTitle}")`;
+  }
+  return `![${safeAlt}](${dest})`;
+}
+

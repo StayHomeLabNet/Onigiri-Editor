@@ -48,6 +48,7 @@ import {
   saveSvgAsPngFile,
   saveSvgFile,
 } from '../utils/diagramExport';
+import { computeRelativePath, normalizeLocalMarkdownPath } from '../utils/paths';
 
 const lowlight = createLowlight(all);
 
@@ -68,6 +69,7 @@ interface PreviewPaneProps {
   docId: string;
   markdown: string;
   docPath?: string;
+  workspaceRoot?: string | null;
   theme: ThemeId;
   settings: EditorSettings;
   onMarkdownChange: (nextMarkdown: string, sourceDocId?: string) => void;
@@ -997,6 +999,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       docId,
       markdown,
       docPath,
+      workspaceRoot,
       theme,
       settings,
       onMarkdownChange,
@@ -1053,12 +1056,16 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       onFocusPane,
       onImagePasteOrDrop,
       onActiveBlockLinesChange,
+      docPath,
+      workspaceRoot,
     });
     callbacksRef.current = {
       onMarkdownChange,
       onFocusPane,
       onImagePasteOrDrop,
       onActiveBlockLinesChange,
+      docPath,
+      workspaceRoot,
     };
 
     const applyPreviewBlockHighlight = useCallback(() => {
@@ -1180,9 +1187,62 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
             }
             return false;
           },
-          drop: (_view, event) => {
+          drop: (view, event) => {
+            const rawEntry = event.dataTransfer?.getData('application/x-onigiri-workspace-entry');
+            if (rawEntry) {
+              try {
+                const entry = JSON.parse(rawEntry) as {
+                  path: string;
+                  name: string;
+                  relPath?: string;
+                  isDir?: boolean;
+                };
+                if (entry && entry.path && entry.name && !entry.isDir) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const { docPath: curDocPath, workspaceRoot: curWsRoot } = callbacksRef.current;
+                  let rel: string;
+                  if (curDocPath && curDocPath.trim()) {
+                    rel = computeRelativePath(curDocPath, true, entry.path);
+                  } else if (curWsRoot && curWsRoot.trim()) {
+                    rel = computeRelativePath(curWsRoot, false, entry.path);
+                  } else if (entry.relPath) {
+                    const cleaned = normalizeLocalMarkdownPath(entry.relPath).replace(/^\/+/, '');
+                    rel = cleaned.startsWith('./') ? cleaned : `./${cleaned}`;
+                  } else {
+                    rel = normalizeLocalMarkdownPath(entry.path);
+                  }
+                  const coords = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                  const insertPos = coords?.pos ?? view.state.selection.from;
+                  if (/\.(png|jpe?g|gif|webp|bmp|ico|avif|svg)$/i.test(entry.name)) {
+                    const imageType = view.state.schema.nodes.image;
+                    if (imageType) {
+                      const alt = entry.name.replace(/\.[^.]+$/, '') || 'image';
+                      const node = imageType.create({ src: rel, alt });
+                      view.dispatch(view.state.tr.insert(insertPos, node));
+                      view.focus();
+                      return true;
+                    }
+                  }
+                  const linkMark = view.state.schema.marks.link;
+                  if (linkMark) {
+                    const tr = view.state.tr.insertText(entry.name, insertPos);
+                    tr.addMark(insertPos, insertPos + entry.name.length, linkMark.create({ href: rel }));
+                    view.dispatch(tr);
+                    view.focus();
+                    return true;
+                  }
+                }
+              } catch {
+                // ignore invalid drag payload
+              }
+            }
             const files = Array.from(event.dataTransfer?.files || []);
-            const imgFile = files.find((f) => f.type.startsWith('image/'));
+            const imgFile = files.find(
+              (f) =>
+                f.type.startsWith('image/') ||
+                /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(f.name)
+            );
             if (imgFile && callbacksRef.current.onImagePasteOrDrop) {
               event.preventDefault();
               callbacksRef.current.onImagePasteOrDrop(imgFile);
@@ -1494,14 +1554,14 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
 
     const runtimeValue = useMemo<RuntimeCtxValue>(
       () => ({
-        baseDir: docPath,
+        baseDir: docPath || workspaceRoot || undefined,
         isDark,
         onCopyNotify,
         onDiagramExportNotify,
         diagramLabels: resolvedDiagramLabels,
         onZoomSvg: setZoomSvg,
       }),
-      [docPath, isDark, onCopyNotify, onDiagramExportNotify, resolvedDiagramLabels]
+      [docPath, workspaceRoot, isDark, onCopyNotify, onDiagramExportNotify, resolvedDiagramLabels]
     );
 
     const fmEntries = frontmatter.data ? Object.entries(frontmatter.data) : [];

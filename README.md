@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v120">What's New in v1.2.0</a> ・
+    <a href="#whats-new-in-v121">What's New in v1.2.1</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.2.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.2.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.2.0`
+Current version: `v1.2.1`
 
 ## Key Features
 
@@ -96,13 +96,22 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.2.0
+## What's New in v1.2.1
+
+- **Image Drop & Preview Rendering Fix (Windows Paths, Spaces & Non-ASCII Filenames)**: Fixed local/dropped images failing to render in Markdown Preview when file paths contain spaces, parentheses, non-ASCII characters (e.g. Japanese folders), or Windows drive letters/backslashes (`C:\...\foo bar.png`). Both inserted image syntax (`<C:/...>`) and manually typed/pasted local paths are normalized cleanly, `rehype-sanitize` preserves local drive/`file:`/`data:`/`blob:` image sources, and the Rust backend decodes UTF-8 percent-encoded paths and `file:///` Windows URIs reliably.
+- **Unsaved Tab & Visual Preview Drop Improvements**: Added `workspaceRoot` fallback for image resolution in `PreviewPane`, `ImageModal`, and `SlidePresentationModal`, enabled direct Sidebar drag-and-drop onto Visual Preview, and synced Turndown round-tripping for space/Unicode paths.
+- **Updated Welcome Guide (`Welcome.md` / `ようこそ.md`)**: Refreshed the built-in first-launch welcome document with v1.2 feature examples (Git panel, Knowledge Graph, Citations/Footnotes, Word `.docx` & diagram export, Keybindings UI, and JSON backup).
+
+<details>
+<summary>Previous release: v1.2.0</summary>
 
 - **Git Source Control Panel**: Dedicated **Git** sidebar tab with change badge, branch & ahead/behind info, Stage / Unstage / Discard, inline unified Diff viewer, Commit, **AI Commit Message Generator**, Pull / Push, and recent commit log.
 - **Knowledge Graph & Broken Link Diagnostics**: Interactive workspace note connection graph with search/`#tag` filters, connected-only toggle, orphan note stats, and click-to-jump broken link diagnostics.
 - **Word (`.docx`), Mermaid/KaTeX SVG/PNG Export & Copy as Rich Text**: Export Markdown documents natively to `.docx`, save Mermaid diagrams & KaTeX math blocks as `.svg` or `.png`, and copy selections or whole docs as inline-styled Rich Text (`text/html` + `text/plain`).
 - **Citations, Footnotes, BibTeX / DOI Lookup & URL Auto-Title Paste**: Insert Link Cards, auto-numbered footnotes (`[^N]`), parsed BibTeX references (APA / Markdown), and Crossref DOI lookups; wrap selected text when pasting URLs and optionally auto-fetch webpage `<title>` on bare URL paste.
 - **Unused Image Cleaner, `.editorconfig` / `.onigiri.json`, Keybindings UI & JSON Backup**: Scan & remove unreferenced workspace images, apply hierarchical `.editorconfig` and `.onigiri.json` project settings, customize shortcuts across 27 commands with conflict detection, and back up/restore settings, AI presets, snippets, templates, and keybindings as JSON (plus granular Reset & Cache Cleaner).
+
+</details>
 
 <details>
 <summary>Previous release: v1.1.0</summary>

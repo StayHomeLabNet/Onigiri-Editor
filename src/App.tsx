@@ -62,6 +62,7 @@ import {
   saveCustomTemplates,
 } from './utils/templates';
 import { resolveEditorLanguageLabel, resolveEffectiveLanguageId } from './utils/language';
+import { formatMarkdownImageSyntax, normalizeLocalMarkdownPath } from './utils/paths';
 import { resolveSyntaxColors, syntaxColorsToCssVars, SYNTAX_PRESETS } from './utils/syntaxThemes';
 import {
   CUSTOM_SNIPPETS_KEY,
@@ -1553,8 +1554,10 @@ export function App() {
 
   const insertImageIntoActivePane = useCallback(
     (src: string, alt = '') => {
+      const mdSyntax = formatMarkdownImageSyntax(src, alt);
+      if (!mdSyntax) return;
       if (isSideEditorActive() && sideEditorRef.current) {
-        sideEditorRef.current.insertText(`\n![${alt}](${src})\n`);
+        sideEditorRef.current.insertText(`\n${mdSyntax}\n`);
         notify(t.toasts.imageInserted);
         return;
       }
@@ -1565,9 +1568,9 @@ export function App() {
         !hasSidePane &&
         (layout === 'preview' || (layout === 'split' && activePaneRef.current === 'visual'));
       if (targetVisual && previewRef.current) {
-        previewRef.current.insertImage(src, alt);
+        previewRef.current.insertImage(normalizeLocalMarkdownPath(src), alt);
       } else {
-        editorRef.current?.insertText(`\n![${alt}](${src})\n`);
+        editorRef.current?.insertText(`\n${mdSyntax}\n`);
       }
       notify(t.toasts.imageInserted);
     },
@@ -2038,7 +2041,7 @@ export function App() {
             const paths = event.payload.paths || [];
             let savedAnyImage = false;
             for (const p of paths) {
-              if (/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p)) {
+              if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(p)) {
                 try {
                   const savedSrc = await saveImageAsset(
                     p,
@@ -7251,6 +7254,7 @@ export function App() {
                       docId={activeTab.id}
                       markdown={activeTab.content}
                       docPath={activeTab.filePath}
+                      workspaceRoot={workspaceRoot}
                       theme={theme}
                       settings={effectiveSettings}
                       onMarkdownChange={(next, sourceDocId) =>
@@ -7477,6 +7481,8 @@ export function App() {
         t={t}
         open={showImageModal}
         docPath={activeTab.filePath}
+        workspaceRoot={workspaceRoot}
+        imageAssetFolder={effectiveSettings.imageAssetFolder}
         onClose={() => setShowImageModal(false)}
         onInsert={(src, alt) => insertImageIntoActivePane(src, alt)}
       />
@@ -7551,6 +7557,7 @@ export function App() {
         title={activeTab.title}
         markdown={activeTab.content}
         docPath={activeTab.filePath}
+        workspaceRoot={workspaceRoot}
         theme={theme}
         onClose={() => setShowSlideModal(false)}
       />
