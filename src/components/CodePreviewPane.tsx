@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ClipboardCopy, ExternalLink, Globe, Info, Loader2, Play, Square, Wifi } from 'lucide-react';
 import { all, createLowlight } from 'lowlight';
 import type { Translations } from '../i18n/types';
@@ -7,6 +7,8 @@ import { resolveEditorLanguageLabel, resolveHljsLanguage } from '../utils/langua
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
 import { ProjectPortInput } from './ProjectPortInput';
+import { ProjectTargetControls } from './ProjectTargetControls';
+import { ProjectServerLogsBox, ProjectServerLogsToggle } from './ProjectServerLogs';
 
 const lowlight = createLowlight(all);
 
@@ -26,6 +28,8 @@ interface CodePreviewPaneProps {
   projectServerAllowLan?: boolean;
   projectCustomPort?: string;
   onProjectCustomPortChange?: (port: string) => void;
+  onSelectTargetRoot?: (targetRoot: string) => void;
+  onSelectScript?: (scriptName: string) => void;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -132,6 +136,8 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   projectServerAllowLan = false,
   projectCustomPort = '',
   onProjectCustomPortChange,
+  onSelectTargetRoot,
+  onSelectScript,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -146,6 +152,7 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   onRecheckProjectEnv,
 }) => {
   const activeRowRef = useRef<HTMLDivElement | null>(null);
+  const [logsExpanded, setLogsExpanded] = useState(false);
 
   const ext = useMemo(() => {
     const base = fileName.toLowerCase().split(/[/\\]/).pop() || '';
@@ -265,12 +272,40 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
                   showTitle={t.project.lanUrlsToggleShowTitle}
                   hideTitle={t.project.lanUrlsToggleHideTitle}
                   copyTitlePrefix={t.project.lanUrlCopyTitle}
+                  qrShowTitle={t.project.qrShowTitle}
+                  qrHideTitle={t.project.qrHideTitle}
+                  qrScanHint={t.project.qrScanHint}
                   onCopyUrl={onCopyLanUrl}
                   variant="inline"
                 />
               )}
+            {(!projectInfo ||
+              !projectServer?.rootPath ||
+              projectServer.rootPath === projectInfo.rootPath) &&
+              projectServer?.logs &&
+              projectServer.logs.length > 0 && (
+                <ProjectServerLogsToggle
+                  logCount={projectServer.logs.length}
+                  expanded={logsExpanded}
+                  onToggle={() => setLogsExpanded((prev) => !prev)}
+                  running={Boolean(serverRunningHere)}
+                  hasError={Boolean(projectServer.error)}
+                  label={t.project.liveLogsLabel}
+                  showTitle={t.project.liveLogsShowTitle}
+                  hideTitle={t.project.liveLogsHideTitle}
+                />
+              )}
           </div>
           <div className="project-bar-actions">
+            <ProjectTargetControls
+              projectInfo={projectInfo}
+              projectServer={projectServer}
+              onSelectTargetRoot={onSelectTargetRoot}
+              onSelectScript={onSelectScript}
+              targetLabel={t.project.targetLabel}
+              scriptLabel={t.project.scriptLabel}
+              lockedTitle={t.project.targetScriptLockedHint}
+            />
             {onProjectCustomPortChange && (
               <ProjectPortInput
                 value={projectCustomPort}
@@ -353,6 +388,16 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
               )
             )}
           </div>
+          {logsExpanded &&
+            (!projectInfo ||
+              !projectServer?.rootPath ||
+              projectServer.rootPath === projectInfo.rootPath) &&
+            projectServer?.logs &&
+            projectServer.logs.length > 0 && (
+              <div className="project-logs-drawer">
+                <ProjectServerLogsBox logs={projectServer.logs} expanded={logsExpanded} />
+              </div>
+            )}
         </div>
       ) : (
         isPhp && (

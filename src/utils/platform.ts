@@ -707,6 +707,12 @@ export async function browserNavAction(action: 'back' | 'forward' | 'reload'): P
   await invoke('browser_nav_action', { action });
 }
 
+export async function browserOpenDevtools(): Promise<boolean> {
+  if (!isTauri()) return false;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('browser_open_devtools');
+}
+
 export async function browserClose(): Promise<void> {
   if (!isTauri()) return;
   try {
@@ -792,21 +798,35 @@ export async function getExternalPreviewStatus(): Promise<ExternalPreviewStatus>
   return invoke<ExternalPreviewStatus>('get_external_preview_status');
 }
 
-export async function inspectWorkspaceProject(rootPath: string): Promise<ProjectInfo | null> {
+export async function inspectWorkspaceProject(
+  rootPath: string,
+  targetRoot?: string | null,
+  scriptName?: string | null
+): Promise<ProjectInfo | null> {
   if (!isTauri()) return null;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<ProjectInfo>('inspect_workspace_project', { rootPath });
+    return await invoke<ProjectInfo>('inspect_workspace_project', {
+      rootPath,
+      targetRoot: targetRoot || null,
+      scriptName: scriptName || null,
+    });
   } catch {
     return null;
   }
 }
 
-export async function inspectProjectForPath(path: string): Promise<ProjectInfo | null> {
+export async function inspectProjectForPath(
+  path: string,
+  scriptName?: string | null
+): Promise<ProjectInfo | null> {
   if (!isTauri()) return null;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<ProjectInfo>('inspect_project_for_path', { path });
+    return await invoke<ProjectInfo>('inspect_project_for_path', {
+      path,
+      scriptName: scriptName || null,
+    });
   } catch {
     return null;
   }
@@ -842,6 +862,8 @@ export async function stopProjectDevServer(): Promise<ProjectServerStatus> {
       kind: null,
       url: null,
       commandLabel: null,
+      requestedPort: null,
+      requestedScript: null,
       logs: [],
       error: null,
     };

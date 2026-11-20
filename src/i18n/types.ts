@@ -482,6 +482,11 @@ export interface Translations {
     go: string;
     openExternal: string;
     openSettings: string;
+    devtools: string;
+    devtoolsTitle: string;
+    serverStoppedBannerTitle: string;
+    serverStoppedBannerRestart: string;
+    serverStoppedBannerHome: string;
     externalLiveTitle: string;
     externalLiveBtn: string;
     externalStopBtn: string;
@@ -557,6 +562,16 @@ export interface Translations {
     portInputTitle: string;
     portStopToChangeHint: string;
     invalidPortError: string;
+    portMismatchNotice: string;
+    targetLabel: string;
+    scriptLabel: string;
+    targetScriptLockedHint: string;
+    liveLogsLabel: string;
+    liveLogsShowTitle: string;
+    liveLogsHideTitle: string;
+    qrShowTitle: string;
+    qrHideTitle: string;
+    qrScanHint: string;
   };
   imageModal: {
     title: string;

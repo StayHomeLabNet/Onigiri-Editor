@@ -2728,6 +2728,7 @@ pub fn run() {
             browser::browser_set_bounds,
             browser::browser_navigate,
             browser::browser_nav_action,
+            browser::browser_open_devtools,
             browser::browser_close,
             browser::open_in_external_browser,
             live_preview::start_external_preview,

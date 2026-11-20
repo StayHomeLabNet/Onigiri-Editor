@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import QRCode from 'qrcode';
 import { extractPortFromUrl, isDockerProject } from '../components/ProjectPortInput';
+import { orderProjectScripts } from '../components/ProjectTargetControls';
 import type { ProjectInfo } from '../types';
 
 function makeProjectInfo(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
@@ -36,5 +38,16 @@ describe('ProjectPortInput helpers', () => {
     expect(isDockerProject(makeProjectInfo({ kind: 'vite', devScript: 'dev' }))).toBe(false);
     expect(isDockerProject(makeProjectInfo({ kind: 'docker', devScript: 'docker-compose' }))).toBe(true);
     expect(isDockerProject(makeProjectInfo({ kind: 'laravel', devScript: 'docker-compose' }))).toBe(true);
+  });
+
+  it('orders server scripts ahead of utility scripts', () => {
+    expect(
+      orderProjectScripts(['lint', 'build', 'preview', 'dev', 'test'], 'dev')
+    ).toEqual(['dev', 'preview', 'lint', 'build', 'test']);
+  });
+
+  it('generates valid QR code data URLs for LAN URLs', async () => {
+    const uri = await QRCode.toDataURL('http://192.168.68.222:5173/', { margin: 1, width: 120 });
+    expect(uri.startsWith('data:image/png;base64,')).toBe(true);
   });
 });

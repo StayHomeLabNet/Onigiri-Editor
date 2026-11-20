@@ -220,6 +220,7 @@ import type { SettingsTab } from './components/SettingsModal';
 import type { EncodingModalMode } from './components/EncodingModal';
 import type { FolderSwitchGuardMode } from './components/FolderSwitchGuardModal';
 import type { DiffPreviewRequest } from './components/AiDiffPreviewModal';
+import { extractPortFromUrl } from './components/ProjectPortInput';
 
 function formatErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
@@ -542,6 +543,34 @@ export function App() {
     }
     return {};
   });
+  const [projectSelectedTargets, setProjectSelectedTargets] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('onigiri-markdown.projectSelectedTargets');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, string>;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return {};
+  });
+  const [projectSelectedScripts, setProjectSelectedScripts] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('onigiri-markdown.projectSelectedScripts');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, string>;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return {};
+  });
   const [projectSetupBusy, setProjectSetupBusy] = useState(false);
   const [projectSetupActionId, setProjectSetupActionId] = useState<string | null>(null);
   const [projectSetupLogs, setProjectSetupLogs] = useState<string[]>([]);
@@ -551,6 +580,7 @@ export function App() {
   } | null>(null);
   const [projectRechecking, setProjectRechecking] = useState(false);
   const pendingBrowseTargetRef = useRef<'builtin' | 'external' | null>(null);
+  const notifiedPortMismatchRef = useRef<string | null>(null);
 
   const projectPortKey = projectInfo?.rootPath || workspaceRoot || '__default__';
   const projectCustomPort = projectPortOverrides[projectPortKey] ?? '';
@@ -645,6 +675,7 @@ export function App() {
   sidePaneModeRef.current = sidePaneMode;
   const rightPaneModeRef = useRef<RightPaneMode>(rightPaneMode);
   rightPaneModeRef.current = rightPaneMode;
+  const anyModalOpenRef = useRef<boolean>(false);
   const focusedSplitSideRef = useRef<'main' | 'side'>(focusedSplitSide);
   focusedSplitSideRef.current = focusedSplitSide;
   const settingsRef = useRef<EditorSettings>(settings);
@@ -4733,39 +4764,65 @@ export function App() {
     buildExternalPreviewPayload,
   ]);
 
-  const refreshProjectInfo = useCallback(async (): Promise<ProjectInfo | null> => {
-    if (!isTauri()) {
-      setProjectInfo(null);
-      return null;
-    }
-    let info: ProjectInfo | null = null;
-    if (workspaceRoot) {
-      info = await inspectWorkspaceProject(workspaceRoot);
-    } else if (activeTab.filePath && /[/\\]/.test(activeTab.filePath)) {
-      info = await inspectProjectForPath(activeTab.filePath);
-    }
-    setProjectInfo(info);
-    if (info?.alreadyRunning && info.defaultUrl) {
-      setProjectServer((prev) => {
-        if (prev?.running && prev.rootPath === info.rootPath) return prev;
-        if (prev?.running && !prev.external) return prev;
-        return {
-          running: true,
-          starting: false,
-          external: true,
-          allowLan: false,
-          lanUrls: [],
-          rootPath: info.rootPath,
-          kind: info.kind,
-          url: info.defaultUrl,
-          commandLabel: info.devCommandLabel,
-          logs: [`Connected to already-running server at ${info.defaultUrl}`],
-          error: null,
-        };
-      });
-    }
-    return info;
-  }, [workspaceRoot, activeTab.filePath]);
+  const refreshProjectInfo = useCallback(
+    async (overrideTargetRoot?: string | null, overrideScript?: string | null): Promise<ProjectInfo | null> => {
+      if (!isTauri()) {
+        setProjectInfo(null);
+        return null;
+      }
+      let info: ProjectInfo | null = null;
+      if (workspaceRoot) {
+        const chosenTarget =
+          overrideTargetRoot !== undefined
+            ? overrideTargetRoot
+            : projectSelectedTargets[workspaceRoot] ?? null;
+        const scriptKey = chosenTarget || workspaceRoot;
+        const chosenScript =
+          overrideScript !== undefined
+            ? overrideScript
+            : projectSelectedScripts[scriptKey] ?? null;
+        info = await inspectWorkspaceProject(workspaceRoot, chosenTarget, chosenScript);
+      } else if (activeTab.filePath && /[/\\]/.test(activeTab.filePath)) {
+        const chosenScript =
+          overrideScript !== undefined
+            ? overrideScript
+            : projectInfo?.rootPath
+              ? projectSelectedScripts[projectInfo.rootPath] ?? null
+              : null;
+        info = await inspectProjectForPath(activeTab.filePath, chosenScript);
+      }
+      setProjectInfo(info);
+      if (info?.alreadyRunning && info.defaultUrl) {
+        setProjectServer((prev) => {
+          if (prev?.running && prev.rootPath === info.rootPath) return prev;
+          if (prev?.running && !prev.external) return prev;
+          return {
+            running: true,
+            starting: false,
+            external: true,
+            allowLan: false,
+            lanUrls: [],
+            rootPath: info.rootPath,
+            kind: info.kind,
+            url: info.defaultUrl,
+            commandLabel: info.devCommandLabel,
+            requestedPort: null,
+            requestedScript: info.devScript ?? null,
+            logs: [`Connected to already-running server at ${info.defaultUrl}`],
+            error: null,
+          };
+        });
+      }
+      return info;
+    },
+    [
+      workspaceRoot,
+      activeTab.filePath,
+      projectInfo?.rootPath,
+      projectSelectedTargets,
+      projectSelectedScripts,
+    ]
+  );
 
   // Inspect project structure from workspace folder or active file path
   useEffect(() => {
@@ -4777,9 +4834,11 @@ export function App() {
     (async () => {
       let info: ProjectInfo | null = null;
       if (workspaceRoot) {
-        info = await inspectWorkspaceProject(workspaceRoot);
+        const chosenTarget = projectSelectedTargets[workspaceRoot] ?? null;
+        const chosenScript = chosenTarget ? projectSelectedScripts[chosenTarget] ?? null : null;
+        info = await inspectWorkspaceProject(workspaceRoot, chosenTarget, chosenScript);
       } else if (activeTab.filePath && /[/\\]/.test(activeTab.filePath)) {
-        info = await inspectProjectForPath(activeTab.filePath);
+        info = await inspectProjectForPath(activeTab.filePath, null);
       }
       if (!cancelled) {
         setProjectInfo(info);
@@ -4797,6 +4856,8 @@ export function App() {
               kind: info.kind,
               url: info.defaultUrl,
               commandLabel: info.devCommandLabel,
+              requestedPort: null,
+              requestedScript: info.devScript ?? null,
               logs: [`Connected to already-running server at ${info.defaultUrl}`],
               error: null,
             };
@@ -4807,7 +4868,44 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [workspaceRoot, activeTab.filePath]);
+  }, [workspaceRoot, activeTab.filePath, projectSelectedTargets, projectSelectedScripts]);
+
+  const handleSelectTargetRoot = useCallback(
+    async (nextTargetRoot: string) => {
+      if (workspaceRoot) {
+        setProjectSelectedTargets((prev) => {
+          const next = { ...prev, [workspaceRoot]: nextTargetRoot };
+          try {
+            localStorage.setItem('onigiri-markdown.projectSelectedTargets', JSON.stringify(next));
+          } catch {
+            // ignore storage errors
+          }
+          return next;
+        });
+      }
+      await refreshProjectInfo(nextTargetRoot, projectSelectedScripts[nextTargetRoot] ?? null);
+    },
+    [workspaceRoot, projectSelectedScripts, refreshProjectInfo]
+  );
+
+  const handleSelectScript = useCallback(
+    async (nextScript: string) => {
+      const targetRoot = projectInfo?.rootPath || workspaceRoot;
+      if (targetRoot) {
+        setProjectSelectedScripts((prev) => {
+          const next = { ...prev, [targetRoot]: nextScript };
+          try {
+            localStorage.setItem('onigiri-markdown.projectSelectedScripts', JSON.stringify(next));
+          } catch {
+            // ignore storage errors
+          }
+          return next;
+        });
+      }
+      await refreshProjectInfo(targetRoot ?? null, nextScript);
+    },
+    [projectInfo?.rootPath, workspaceRoot, refreshProjectInfo]
+  );
 
   // Clear setup logs & feedback when switching projects
   useEffect(() => {
@@ -4882,6 +4980,29 @@ export function App() {
   const openProjectUrlRef = useRef(handleOpenProjectUrl);
   openProjectUrlRef.current = handleOpenProjectUrl;
 
+  const maybeNotifyPortMismatch = useCallback(
+    (st: ProjectServerStatus | null | undefined) => {
+      if (!st?.running) {
+        notifiedPortMismatchRef.current = null;
+        return;
+      }
+      if (!st.url || !st.requestedPort) return;
+      const actualPort = extractPortFromUrl(st.url);
+      if (!actualPort || Number(actualPort) === st.requestedPort) return;
+      const key = `${st.url}:${st.requestedPort}`;
+      if (notifiedPortMismatchRef.current === key) return;
+      notifiedPortMismatchRef.current = key;
+      notify(
+        t.project.portMismatchNotice
+          .replace('{requested}', String(st.requestedPort))
+          .replace('{actual}', actualPort)
+      );
+    },
+    [notify, t.project.portMismatchNotice]
+  );
+  const maybeNotifyPortMismatchRef = useRef(maybeNotifyPortMismatch);
+  maybeNotifyPortMismatchRef.current = maybeNotifyPortMismatch;
+
   // Listen to project dev server status updates
   useEffect(() => {
     if (!isTauri()) return;
@@ -4894,6 +5015,7 @@ export function App() {
         unlisten = await listen<ProjectServerStatus>('project-server-update', (ev) => {
           const st = ev.payload;
           setProjectServer(st);
+          maybeNotifyPortMismatchRef.current(st);
           if (st?.url && pendingBrowseTargetRef.current) {
             const target = pendingBrowseTargetRef.current;
             pendingBrowseTargetRef.current = null;
@@ -5031,6 +5153,7 @@ export function App() {
           requestedPort
         );
         setProjectServer(st);
+        maybeNotifyPortMismatch(st);
         if (st.url && pendingBrowseTargetRef.current) {
           const dest = pendingBrowseTargetRef.current;
           pendingBrowseTargetRef.current = null;
@@ -5489,6 +5612,17 @@ export function App() {
   // Global keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (
+        e.key === 'F5' &&
+        settingsRef.current.builtinBrowserEnabled &&
+        rightPaneModeRef.current === 'browser' &&
+        !anyModalOpenRef.current
+      ) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('onigiri-browser-reload'));
+        return;
+      }
       const meta = e.metaKey || e.ctrlKey;
       if (matchesKeybinding(e, effectiveKeybindings['save-file'])) {
         e.preventDefault();
@@ -6576,6 +6710,7 @@ export function App() {
     Boolean(previewWorkspaceImagePath) ||
     nativeDialogOpen ||
     isDraggingFile;
+  anyModalOpenRef.current = anyModalOpen;
   const showRightBrowser = settings.builtinBrowserEnabled && rightPaneMode === 'browser';
   const showSideComparePane = Boolean(sideTab) && !showRightBrowser;
   const nativeBrowserVisible =
@@ -6775,6 +6910,8 @@ export function App() {
             projectServerAllowLan={settings.projectServerAllowLan}
             projectCustomPort={projectCustomPort}
             onProjectCustomPortChange={handleProjectCustomPortChange}
+            onSelectTargetRoot={(tr) => void handleSelectTargetRoot(tr)}
+            onSelectScript={(sc) => void handleSelectScript(sc)}
             setupBusy={projectSetupBusy}
             setupActionId={projectSetupActionId}
             setupLogs={projectSetupLogs}
@@ -7317,6 +7454,8 @@ export function App() {
                       projectServerAllowLan={settings.projectServerAllowLan}
                       projectCustomPort={projectCustomPort}
                       onProjectCustomPortChange={handleProjectCustomPortChange}
+                      onSelectTargetRoot={(tr) => void handleSelectTargetRoot(tr)}
+                      onSelectScript={(sc) => void handleSelectScript(sc)}
                       setupBusy={projectSetupBusy}
                       setupActionId={projectSetupActionId}
                       setupLogs={projectSetupLogs}
@@ -7362,6 +7501,8 @@ export function App() {
                       projectServerAllowLan={settings.projectServerAllowLan}
                       projectCustomPort={projectCustomPort}
                       onProjectCustomPortChange={handleProjectCustomPortChange}
+                      onSelectTargetRoot={(tr) => void handleSelectTargetRoot(tr)}
+                      onSelectScript={(sc) => void handleSelectScript(sc)}
                       setupBusy={projectSetupBusy}
                       setupActionId={projectSetupActionId}
                       setupLogs={projectSetupLogs}
@@ -7419,6 +7560,8 @@ export function App() {
                     projectServerAllowLan={settings.projectServerAllowLan}
                     projectCustomPort={projectCustomPort}
                     onProjectCustomPortChange={handleProjectCustomPortChange}
+                    onSelectTargetRoot={(tr) => void handleSelectTargetRoot(tr)}
+                    onSelectScript={(sc) => void handleSelectScript(sc)}
                     setupBusy={projectSetupBusy}
                     setupActionId={projectSetupActionId}
                     setupLogs={projectSetupLogs}

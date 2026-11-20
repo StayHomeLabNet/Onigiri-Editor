@@ -73,6 +73,8 @@ import {
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
 import { ProjectPortInput } from './ProjectPortInput';
+import { ProjectTargetControls } from './ProjectTargetControls';
+import { ProjectServerLogs } from './ProjectServerLogs';
 
 const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
 const JSON_EXT_RE = /\.(json|jsonc)$/i;
@@ -278,6 +280,8 @@ interface SidebarProps {
   projectServerAllowLan?: boolean;
   projectCustomPort?: string;
   onProjectCustomPortChange?: (port: string) => void;
+  onSelectTargetRoot?: (targetRoot: string) => void;
+  onSelectScript?: (scriptName: string) => void;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -357,6 +361,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   projectServerAllowLan = false,
   projectCustomPort = '',
   onProjectCustomPortChange,
+  onSelectTargetRoot,
+  onSelectScript,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -1062,7 +1068,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       ) : null}
                     </div>
                     {projectInfo.devCommandLabel && (
-                      <div className="sidebar-project-actions">
+                      <>
+                        <ProjectTargetControls
+                          projectInfo={projectInfo}
+                          projectServer={projectServer}
+                          onSelectTargetRoot={onSelectTargetRoot}
+                          onSelectScript={onSelectScript}
+                          targetLabel={t.project.targetLabel}
+                          scriptLabel={t.project.scriptLabel}
+                          lockedTitle={t.project.targetScriptLockedHint}
+                        />
+                        <div className="sidebar-project-actions">
                         {projectServer?.running &&
                         (!projectServer.rootPath ||
                           projectServer.rootPath === projectInfo.rootPath) &&
@@ -1145,7 +1161,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             </span>
                           </button>
                         )}
-                      </div>
+                        </div>
+                      </>
                     )}
                     {projectServer?.running &&
                       (!projectServer.rootPath ||
@@ -1158,8 +1175,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           showTitle={t.project.lanUrlsToggleShowTitle}
                           hideTitle={t.project.lanUrlsToggleHideTitle}
                           copyTitlePrefix={t.project.lanUrlCopyTitle}
+                          qrShowTitle={t.project.qrShowTitle}
+                          qrHideTitle={t.project.qrHideTitle}
+                          qrScanHint={t.project.qrScanHint}
                           onCopyUrl={onCopyLanUrl}
                           variant="block"
+                        />
+                      )}
+                    {(!projectServer?.rootPath ||
+                      projectServer.rootPath === projectInfo.rootPath) &&
+                      projectServer?.logs &&
+                      projectServer.logs.length > 0 && (
+                        <ProjectServerLogs
+                          logs={projectServer.logs}
+                          running={Boolean(projectServer.running)}
+                          hasError={Boolean(projectServer.error)}
+                          label={t.project.liveLogsLabel}
+                          showTitle={t.project.liveLogsShowTitle}
+                          hideTitle={t.project.liveLogsHideTitle}
                         />
                       )}
                     {projectServer?.running &&

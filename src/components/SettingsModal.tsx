@@ -19,7 +19,9 @@ import {
   Upload,
   FileCode,
   RefreshCw,
+  QrCode,
 } from 'lucide-react';
+import { QrCodeCard } from './LanUrlList';
 import type {
   AiFolderMode,
   AppUpdateInfo,
@@ -212,6 +214,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Keybindings editor state
   const [kbFilter, setKbFilter] = useState('');
   const [recordingCmdId, setRecordingCmdId] = useState<string | null>(null);
+  const [activeLanQrUrl, setActiveLanQrUrl] = useState<string | null>(null);
 
   const effectiveKeybindings = useMemo(
     () => resolveEffectiveKeybindings(customKeybindings),
@@ -1472,8 +1475,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 <span>{t.actions.copyLanUrl}</span>
                               </button>
                             )}
+                            <button
+                              type="button"
+                              className={`mini-pill-btn ${activeLanQrUrl === lanUrl ? 'is-active' : ''}`}
+                              onClick={() =>
+                                setActiveLanQrUrl((cur) => (cur === lanUrl ? null : lanUrl))
+                              }
+                              title={activeLanQrUrl === lanUrl ? t.project.qrHideTitle : t.project.qrShowTitle}
+                            >
+                              <QrCode size={11} />
+                            </button>
                           </div>
                         ))}
+                      {activeLanQrUrl && externalPreviewLanUrls.includes(activeLanQrUrl) && (
+                        <QrCodeCard
+                          url={activeLanQrUrl}
+                          scanHint={t.project.qrScanHint}
+                          copyTitle={t.actions.copyLanUrl}
+                          closeTitle={t.project.qrHideTitle}
+                          onCopyUrl={onCopyLanUrl}
+                          onClose={() => setActiveLanQrUrl(null)}
+                        />
+                      )}
                     </div>
                   )}
                   <div className="ai-hint-text">
@@ -1520,8 +1543,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 <span>{t.actions.copyLanUrl}</span>
                               </button>
                             )}
+                            <button
+                              type="button"
+                              className={`mini-pill-btn ${activeLanQrUrl === lanUrl ? 'is-active' : ''}`}
+                              onClick={() =>
+                                setActiveLanQrUrl((cur) => (cur === lanUrl ? null : lanUrl))
+                              }
+                              title={activeLanQrUrl === lanUrl ? t.project.qrHideTitle : t.project.qrShowTitle}
+                            >
+                              <QrCode size={11} />
+                            </button>
                           </div>
                         ))}
+                      {activeLanQrUrl &&
+                        (projectServer.lanUrls ?? []).includes(activeLanQrUrl) && (
+                          <QrCodeCard
+                            url={activeLanQrUrl}
+                            scanHint={t.project.qrScanHint}
+                            copyTitle={t.project.lanUrlCopyTitle}
+                            closeTitle={t.project.qrHideTitle}
+                            onCopyUrl={onCopyLanUrl}
+                            onClose={() => setActiveLanQrUrl(null)}
+                          />
+                        )}
                       {settings.projectServerAllowLan &&
                         projectServer.external &&
                         (!projectServer.lanUrls || projectServer.lanUrls.length === 0) && (

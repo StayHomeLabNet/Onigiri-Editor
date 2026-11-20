@@ -167,6 +167,28 @@ pub async fn browser_nav_action(app: AppHandle, action: String) -> Result<(), St
 }
 
 #[tauri::command]
+pub async fn browser_open_devtools(app: AppHandle) -> Result<bool, String> {
+    let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) else {
+        return Err("Built-in browser is not open yet.".to_string());
+    };
+    #[cfg(target_os = "windows")]
+    {
+        wv.open_devtools();
+        Ok(true)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if wv.is_devtools_open() {
+            wv.close_devtools();
+            Ok(false)
+        } else {
+            wv.open_devtools();
+            Ok(true)
+        }
+    }
+}
+
+#[tauri::command]
 pub async fn browser_close(app: AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
         let _ = wv.hide();

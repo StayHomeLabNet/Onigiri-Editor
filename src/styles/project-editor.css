@@ -242,6 +242,232 @@
   gap: 5px;
 }
 
+.project-target-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+}
+
+.project-select-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface, var(--bg-primary));
+  color: var(--fg-secondary);
+  font-size: 11px;
+  max-width: 190px;
+}
+
+.project-select-control:focus-within {
+  border-color: var(--accent);
+}
+
+.project-select-control.is-locked {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.project-select-icon {
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+.project-select-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  max-width: 155px;
+  cursor: pointer;
+}
+
+.project-select-input:disabled {
+  cursor: not-allowed;
+}
+
+.project-url-chip.is-logs-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.1);
+  color: var(--fg-secondary);
+}
+
+.project-url-chip.is-logs-toggle:hover {
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.project-url-chip.is-logs-toggle.is-expanded {
+  border-color: var(--accent);
+  color: var(--fg-primary);
+}
+
+.project-url-chip.is-logs-toggle.is-error {
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #ef4444;
+}
+
+.project-logs-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #10b981;
+  flex-shrink: 0;
+}
+
+.project-logs-drawer {
+  width: 100%;
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+
+.project-log-box.is-live {
+  max-height: 150px;
+  font-size: 11px;
+}
+
+.lan-chip-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+}
+
+.project-url-chip.is-lan.is-qr-btn {
+  padding: 2px 5px;
+}
+
+.project-url-chip.is-lan.is-qr-btn.is-expanded {
+  border-color: rgba(59, 130, 246, 0.65);
+  background: rgba(59, 130, 246, 0.24);
+  color: #93c5fd;
+}
+
+.lan-qr-card {
+  width: 100%;
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: var(--bg-panel);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.lan-qr-frame {
+  padding: 6px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.lan-qr-img {
+  display: block;
+  width: 120px;
+  height: 120px;
+}
+
+.lan-qr-loading {
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.lan-qr-meta {
+  flex: 1 1 160px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.lan-qr-url-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.lan-qr-url-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.lan-qr-url-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lan-qr-url-btn:hover {
+  border-color: var(--accent);
+}
+
+.lan-qr-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--fg-muted);
+}
+
+.browser-stopped-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  padding: 6px 10px;
+  background: rgba(245, 158, 11, 0.12);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+  font-size: 11.5px;
+  color: var(--fg-primary);
+  flex-shrink: 0;
+}
+
+.browser-stopped-banner-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.browser-stopped-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
 .sidebar-project-lan-row {
   display: flex;
   flex-wrap: wrap;

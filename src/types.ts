@@ -371,6 +371,16 @@ export interface ProjectSetupResult {
   output: string[];
 }
 
+export interface ProjectTarget {
+  rootPath: string;
+  label: string;
+  relativePath: string;
+  kind: ProjectKind;
+  devScript: string | null;
+  scripts: string[];
+  defaultUrl: string | null;
+}
+
 export interface ProjectInfo {
   rootPath: string;
   name: string;
@@ -385,6 +395,7 @@ export interface ProjectInfo {
   entryHtmlPath: string | null;
   alreadyRunning?: boolean;
   diagnostics?: ProjectDiagnostic[];
+  targets?: ProjectTarget[];
 }
 
 export interface ProjectServerStatus {
@@ -397,6 +408,8 @@ export interface ProjectServerStatus {
   kind: string | null;
   url: string | null;
   commandLabel: string | null;
+  requestedPort?: number | null;
+  requestedScript?: string | null;
   logs: string[];
   error: string | null;
 }

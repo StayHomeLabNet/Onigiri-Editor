@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.3.1',
+  versionLabel: 'v1.3.2',
   modes: {
     simple: 'Simple',
     basic: 'Basic',
@@ -546,6 +546,11 @@ export const en: Translations = {
     go: 'Go',
     openExternal: 'Open in External Browser',
     openSettings: 'Browser Settings (Home URL)',
+    devtools: 'DevTools',
+    devtoolsTitle: 'Open / Toggle Browser Developer Tools (F12)',
+    serverStoppedBannerTitle: 'The dev server for this page has stopped.',
+    serverStoppedBannerRestart: 'Restart Server',
+    serverStoppedBannerHome: 'Go Home',
     externalLiveTitle: 'Open auto-refreshing live preview in external browser',
     externalLiveBtn: 'External Browser',
     externalStopBtn: 'Stop Live',
@@ -631,6 +636,16 @@ export const en: Translations = {
     portInputTitle: 'Optional dev server port (1-65535). Leave blank to use the project default.',
     portStopToChangeHint: 'Stop the server to change the port number.',
     invalidPortError: 'Please enter a valid port number between 1 and 65535.',
+    portMismatchNotice: 'Requested port {requested} was unavailable; server started on port {actual} instead.',
+    targetLabel: 'Target',
+    scriptLabel: 'Script',
+    targetScriptLockedHint: 'Stop the server to change the target folder or startup script.',
+    liveLogsLabel: 'Logs',
+    liveLogsShowTitle: 'Show live server console output',
+    liveLogsHideTitle: 'Collapse live server console output',
+    qrShowTitle: 'Show QR code for mobile scanning',
+    qrHideTitle: 'Hide QR code',
+    qrScanHint: 'Scan with your phone or tablet camera (on the same Wi-Fi/LAN)',
   },
   imageModal: {
     title: 'Insert Image',

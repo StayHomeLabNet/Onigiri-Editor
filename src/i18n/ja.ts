@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const ja: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.3.1',
+  versionLabel: 'v1.3.2',
   modes: {
     simple: 'シンプル',
     basic: '標準',
@@ -546,6 +546,11 @@ export const ja: Translations = {
     go: '移動',
     openExternal: '外部ブラウザで開く',
     openSettings: 'ブラウザ設定（ホーム URL）',
+    devtools: 'DevTools',
+    devtoolsTitle: '開発者ツールを開く / 切り替え (F12)',
+    serverStoppedBannerTitle: '表示中の開発サーバーは停止しています。',
+    serverStoppedBannerRestart: 'サーバーを再起動',
+    serverStoppedBannerHome: 'ホームを開く',
     externalLiveTitle: '外部ブラウザでリアルタイム自動更新プレビューを開く',
     externalLiveBtn: '外部ブラウザ',
     externalStopBtn: '配信停止',
@@ -631,6 +636,16 @@ export const ja: Translations = {
     portInputTitle: '起動ポート番号を指定（1〜65535）。空欄の場合はプロジェクト既定のポートを使用します。',
     portStopToChangeHint: 'ポート番号を変更するにはサーバーを一度停止してください。',
     invalidPortError: 'ポート番号は 1〜65535 の範囲で指定してください。',
+    portMismatchNotice: '指定ポート {requested} が使用中等の理由により、ポート {actual} で起動しました。',
+    targetLabel: '対象',
+    scriptLabel: 'Script',
+    targetScriptLockedHint: '対象フォルダーや起動スクリプトを変更するにはサーバーを一度停止してください。',
+    liveLogsLabel: 'Logs',
+    liveLogsShowTitle: '開発サーバーのリアルタイムログを表示',
+    liveLogsHideTitle: '開発サーバーのログを折りたたむ',
+    qrShowTitle: 'スマホ・タブレット用 QR コードを表示',
+    qrHideTitle: 'QR コードを閉じる',
+    qrScanHint: '同じ Wi-Fi / LAN 上のスマホやタブレットのカメラで読み取れます',
   },
   imageModal: {
     title: '画像を挿入',

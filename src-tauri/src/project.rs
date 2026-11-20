@@ -50,6 +50,18 @@ pub struct ProjectSetupResult {
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectTarget {
+    pub root_path: String,
+    pub label: String,
+    pub relative_path: String,
+    pub kind: String,
+    pub dev_script: Option<String>,
+    pub scripts: Vec<String>,
+    pub default_url: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
     pub root_path: String,
     pub name: String,
@@ -64,6 +76,7 @@ pub struct ProjectInfo {
     pub entry_html_path: Option<String>,
     pub already_running: bool,
     pub diagnostics: Vec<ProjectDiagnostic>,
+    pub targets: Vec<ProjectTarget>,
 }
 
 #[derive(Serialize, Clone, Debug, Default)]
@@ -78,6 +91,8 @@ pub struct ProjectServerStatus {
     pub kind: Option<String>,
     pub url: Option<String>,
     pub command_label: Option<String>,
+    pub requested_port: Option<u16>,
+    pub requested_script: Option<String>,
     pub logs: Vec<String>,
     pub error: Option<String>,
 }
@@ -85,6 +100,7 @@ pub struct ProjectServerStatus {
 pub struct ProjectServerInner {
     pub status: ProjectServerStatus,
     pub requested_port: Option<u16>,
+    pub requested_script: Option<String>,
     pub child: Option<Child>,
     pub pid: Option<u32>,
     pub aux_child: Option<Child>,
@@ -104,6 +120,7 @@ impl ProjectServerState {
             inner: Arc::new(Mutex::new(ProjectServerInner {
                 status: ProjectServerStatus::default(),
                 requested_port: None,
+                requested_script: None,
                 child: None,
                 pid: None,
                 aux_child: None,
@@ -1545,6 +1562,13 @@ fn parse_port_from_config(root: &Path, kind: &str) -> Option<u16> {
 }
 
 fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
+    inspect_root_dir_with_script(root, None)
+}
+
+fn inspect_root_dir_with_script(
+    root: &Path,
+    preferred_script: Option<&str>,
+) -> Result<ProjectInfo, String> {
     if !root.exists() || !root.is_dir() {
         return Err("Project root is not a directory".to_string());
     }
@@ -1575,11 +1599,16 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             "."
         };
         let (dev_script, scripts, label) = if has_artisan && with_vite {
-            (
-                Some("artisan-vite".to_string()),
-                vec!["artisan-vite".to_string(), "artisan-serve".to_string()],
-                "php artisan serve + vite".to_string(),
-            )
+            let scripts = vec!["artisan-vite".to_string(), "artisan-serve".to_string()];
+            let chosen = preferred_script
+                .filter(|s| scripts.iter().any(|k| k == *s))
+                .unwrap_or("artisan-vite");
+            let cmd_label = if chosen == "artisan-serve" {
+                "php artisan serve --host=127.0.0.1 --port=8000".to_string()
+            } else {
+                "php artisan serve + vite".to_string()
+            };
+            (Some(chosen.to_string()), scripts, cmd_label)
         } else if has_artisan {
             (
                 Some("artisan-serve".to_string()),
@@ -1607,6 +1636,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1628,7 +1658,8 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
                 dist_index_path: dist_index.map(|p| p.to_string_lossy().to_string()),
                 entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
                 already_running: false,
-            diagnostics: Vec::new(),
+                diagnostics: Vec::new(),
+                targets: Vec::new(),
             });
         }
         return Ok(ProjectInfo {
@@ -1645,6 +1676,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1664,6 +1696,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1682,6 +1715,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1700,6 +1734,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1743,10 +1778,15 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             "node"
         };
 
-        let dev_script = ["dev", "docs:dev", "start", "preview", "docs:preview", "serve"]
-            .iter()
-            .find(|s| scripts.iter().any(|k| k == *s))
-            .map(|s| (*s).to_string());
+        let dev_script = preferred_script
+            .filter(|s| scripts.iter().any(|k| k == *s))
+            .map(|s| s.to_string())
+            .or_else(|| {
+                ["dev", "docs:dev", "start", "preview", "docs:preview", "serve"]
+                    .iter()
+                    .find(|s| scripts.iter().any(|k| k == *s))
+                    .map(|s| (*s).to_string())
+            });
 
         let compose_ports = parse_compose_ports(root);
         if dev_script.is_some() || compose_ports.is_empty() {
@@ -1754,10 +1794,23 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
                 .as_ref()
                 .and_then(|sc| scripts_map.and_then(|m| m.get(sc)).and_then(|v| v.as_str()));
 
+            let is_vite_preview = matches!(
+                dev_script.as_deref(),
+                Some("preview") | Some("docs:preview")
+            ) || script_cmd
+                .map(|c| c.to_ascii_lowercase().contains("vite preview"))
+                .unwrap_or(false);
+
             let pm = detect_package_manager(root);
             let default_port = script_cmd
                 .and_then(parse_port_from_script)
-                .or_else(|| parse_port_from_config(root, kind))
+                .or_else(|| {
+                    if is_vite_preview {
+                        Some(4173)
+                    } else {
+                        parse_port_from_config(root, kind)
+                    }
+                })
                 .unwrap_or(match kind {
                     "vite" | "vitepress" | "sveltekit" => 5173,
                     "astro" => 4321,
@@ -1780,7 +1833,8 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
                 dist_index_path: dist_index.map(|p| p.to_string_lossy().to_string()),
                 entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
                 already_running: false,
-            diagnostics: Vec::new(),
+                diagnostics: Vec::new(),
+                targets: Vec::new(),
             });
         }
     }
@@ -1801,6 +1855,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1827,7 +1882,8 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
                 dist_index_path: dist_index.map(|p| p.to_string_lossy().to_string()),
                 entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
                 already_running: false,
-            diagnostics: Vec::new(),
+                diagnostics: Vec::new(),
+                targets: Vec::new(),
             });
         }
         let docroot = if root.join("public/index.php").exists() {
@@ -1849,6 +1905,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1869,6 +1926,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1888,6 +1946,7 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
             entry_html_path: entry_html.map(|p| p.to_string_lossy().to_string()),
             already_running: false,
             diagnostics: Vec::new(),
+            targets: Vec::new(),
         });
     }
 
@@ -1904,7 +1963,8 @@ fn inspect_root_dir(root: &Path) -> Result<ProjectInfo, String> {
         dist_index_path: None,
         entry_html_path: None,
         already_running: false,
-            diagnostics: Vec::new(),
+        diagnostics: Vec::new(),
+        targets: Vec::new(),
     })
 }
 
@@ -2925,84 +2985,168 @@ fn kind_priority(kind: &str) -> u8 {
     }
 }
 
-fn find_monorepo_subproject(root: &Path) -> Option<ProjectInfo> {
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    let Ok(entries) = fs::read_dir(root) else {
-        return None;
+fn to_project_target(workspace_root: &Path, info: &ProjectInfo) -> ProjectTarget {
+    let target_path = Path::new(&info.root_path);
+    let relative_path = target_path
+        .strip_prefix(workspace_root)
+        .ok()
+        .map(|rel| {
+            let s = rel.to_string_lossy().replace('\\', "/");
+            if s.is_empty() {
+                ".".to_string()
+            } else {
+                s
+            }
+        })
+        .unwrap_or_else(|| ".".to_string());
+    let label = if relative_path == "." {
+        format!("{} ({})", info.name, info.kind)
+    } else {
+        format!("{} ({})", relative_path, info.kind)
     };
+    ProjectTarget {
+        root_path: info.root_path.clone(),
+        label,
+        relative_path,
+        kind: info.kind.clone(),
+        dev_script: info.dev_script.clone(),
+        scripts: info.scripts.clone(),
+        default_url: info.default_url.clone(),
+    }
+}
 
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if !p.is_dir() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.')
-            || matches!(
+fn discover_monorepo_targets(root: &Path) -> Vec<ProjectTarget> {
+    let mut dirs: Vec<PathBuf> = vec![root.to_path_buf()];
+    if let Ok(entries) = fs::read_dir(root) {
+        let mut sub_dirs: Vec<PathBuf> = Vec::new();
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.')
+                || matches!(
+                    name.as_str(),
+                    "node_modules" | "target" | "dist" | "build" | "vendor" | ".venv" | "venv"
+                )
+            {
+                continue;
+            }
+            sub_dirs.push(p.clone());
+
+            if matches!(
                 name.as_str(),
-                "node_modules" | "target" | "dist" | "build" | "vendor" | ".venv" | "venv"
-            )
-        {
-            continue;
-        }
-        candidates.push(p.clone());
-
-        if matches!(
-            name.as_str(),
-            "apps" | "packages" | "services" | "sites" | "examples" | "frontend" | "backend"
-        ) {
-            if let Ok(sub_entries) = fs::read_dir(&p) {
-                for sub in sub_entries.flatten() {
-                    let sp = sub.path();
-                    if sp.is_dir() {
-                        let sname = sub.file_name().to_string_lossy().to_string();
-                        if !sname.starts_with('.') && sname != "node_modules" && sname != "target" {
-                            candidates.push(sp);
+                "apps" | "packages" | "services" | "sites" | "examples" | "frontend" | "backend" | "web" | "server"
+            ) {
+                if let Ok(sub_entries) = fs::read_dir(&p) {
+                    for sub in sub_entries.flatten() {
+                        let sp = sub.path();
+                        if sp.is_dir() {
+                            let sname = sub.file_name().to_string_lossy().to_string();
+                            if !sname.starts_with('.')
+                                && !matches!(
+                                    sname.as_str(),
+                                    "node_modules" | "target" | "dist" | "build" | "vendor" | ".venv" | "venv"
+                                )
+                            {
+                                sub_dirs.push(sp);
+                            }
                         }
                     }
                 }
             }
         }
+        sub_dirs.sort();
+        dirs.extend(sub_dirs);
     }
 
-    candidates.sort();
-    let mut best: Option<ProjectInfo> = None;
-    for dir in candidates {
+    let mut seen_paths: Vec<String> = Vec::new();
+    let mut targets: Vec<ProjectTarget> = Vec::new();
+    for dir in dirs {
         if let Ok(info) = inspect_root_dir(&dir) {
-            let score = kind_priority(&info.kind);
-            if score == 0 {
+            if info.kind == "none" || info.dev_command_label.is_none() {
                 continue;
             }
-            let replace = match &best {
-                None => true,
-                Some(prev) => score > kind_priority(&prev.kind),
-            };
-            if replace {
-                best = Some(info);
-                if score >= 2 {
-                    break;
-                }
+            if seen_paths.iter().any(|p| p == &info.root_path) {
+                continue;
             }
+            seen_paths.push(info.root_path.clone());
+            targets.push(to_project_target(root, &info));
         }
     }
-    best
+
+    targets.sort_by(|a, b| {
+        let prio_a = kind_priority(&a.kind);
+        let prio_b = kind_priority(&b.kind);
+        if prio_a != prio_b {
+            return prio_b.cmp(&prio_a);
+        }
+        if a.relative_path == "." && b.relative_path != "." {
+            return std::cmp::Ordering::Less;
+        }
+        if b.relative_path == "." && a.relative_path != "." {
+            return std::cmp::Ordering::Greater;
+        }
+        a.relative_path.cmp(&b.relative_path)
+    });
+
+    targets
+}
+
+fn find_monorepo_subproject(root: &Path) -> Option<ProjectInfo> {
+    let targets = discover_monorepo_targets(root);
+    let first = targets.into_iter().find(|t| t.relative_path != ".")?;
+    inspect_root_dir(Path::new(&first.root_path)).ok()
 }
 
 #[tauri::command]
-pub async fn inspect_workspace_project(root_path: String) -> Result<ProjectInfo, String> {
+pub async fn inspect_workspace_project(
+    root_path: String,
+    target_root: Option<String>,
+    script_name: Option<String>,
+) -> Result<ProjectInfo, String> {
     let root = Path::new(&root_path);
-    let mut info = inspect_root_dir(root)?;
+    let targets = discover_monorepo_targets(root);
+
+    let chosen_dir = target_root
+        .as_deref()
+        .and_then(|tr| {
+            targets
+                .iter()
+                .find(|t| t.root_path == tr)
+                .map(|t| PathBuf::from(&t.root_path))
+                .or_else(|| {
+                    let p = PathBuf::from(tr);
+                    if p.is_dir() && p.starts_with(root) {
+                        Some(p)
+                    } else {
+                        None
+                    }
+                })
+        })
+        .or_else(|| targets.first().map(|t| PathBuf::from(&t.root_path)));
+
+    let mut info = if let Some(dir) = chosen_dir {
+        inspect_root_dir_with_script(&dir, script_name.as_deref())?
+    } else {
+        inspect_root_dir_with_script(root, script_name.as_deref())?
+    };
     if info.kind == "none" {
         if let Some(sub) = find_monorepo_subproject(root) {
             info = sub;
         }
     }
+    info.targets = targets;
     finalize_project_probe(&mut info).await;
     Ok(info)
 }
 
 #[tauri::command]
-pub async fn inspect_project_for_path(path: String) -> Result<ProjectInfo, String> {
+pub async fn inspect_project_for_path(
+    path: String,
+    script_name: Option<String>,
+) -> Result<ProjectInfo, String> {
     let target = PathBuf::from(&path);
     let start_dir = if target.is_dir() {
         target
@@ -3040,7 +3184,10 @@ pub async fn inspect_project_for_path(path: String) -> Result<ProjectInfo, Strin
         cur = dir.parent();
     }
 
-    let mut info = inspect_root_dir(&chosen_dir)?;
+    let mut info = inspect_root_dir_with_script(&chosen_dir, script_name.as_deref())?;
+    if info.kind != "none" && info.dev_command_label.is_some() {
+        info.targets = vec![to_project_target(&chosen_dir, &info)];
+    }
     finalize_project_probe(&mut info).await;
     Ok(info)
 }
@@ -3347,10 +3494,13 @@ async fn kill_existing_server(guard: &mut ProjectServerInner) {
         let _ = aux.kill().await;
     }
     guard.requested_port = None;
+    guard.requested_script = None;
     guard.status.running = false;
     guard.status.starting = false;
     guard.status.external = false;
     guard.status.allow_lan = false;
+    guard.status.requested_port = None;
+    guard.status.requested_script = None;
     guard.status.lan_urls.clear();
 }
 
@@ -3393,10 +3543,13 @@ pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
             let _ = aux.start_kill();
         }
         guard.requested_port = None;
+        guard.requested_script = None;
         guard.status.running = false;
         guard.status.starting = false;
         guard.status.external = false;
         guard.status.allow_lan = false;
+        guard.status.requested_port = None;
+        guard.status.requested_script = None;
         guard.status.lan_urls.clear();
     };
 }
@@ -3466,11 +3619,25 @@ fn append_node_dev_args(
     }
 
     if let Some(p) = port {
+        let uses_long_port = cmd_lower.split_whitespace().any(|tok| {
+            tok == "--port" || tok.starts_with("--port=")
+        });
         if kind == "next"
             || cmd_lower.contains("next dev")
             || cmd_lower.contains("next start")
         {
-            extra.push("-p".to_string());
+            extra.push(if uses_long_port {
+                "--port".to_string()
+            } else {
+                "-p".to_string()
+            });
+            extra.push(p.to_string());
+        } else if cmd_lower.contains("storybook") || cmd_lower.contains("parcel") {
+            extra.push(if uses_long_port {
+                "--port".to_string()
+            } else {
+                "-p".to_string()
+            });
             extra.push(p.to_string());
         } else if matches!(
             kind,
@@ -3480,6 +3647,8 @@ fn append_node_dev_args(
             || cmd_lower.contains("nuxt")
             || cmd_lower.contains("docusaurus")
             || cmd_lower.contains("svelte-kit")
+            || cmd_lower.contains("webpack")
+            || cmd_lower.contains("ng serve")
         {
             extra.push("--port".to_string());
             extra.push(p.to_string());
@@ -3784,6 +3953,8 @@ async fn emit_project_server_failure(
         kind: Some(info.kind.clone()),
         url: None,
         command_label,
+        requested_port: None,
+        requested_script: None,
         logs: vec![msg.to_string()],
         error: Some(msg.to_string()),
     };
@@ -3806,14 +3977,15 @@ pub async fn start_project_dev_server(
     }
     let _start_guard = state.start_lock.lock().await;
     let mut effective_root = root_path.clone();
-    let mut info = inspect_root_dir(Path::new(&effective_root))?;
+    let mut info = inspect_root_dir_with_script(Path::new(&effective_root), script_name.as_deref())?;
     if info.kind == "none" {
         if let Some(sub) = find_monorepo_subproject(Path::new(&effective_root)) {
             effective_root = sub.root_path.clone();
-            info = sub;
+            info = inspect_root_dir_with_script(Path::new(&effective_root), script_name.as_deref())?;
         }
     }
     let want_lan = allow_lan.unwrap_or(false);
+    let chosen_script = script_name.clone().or_else(|| info.dev_script.clone());
     let effective_port = if info.kind == "docker" || script_name.as_deref() == Some("docker-compose") {
         None
     } else {
@@ -3824,17 +3996,21 @@ pub async fn start_project_dev_server(
         None => info.default_url.clone(),
     };
 
-    // 1. If we already manage a live server for this exact root_path, reuse it when LAN mode and port match
+    // 1. If we already manage a live server for this exact root_path, reuse it when LAN mode, script, and port match
     // (or refresh LAN URLs for externally-managed servers).
     {
-        let (existing_snap, existing_port) = {
+        let (existing_snap, existing_port, existing_script) = {
             let guard = state.inner.lock().await;
             if guard.status.running
                 && guard.status.root_path.as_deref() == Some(effective_root.as_str())
             {
-                (Some(guard.status.clone()), guard.requested_port)
+                (
+                    Some(guard.status.clone()),
+                    guard.requested_port,
+                    guard.requested_script.clone(),
+                )
             } else {
-                (None, None)
+                (None, None, None)
             }
         };
         if let Some(existing) = existing_snap {
@@ -3866,7 +4042,10 @@ pub async fn start_project_dev_server(
                         }
                     }
                 }
-            } else if existing.allow_lan == want_lan && existing_port == effective_port {
+            } else if existing.allow_lan == want_lan
+                && existing_port == effective_port
+                && existing_script == chosen_script
+            {
                 if let Some(ref existing_url) = existing.url {
                     if probe_local_http(existing_url, 400).await || existing.starting {
                         return Ok(existing);
@@ -3906,6 +4085,8 @@ pub async fn start_project_dev_server(
                 };
                 let mut guard = state.inner.lock().await;
                 kill_existing_server(&mut guard).await;
+                guard.requested_port = effective_port;
+                guard.requested_script = chosen_script.clone();
                 guard.status = ProjectServerStatus {
                     running: true,
                     starting: false,
@@ -3916,6 +4097,8 @@ pub async fn start_project_dev_server(
                     kind: Some(info.kind.clone()),
                     url: Some(candidate.clone()),
                     command_label: info.dev_command_label.clone(),
+                    requested_port: effective_port,
+                    requested_script: chosen_script.clone(),
                     logs: vec![format!("Connected to already-running server at {}", candidate)],
                     error: None,
                 };
@@ -4033,6 +4216,7 @@ pub async fn start_project_dev_server(
             let mut guard = state.inner.lock().await;
             guard.generation = guard.generation.saturating_add(1);
             guard.requested_port = effective_port;
+            guard.requested_script = chosen_script.clone();
             guard.static_server_task = Some(task);
             guard.status = ProjectServerStatus {
                 running: true,
@@ -4044,6 +4228,8 @@ pub async fn start_project_dev_server(
                 kind: Some("static".to_string()),
                 url: Some(url.clone()),
                 command_label: Some(format!("Built-in Static HTTP ({})", url)),
+                requested_port: effective_port,
+                requested_script: chosen_script.clone(),
                 logs: vec![format!("Serving {} at {}", effective_root, url)],
                 error: None,
             };
@@ -4159,6 +4345,7 @@ pub async fn start_project_dev_server(
         guard.generation = guard.generation.saturating_add(1);
         let gen_id = guard.generation;
         guard.requested_port = effective_port;
+        guard.requested_script = chosen_script.clone();
         guard.child = Some(child);
         guard.pid = pid;
         guard.aux_child = aux_child;
@@ -4173,6 +4360,8 @@ pub async fn start_project_dev_server(
             kind: Some(info.kind.clone()),
             url: None,
             command_label: Some(command_label.clone()),
+            requested_port: effective_port,
+            requested_script: chosen_script.clone(),
             logs: vec![format!("$ {}", command_label)],
             error: None,
         };
@@ -5737,6 +5926,50 @@ IF EXIST \"%NPM_PREFIX_NPM_CLI_JS%\" (\r\n\
             decode_process_output_bytes_with_fallback(encoded.as_ref(), true),
             "ドキュメント\\Repos\\Shift-for-Retail"
         );
+    }
+
+    #[test]
+    fn discovers_monorepo_targets_and_selects_scripts() {
+        let root = make_temp_dir("monorepo_targets");
+        let gui = root.join("gui");
+        let engine = root.join("engine");
+        fs::create_dir_all(&gui).unwrap();
+        fs::create_dir_all(&engine).unwrap();
+
+        fs::write(
+            gui.join("package.json"),
+            r#"{"name":"retail-gui","devDependencies":{"vite":"^5.0.0"},"scripts":{"dev":"vite --port 5173","preview":"vite preview","build":"vite build"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            engine.join("pyproject.toml"),
+            "[project]\ndependencies = [\"fastapi\", \"uvicorn\"]\n",
+        )
+        .unwrap();
+        fs::write(engine.join("main.py"), "from fastapi import FastAPI\napp = FastAPI()\n").unwrap();
+
+        let targets = discover_monorepo_targets(&root);
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().any(|t| t.relative_path == "gui" && t.kind == "vite"));
+        assert!(targets.iter().any(|t| t.relative_path == "engine" && t.kind == "fastapi"));
+
+        let gui_preview = inspect_root_dir_with_script(&gui, Some("preview")).unwrap();
+        assert_eq!(gui_preview.dev_script.as_deref(), Some("preview"));
+        assert_eq!(gui_preview.default_url.as_deref(), Some("http://localhost:4173"));
+
+        // Next.js with --port flag respects `--port` rather than mixing `-p`
+        let mut next_long_port = vec!["run".to_string(), "dev".to_string()];
+        append_node_dev_args(
+            &mut next_long_port,
+            "npm",
+            "next",
+            Some("next dev --port 3000"),
+            false,
+            Some(3050),
+        );
+        assert_eq!(next_long_port, vec!["run", "dev", "--", "--port", "3050"]);
+
+        let _ = fs::remove_dir_all(&root);
     }
 }
 

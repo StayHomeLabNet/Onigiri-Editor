@@ -5,6 +5,7 @@ import {
   RotateCw,
   Home,
   Settings,
+  Bug,
   ExternalLink,
   Globe,
   Play,
@@ -13,21 +14,26 @@ import {
   AlertCircle,
   Info,
   Wifi,
+  X,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
 import {
   browserNavAction,
   browserNavigate,
+  browserOpenDevtools,
   browserOpenOrUpdate,
   browserSetBounds,
   getHostOs,
+  isMacOs,
   isTauri,
   openInExternalBrowser,
 } from '../utils/platform';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
 import { ProjectPortInput } from './ProjectPortInput';
+import { ProjectTargetControls } from './ProjectTargetControls';
+import { ProjectServerLogsBox, ProjectServerLogsToggle } from './ProjectServerLogs';
 
 interface RightBrowserPaneProps {
   t: Translations;
@@ -42,6 +48,8 @@ interface RightBrowserPaneProps {
   projectServerAllowLan?: boolean;
   projectCustomPort?: string;
   onProjectCustomPortChange?: (port: string) => void;
+  onSelectTargetRoot?: (targetRoot: string) => void;
+  onSelectScript?: (scriptName: string) => void;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -68,6 +76,24 @@ export function resolveBrowserHomeUrl(homeUrl?: string | null): string {
   return normalizeDisplayUrl(homeUrl || 'https://www.google.com');
 }
 
+export function urlsShareOrigin(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    const normHost = (h: string) =>
+      h === '127.0.0.1' || h === '0.0.0.0' || h === '[::1]' ? 'localhost' : h.toLowerCase();
+    const portOf = (u: URL) => u.port || (u.protocol === 'https:' ? '443' : '80');
+    return (
+      ua.protocol === ub.protocol &&
+      normHost(ua.hostname) === normHost(ub.hostname) &&
+      portOf(ua) === portOf(ub)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   t,
   locale,
@@ -81,6 +107,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   projectServerAllowLan = false,
   projectCustomPort = '',
   onProjectCustomPortChange,
+  onSelectTargetRoot,
+  onSelectScript,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -95,10 +123,14 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
 }) => {
   const resolvedHomeUrl = resolveBrowserHomeUrl(homeUrl);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const urlInputRef = useRef<HTMLInputElement | null>(null);
+  const lastServerUrlRef = useRef<string | null>(null);
   const [draftUrl, setDraftUrl] = useState(url);
   const [iframeSrc, setIframeSrc] = useState(() => normalizeDisplayUrl(url));
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
+  const [logsExpanded, setLogsExpanded] = useState(false);
+  const [dismissedStoppedBannerUrl, setDismissedStoppedBannerUrl] = useState<string | null>(null);
 
   const initializedRef = useRef(false);
   const initializingRef = useRef(false);
@@ -108,9 +140,33 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   const latestVisibleRef = useRef(visible);
   latestVisibleRef.current = visible;
 
+  if (projectServer?.running && projectServer.url) {
+    lastServerUrlRef.current = projectServer.url;
+  }
+
+  useEffect(() => {
+    if (projectServer?.running || projectServer?.starting) {
+      setDismissedStoppedBannerUrl(null);
+    }
+  }, [projectServer?.running, projectServer?.starting]);
+
   const showProjectBar =
     Boolean(projectServer?.running) ||
     Boolean(projectInfo && projectInfo.kind !== 'none' && projectInfo.devCommandLabel);
+
+  const serverLogs =
+    !projectInfo || !projectServer?.rootPath || projectServer.rootPath === projectInfo.rootPath
+      ? projectServer?.logs || []
+      : [];
+
+  const showStoppedBanner =
+    Boolean(showProjectBar) &&
+    !projectServer?.running &&
+    !projectServer?.starting &&
+    !projectServer?.error &&
+    dismissedStoppedBannerUrl !== url &&
+    (urlsShareOrigin(url, lastServerUrlRef.current) ||
+      urlsShareOrigin(url, projectInfo?.defaultUrl));
 
   useEffect(() => {
     setDraftUrl(url);
@@ -223,7 +279,15 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       ro?.disconnect();
       window.removeEventListener('resize', onWinResize);
     };
-  }, [visible, showProjectBar, projectServer?.running, projectServer?.url, syncBounds]);
+  }, [
+    visible,
+    showProjectBar,
+    projectServer?.running,
+    projectServer?.url,
+    logsExpanded,
+    showStoppedBanner,
+    syncBounds,
+  ]);
 
   // Hide native child webview when this component unmounts
   useEffect(() => {
@@ -308,8 +372,74 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     await navigateTo(draftUrl);
   };
 
+  const handleReload = useCallback(() => {
+    if (isTauri()) {
+      setBrowserError(null);
+      if (initializedRef.current) {
+        browserNavAction('reload').catch(() => navigateTo(draftUrl || url));
+      } else {
+        navigateTo(draftUrl || url);
+      }
+    } else {
+      setIframeSrc((s) => s);
+    }
+  }, [draftUrl, url]);
+
+  const handleOpenDevtools = useCallback(async () => {
+    if (!isTauri()) return;
+    try {
+      if (!initializedRef.current) {
+        await navigateTo(draftUrl || url);
+      }
+      await browserOpenDevtools();
+    } catch {
+      // ignore if webview not ready
+    }
+  }, [draftUrl, url]);
+
+  useEffect(() => {
+    const onReloadEvent = () => handleReload();
+    window.addEventListener('onigiri-browser-reload', onReloadEvent);
+    return () => window.removeEventListener('onigiri-browser-reload', onReloadEvent);
+  }, [handleReload]);
+
+  const handlePaneKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const mod = isMacOs() ? e.metaKey : e.ctrlKey;
+    const keyLower = e.key.toLowerCase();
+    if ((mod || e.ctrlKey) && !e.altKey && !e.shiftKey && keyLower === 'l') {
+      e.preventDefault();
+      e.stopPropagation();
+      urlInputRef.current?.focus();
+      urlInputRef.current?.select();
+      return;
+    }
+    if (e.key === 'F5' || (mod && !e.altKey && !e.shiftKey && keyLower === 'r')) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleReload();
+      return;
+    }
+    if (e.altKey && !mod && !e.shiftKey && e.key === 'ArrowLeft') {
+      e.preventDefault();
+      e.stopPropagation();
+      browserNavAction('back').catch(() => {});
+      return;
+    }
+    if (e.altKey && !mod && !e.shiftKey && e.key === 'ArrowRight') {
+      e.preventDefault();
+      e.stopPropagation();
+      browserNavAction('forward').catch(() => {});
+      return;
+    }
+    if (e.key === 'F12') {
+      e.preventDefault();
+      e.stopPropagation();
+      void handleOpenDevtools();
+    }
+  };
+
   return (
-    <div className="right-browser-pane">
+    <div className="right-browser-pane" tabIndex={-1} onKeyDown={handlePaneKeyDown}>
       <form className="browser-toolbar" onSubmit={handleNavigate}>
         <button
           type="button"
@@ -332,18 +462,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         <button
           type="button"
           className="icon-btn-sm"
-          onClick={() => {
-            if (isTauri()) {
-              setBrowserError(null);
-              if (initializedRef.current) {
-                browserNavAction('reload').catch(() => navigateTo(draftUrl || url));
-              } else {
-                navigateTo(draftUrl || url);
-              }
-            } else {
-              setIframeSrc((s) => s);
-            }
-          }}
+          onClick={handleReload}
           title={t.browser.reload}
         >
           {isLoadingPage ? <Loader2 size={13} className="spin" /> : <RotateCw size={13} />}
@@ -361,6 +480,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         <div className="browser-url-wrap">
           <Globe size={13} className="browser-url-icon" />
           <input
+            ref={urlInputRef}
             type="text"
             className="browser-url-input"
             value={draftUrl}
@@ -373,6 +493,18 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         <button type="submit" className="mini-pill-btn">
           {t.browser.go}
         </button>
+
+        {isTauri() && (
+          <button
+            type="button"
+            className="icon-btn-sm"
+            onClick={() => void handleOpenDevtools()}
+            title={t.browser.devtoolsTitle}
+            aria-label={t.browser.devtools}
+          >
+            <Bug size={14} />
+          </button>
+        )}
 
         <button
           type="button"
@@ -431,15 +563,39 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                   showTitle={t.project.lanUrlsToggleShowTitle}
                   hideTitle={t.project.lanUrlsToggleHideTitle}
                   copyTitlePrefix={t.project.lanUrlCopyTitle}
+                  qrShowTitle={t.project.qrShowTitle}
+                  qrHideTitle={t.project.qrHideTitle}
+                  qrScanHint={t.project.qrScanHint}
                   onCopyUrl={onCopyLanUrl}
                   variant="inline"
                 />
               )}
+            {serverLogs.length > 0 && (
+              <ProjectServerLogsToggle
+                logCount={serverLogs.length}
+                expanded={logsExpanded}
+                onToggle={() => setLogsExpanded((prev) => !prev)}
+                running={Boolean(projectServer?.running)}
+                hasError={Boolean(projectServer?.error)}
+                label={t.project.liveLogsLabel}
+                showTitle={t.project.liveLogsShowTitle}
+                hideTitle={t.project.liveLogsHideTitle}
+              />
+            )}
             {!projectServer?.running && projectInfo?.devCommandLabel && (
               <span className="browser-project-cmd">{projectInfo.devCommandLabel}</span>
             )}
           </div>
           <div className="browser-project-actions">
+            <ProjectTargetControls
+              projectInfo={projectInfo}
+              projectServer={projectServer}
+              onSelectTargetRoot={onSelectTargetRoot}
+              onSelectScript={onSelectScript}
+              targetLabel={t.project.targetLabel}
+              scriptLabel={t.project.scriptLabel}
+              lockedTitle={t.project.targetScriptLockedHint}
+            />
             {onProjectCustomPortChange && (
               <ProjectPortInput
                 value={projectCustomPort}
@@ -493,6 +649,51 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                 </button>
               )
             )}
+          </div>
+          {logsExpanded && serverLogs.length > 0 && (
+            <div className="project-logs-drawer">
+              <ProjectServerLogsBox logs={serverLogs} expanded={logsExpanded} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {showStoppedBanner && (
+        <div className="browser-stopped-banner" role="status">
+          <div className="browser-stopped-banner-text">
+            <AlertCircle size={13} />
+            <span>{t.browser.serverStoppedBannerTitle}</span>
+          </div>
+          <div className="browser-stopped-banner-actions">
+            {onStartProjectServer && (
+              <button
+                type="button"
+                className="mini-pill-btn is-active"
+                onClick={onStartProjectServer}
+              >
+                <Play size={11} />
+                <span>{t.browser.serverStoppedBannerRestart}</span>
+              </button>
+            )}
+            {!urlsShareOrigin(url, resolvedHomeUrl) && (
+              <button
+                type="button"
+                className="mini-pill-btn"
+                onClick={() => navigateTo(resolvedHomeUrl)}
+              >
+                <Home size={11} />
+                <span>{t.browser.serverStoppedBannerHome}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="icon-btn-sm"
+              onClick={() => setDismissedStoppedBannerUrl(url)}
+              title="Dismiss"
+              aria-label="Dismiss"
+            >
+              <X size={12} />
+            </button>
           </div>
         </div>
       )}
