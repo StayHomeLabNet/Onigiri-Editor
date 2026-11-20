@@ -131,6 +131,57 @@
   margin-left: auto;
 }
 
+.project-port-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface, var(--bg-primary));
+  color: var(--fg-secondary);
+  font-size: 11px;
+  line-height: 1;
+  transition: border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.project-port-control:focus-within {
+  border-color: var(--accent);
+}
+
+.project-port-control.is-locked {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.project-port-label {
+  color: var(--fg-muted);
+  font-size: 10.5px;
+  user-select: none;
+}
+
+.project-port-input {
+  width: 44px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0;
+  text-align: center;
+}
+
+.project-port-input::placeholder {
+  color: var(--fg-muted);
+  opacity: 0.75;
+}
+
+.project-port-input:disabled {
+  cursor: not-allowed;
+}
+
 .project-url-chip {
   border: 1px solid rgba(16, 185, 129, 0.35);
   background: rgba(16, 185, 129, 0.12);

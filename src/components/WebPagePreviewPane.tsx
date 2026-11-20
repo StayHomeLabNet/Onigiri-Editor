@@ -20,6 +20,7 @@ import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
 import { isTauri, readFileByPath, resolveImageSrc, writeClipboardText } from '../utils/platform';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
+import { ProjectPortInput } from './ProjectPortInput';
 
 interface WebPagePreviewPaneProps {
   t: Translations;
@@ -31,6 +32,8 @@ interface WebPagePreviewPaneProps {
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
   projectServerAllowLan?: boolean;
+  projectCustomPort?: string;
+  onProjectCustomPortChange?: (port: string) => void;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -148,6 +151,8 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
   projectInfo,
   projectServer,
   projectServerAllowLan = false,
+  projectCustomPort = '',
+  onProjectCustomPortChange,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -544,6 +549,21 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                 )}
             </div>
             <div className="project-bar-actions">
+              {onProjectCustomPortChange && (
+                <ProjectPortInput
+                  value={projectCustomPort}
+                  onChange={onProjectCustomPortChange}
+                  onSubmitStart={
+                    onStartProjectAndBrowse ? () => onStartProjectAndBrowse('builtin') : undefined
+                  }
+                  projectInfo={projectInfo}
+                  projectServer={projectServer}
+                  label={t.project.portLabel}
+                  defaultPlaceholder={t.project.portPlaceholderDefault}
+                  title={t.project.portInputTitle}
+                  lockedTitle={t.project.portStopToChangeHint}
+                />
+              )}
               {onToggleProjectServerLan && (
                 <button
                   type="button"
@@ -652,19 +672,36 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
               </div>
             )}
 
-            {onToggleProjectServerLan && (
+            {(onProjectCustomPortChange || onToggleProjectServerLan) && (
               <div className="project-lan-collapsible">
                 <div className="sidebar-project-lan-row">
-                  <button
-                    type="button"
-                    className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
-                    onClick={onToggleProjectServerLan}
-                    title={t.project.lanAccessToggleTitle}
-                    aria-pressed={projectServerAllowLan}
-                  >
-                    <Wifi size={12} />
-                    <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
-                  </button>
+                  {onProjectCustomPortChange && (
+                    <ProjectPortInput
+                      value={projectCustomPort}
+                      onChange={onProjectCustomPortChange}
+                      onSubmitStart={
+                        onStartProjectAndBrowse ? () => onStartProjectAndBrowse('builtin') : undefined
+                      }
+                      projectInfo={projectInfo}
+                      projectServer={projectServer}
+                      label={t.project.portLabel}
+                      defaultPlaceholder={t.project.portPlaceholderDefault}
+                      title={t.project.portInputTitle}
+                      lockedTitle={t.project.portStopToChangeHint}
+                    />
+                  )}
+                  {onToggleProjectServerLan && (
+                    <button
+                      type="button"
+                      className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
+                      onClick={onToggleProjectServerLan}
+                      title={t.project.lanAccessToggleTitle}
+                      aria-pressed={projectServerAllowLan}
+                    >
+                      <Wifi size={12} />
+                      <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
+                    </button>
+                  )}
                 </div>
                 {serverRunningHere &&
                   projectServer?.lanUrls &&

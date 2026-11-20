@@ -72,6 +72,7 @@ import {
 } from '../utils/knowledge';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
+import { ProjectPortInput } from './ProjectPortInput';
 
 const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
 const JSON_EXT_RE = /\.(json|jsonc)$/i;
@@ -275,6 +276,8 @@ interface SidebarProps {
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
   projectServerAllowLan?: boolean;
+  projectCustomPort?: string;
+  onProjectCustomPortChange?: (port: string) => void;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -352,6 +355,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   projectInfo,
   projectServer,
   projectServerAllowLan = false,
+  projectCustomPort = '',
+  onProjectCustomPortChange,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -1108,6 +1113,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               </span>
                             </button>
                           )
+                        )}
+                        {onProjectCustomPortChange && (
+                          <ProjectPortInput
+                            value={projectCustomPort}
+                            onChange={onProjectCustomPortChange}
+                            onSubmitStart={
+                              onStartProjectAndBrowse
+                                ? () => onStartProjectAndBrowse('builtin')
+                                : undefined
+                            }
+                            projectInfo={projectInfo}
+                            projectServer={projectServer}
+                            label={t.project.portLabel}
+                            defaultPlaceholder={t.project.portPlaceholderDefault}
+                            title={t.project.portInputTitle}
+                            lockedTitle={t.project.portStopToChangeHint}
+                          />
                         )}
                         {onToggleProjectServerLan && (
                           <button

@@ -321,6 +321,7 @@ export interface Translations {
       };
       builtinBrowserEnabled: string;
       builtinBrowserDefaultUrl: string;
+      builtinBrowserDefaultUrlHint: string;
       externalBrowserPreviewEnabled: string;
       externalBrowserPort: string;
       externalBrowserAllowLan: string;
@@ -476,9 +477,11 @@ export interface Translations {
     back: string;
     forward: string;
     reload: string;
+    home: string;
     urlPlaceholder: string;
     go: string;
     openExternal: string;
+    openSettings: string;
     externalLiveTitle: string;
     externalLiveBtn: string;
     externalStopBtn: string;
@@ -549,6 +552,11 @@ export interface Translations {
     lanUrlsToggleShowTitle: string;
     lanUrlsToggleHideTitle: string;
     externalLanUnavailableHint: string;
+    portLabel: string;
+    portPlaceholderDefault: string;
+    portInputTitle: string;
+    portStopToChangeHint: string;
+    invalidPortError: string;
   };
   imageModal: {
     title: string;

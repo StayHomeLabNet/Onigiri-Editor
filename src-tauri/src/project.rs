@@ -84,6 +84,7 @@ pub struct ProjectServerStatus {
 
 pub struct ProjectServerInner {
     pub status: ProjectServerStatus,
+    pub requested_port: Option<u16>,
     pub child: Option<Child>,
     pub pid: Option<u32>,
     pub aux_child: Option<Child>,
@@ -102,6 +103,7 @@ impl ProjectServerState {
         Self {
             inner: Arc::new(Mutex::new(ProjectServerInner {
                 status: ProjectServerStatus::default(),
+                requested_port: None,
                 child: None,
                 pid: None,
                 aux_child: None,
@@ -1175,9 +1177,18 @@ fn detect_python_web(root: &Path) -> Option<PythonWebSpec> {
 }
 
 fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWebSpec> {
+    detect_python_web_with_host_and_port(root, allow_lan, None)
+}
+
+fn detect_python_web_with_host_and_port(
+    root: &Path,
+    allow_lan: bool,
+    port: Option<u16>,
+) -> Option<PythonWebSpec> {
     let bind_host = if allow_lan { "0.0.0.0" } else { "127.0.0.1" };
     if root.join("manage.py").is_file() {
-        let addr = format!("{}:8000", bind_host);
+        let p = port.unwrap_or(8000);
+        let addr = format!("{}:{}", bind_host, p);
         return Some(PythonWebSpec {
             kind: "django",
             dev_script: "python-django",
@@ -1211,13 +1222,14 @@ fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWeb
             .iter()
             .find(|rel| root.join(rel).is_file())
             .copied()?;
+        let p = port.unwrap_or(8501);
         return Some(PythonWebSpec {
             kind: "streamlit",
             dev_script: "python-streamlit",
             default_url: "http://localhost:8501",
             command_label: format!(
-                "streamlit run {} --server.headless true --server.address {} --server.port 8501",
-                entry, bind_host
+                "streamlit run {} --server.headless true --server.address {} --server.port {}",
+                entry, bind_host, p
             ),
             args: vec![
                 "-m".to_string(),
@@ -1229,7 +1241,7 @@ fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWeb
                 "--server.address".to_string(),
                 bind_host.to_string(),
                 "--server.port".to_string(),
-                "8501".to_string(),
+                p.to_string(),
             ],
             uses_uv_ok: true,
         });
@@ -1245,11 +1257,12 @@ fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWeb
         .iter()
         .find(|(file, _)| root.join(file).is_file())
         .map(|(_, m)| *m)?;
+        let p = port.unwrap_or(8000);
         return Some(PythonWebSpec {
             kind: "fastapi",
             dev_script: "python-fastapi",
             default_url: "http://127.0.0.1:8000",
-            command_label: format!("uvicorn {} --reload --host {} --port 8000", module, bind_host),
+            command_label: format!("uvicorn {} --reload --host {} --port {}", module, bind_host, p),
             args: vec![
                 "-m".to_string(),
                 "uvicorn".to_string(),
@@ -1258,7 +1271,7 @@ fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWeb
                 "--host".to_string(),
                 bind_host.to_string(),
                 "--port".to_string(),
-                "8000".to_string(),
+                p.to_string(),
             ],
             uses_uv_ok: true,
         });
@@ -1269,13 +1282,14 @@ fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWeb
             .iter()
             .find(|rel| root.join(rel).is_file())
             .copied()?;
+        let p = port.unwrap_or(5000);
         return Some(PythonWebSpec {
             kind: "flask",
             dev_script: "python-flask",
             default_url: "http://127.0.0.1:5000",
             command_label: format!(
-                "flask --app {} run --debug --host {} --port 5000",
-                entry, bind_host
+                "flask --app {} run --debug --host {} --port {}",
+                entry, bind_host, p
             ),
             args: vec![
                 "-m".to_string(),
@@ -1287,7 +1301,7 @@ fn detect_python_web_with_host(root: &Path, allow_lan: bool) -> Option<PythonWeb
                 "--host".to_string(),
                 bind_host.to_string(),
                 "--port".to_string(),
-                "5000".to_string(),
+                p.to_string(),
             ],
             uses_uv_ok: true,
         });
@@ -3332,6 +3346,7 @@ async fn kill_existing_server(guard: &mut ProjectServerInner) {
     if let Some(mut aux) = guard.aux_child.take() {
         let _ = aux.kill().await;
     }
+    guard.requested_port = None;
     guard.status.running = false;
     guard.status.starting = false;
     guard.status.external = false;
@@ -3377,6 +3392,7 @@ pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
         if let Some(mut aux) = guard.aux_child.take() {
             let _ = aux.start_kill();
         }
+        guard.requested_port = None;
         guard.status.running = false;
         guard.status.starting = false;
         guard.status.external = false;
@@ -3404,46 +3420,71 @@ fn read_package_script_cmd(root: &Path, script_name: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-fn append_node_lan_args(
+fn append_node_dev_args(
     args: &mut Vec<String>,
     pm: &str,
     kind: &str,
     script_cmd: Option<&str>,
+    allow_lan: bool,
+    port: Option<u16>,
 ) {
     let raw_cmd = script_cmd.unwrap_or("");
     let cmd_lower = raw_cmd.to_ascii_lowercase();
-    let already_has_host = cmd_lower.split_whitespace().any(|tok| {
-        tok == "--host"
-            || tok.starts_with("--host=")
-            || tok == "--hostname"
-            || tok.starts_with("--hostname=")
-            || tok.starts_with("host=")
-    }) || raw_cmd
-        .split_whitespace()
-        .any(|tok| tok == "-H" || tok.starts_with("-H="));
+    let mut extra: Vec<String> = Vec::new();
 
-    if already_has_host {
-        return;
+    if allow_lan {
+        let already_has_host = cmd_lower.split_whitespace().any(|tok| {
+            tok == "--host"
+                || tok.starts_with("--host=")
+                || tok == "--hostname"
+                || tok.starts_with("--hostname=")
+                || tok.starts_with("host=")
+        }) || raw_cmd
+            .split_whitespace()
+            .any(|tok| tok == "-H" || tok.starts_with("-H="));
+
+        if !already_has_host {
+            if kind == "next"
+                || cmd_lower.contains("next dev")
+                || cmd_lower.contains("next start")
+            {
+                extra.push("-H".to_string());
+                extra.push("0.0.0.0".to_string());
+            } else if matches!(
+                kind,
+                "vite" | "vitepress" | "sveltekit" | "astro" | "nuxt" | "docusaurus"
+            ) || cmd_lower.contains("vite")
+                || cmd_lower.contains("astro")
+                || cmd_lower.contains("nuxt")
+                || cmd_lower.contains("docusaurus")
+                || cmd_lower.contains("svelte-kit")
+            {
+                extra.push("--host".to_string());
+                extra.push("0.0.0.0".to_string());
+            }
+        }
     }
 
-    let extra: Vec<&str> = if kind == "next"
-        || cmd_lower.contains("next dev")
-        || cmd_lower.contains("next start")
-    {
-        vec!["-H", "0.0.0.0"]
-    } else if matches!(
-        kind,
-        "vite" | "vitepress" | "sveltekit" | "astro" | "nuxt" | "docusaurus"
-    ) || cmd_lower.contains("vite")
-        || cmd_lower.contains("astro")
-        || cmd_lower.contains("nuxt")
-        || cmd_lower.contains("docusaurus")
-        || cmd_lower.contains("svelte-kit")
-    {
-        vec!["--host", "0.0.0.0"]
-    } else {
-        Vec::new()
-    };
+    if let Some(p) = port {
+        if kind == "next"
+            || cmd_lower.contains("next dev")
+            || cmd_lower.contains("next start")
+        {
+            extra.push("-p".to_string());
+            extra.push(p.to_string());
+        } else if matches!(
+            kind,
+            "vite" | "vitepress" | "sveltekit" | "astro" | "nuxt" | "docusaurus"
+        ) || cmd_lower.contains("vite")
+            || cmd_lower.contains("astro")
+            || cmd_lower.contains("nuxt")
+            || cmd_lower.contains("docusaurus")
+            || cmd_lower.contains("svelte-kit")
+        {
+            extra.push("--port".to_string());
+            extra.push(p.to_string());
+        }
+    }
 
     if extra.is_empty() {
         return;
@@ -3452,9 +3493,17 @@ fn append_node_lan_args(
     if pm == "npm" {
         args.push("--".to_string());
     }
-    for flag in extra {
-        args.push(flag.to_string());
-    }
+    args.extend(extra);
+}
+
+#[allow(dead_code)]
+fn append_node_lan_args(
+    args: &mut Vec<String>,
+    pm: &str,
+    kind: &str,
+    script_cmd: Option<&str>,
+) {
+    append_node_dev_args(args, pm, kind, script_cmd, true, None);
 }
 
 fn resolve_runner(
@@ -3462,6 +3511,7 @@ fn resolve_runner(
     info: &ProjectInfo,
     script_name: Option<String>,
     allow_lan: bool,
+    custom_port: Option<u16>,
 ) -> Result<ResolvedRunner, String> {
     let root = Path::new(root_path);
     let chosen_script = script_name.or_else(|| info.dev_script.clone());
@@ -3497,18 +3547,19 @@ fn resolve_runner(
             })?;
             let with_vite = chosen_script.as_deref() == Some("artisan-vite")
                 || (chosen_script.is_none() && laravel_needs_companion_vite(root));
+            let port = custom_port.unwrap_or(8000);
             return Ok(ResolvedRunner::Command {
                 exe: php,
                 args: vec![
                     "artisan".to_string(),
                     "serve".to_string(),
                     format!("--host={}", bind_host),
-                    "--port=8000".to_string(),
+                    format!("--port={}", port),
                 ],
                 label: if with_vite {
-                    "php artisan serve + vite".to_string()
+                    format!("php artisan serve --port={} + vite", port)
                 } else {
-                    format!("php artisan serve --host={} --port=8000", bind_host)
+                    format!("php artisan serve --host={} --port={}", bind_host, port)
                 },
                 companion_vite: with_vite,
                 is_docker_compose: false,
@@ -3526,7 +3577,8 @@ fn resolve_runner(
         } else {
             "."
         };
-        let addr = format!("{}:8000", bind_host);
+        let port = custom_port.unwrap_or(8000);
+        let addr = format!("{}:{}", bind_host, port);
         return Ok(ResolvedRunner::Command {
             exe: php,
             args: vec![
@@ -3542,7 +3594,8 @@ fn resolve_runner(
     }
 
     if info.kind == "mkdocs" {
-        let addr = format!("{}:8000", bind_host);
+        let port = custom_port.unwrap_or(8000);
+        let addr = format!("{}:{}", bind_host, port);
         for rel in [
             ".venv/bin/mkdocs",
             ".venv/Scripts/mkdocs.exe",
@@ -3591,11 +3644,12 @@ fn resolve_runner(
     if info.kind == "hugo" {
         let hugo = find_executable(&["hugo"])
             .ok_or_else(|| "Command not found: hugo. Please install Hugo (e.g. brew install hugo).".to_string())?;
+        let port = custom_port.unwrap_or(1313);
         let mut args = vec![
             "server".to_string(),
             "-D".to_string(),
             "--port".to_string(),
-            "1313".to_string(),
+            port.to_string(),
         ];
         if allow_lan {
             args.push("--bind".to_string());
@@ -3612,13 +3666,14 @@ fn resolve_runner(
     }
 
     if info.kind == "jekyll" {
+        let port = custom_port.unwrap_or(4000);
         if let Some(bundle) = find_executable(&["bundle"]) {
             let mut args = vec![
                 "exec".to_string(),
                 "jekyll".to_string(),
                 "serve".to_string(),
                 "--port".to_string(),
-                "4000".to_string(),
+                port.to_string(),
             ];
             if allow_lan {
                 args.push("--host".to_string());
@@ -3638,7 +3693,7 @@ fn resolve_runner(
         let mut args = vec![
             "serve".to_string(),
             "--port".to_string(),
-            "4000".to_string(),
+            port.to_string(),
         ];
         if allow_lan {
             args.push("--host".to_string());
@@ -3655,7 +3710,7 @@ fn resolve_runner(
     }
 
     if matches!(info.kind.as_str(), "django" | "fastapi" | "flask" | "streamlit") {
-        let spec = detect_python_web_with_host(root, allow_lan)
+        let spec = detect_python_web_with_host_and_port(root, allow_lan, custom_port)
             .ok_or_else(|| "Python web entry file not found in project root.".to_string())?;
         let (py_exe, mut prefix_args) = if spec.uses_uv_ok {
             find_python_runner(root)
@@ -3688,9 +3743,16 @@ fn resolve_runner(
         )
     })?;
     let mut args = vec!["run".to_string(), sc.clone()];
-    if allow_lan {
+    if allow_lan || custom_port.is_some() {
         let script_cmd = read_package_script_cmd(root, &sc);
-        append_node_lan_args(&mut args, pm_static, &info.kind, script_cmd.as_deref());
+        append_node_dev_args(
+            &mut args,
+            pm_static,
+            &info.kind,
+            script_cmd.as_deref(),
+            allow_lan,
+            custom_port,
+        );
     }
     let label = format!("{} {}", pm_static, args.join(" "));
     Ok(ResolvedRunner::Command {
@@ -3737,7 +3799,11 @@ pub async fn start_project_dev_server(
     root_path: String,
     script_name: Option<String>,
     allow_lan: Option<bool>,
+    port: Option<u16>,
 ) -> Result<ProjectServerStatus, String> {
+    if port == Some(0) {
+        return Err("Invalid port number (must be between 1 and 65535).".to_string());
+    }
     let _start_guard = state.start_lock.lock().await;
     let mut effective_root = root_path.clone();
     let mut info = inspect_root_dir(Path::new(&effective_root))?;
@@ -3748,39 +3814,59 @@ pub async fn start_project_dev_server(
         }
     }
     let want_lan = allow_lan.unwrap_or(false);
+    let effective_port = if info.kind == "docker" || script_name.as_deref() == Some("docker-compose") {
+        None
+    } else {
+        port
+    };
+    let target_default_url = match effective_port {
+        Some(p) => Some(format!("http://localhost:{}", p)),
+        None => info.default_url.clone(),
+    };
 
-    // 1. If we already manage a live server for this exact root_path, reuse it when LAN mode matches
+    // 1. If we already manage a live server for this exact root_path, reuse it when LAN mode and port match
     // (or refresh LAN URLs for externally-managed servers).
     {
-        let existing_snap = {
+        let (existing_snap, existing_port) = {
             let guard = state.inner.lock().await;
             if guard.status.running
                 && guard.status.root_path.as_deref() == Some(effective_root.as_str())
             {
-                Some(guard.status.clone())
+                (Some(guard.status.clone()), guard.requested_port)
             } else {
-                None
+                (None, None)
             }
         };
         if let Some(existing) = existing_snap {
             if existing.external {
-                if let Some(ref existing_url) = existing.url {
-                    if probe_local_http(existing_url, 400).await {
-                        let lan_urls = if want_lan {
-                            probe_lan_reachable(existing_url, 250).await
-                        } else {
-                            Vec::new()
-                        };
-                        let mut guard = state.inner.lock().await;
-                        guard.status.allow_lan = !lan_urls.is_empty();
-                        guard.status.lan_urls = lan_urls;
-                        let snap = guard.status.clone();
-                        drop(guard);
-                        let _ = app.emit("project-server-update", snap.clone());
-                        return Ok(snap);
+                let port_matches = match effective_port {
+                    Some(p) => existing
+                        .url
+                        .as_deref()
+                        .and_then(|u| url::Url::parse(u).ok())
+                        .and_then(|u| u.port_or_known_default())
+                        == Some(p),
+                    None => true,
+                };
+                if port_matches {
+                    if let Some(ref existing_url) = existing.url {
+                        if probe_local_http(existing_url, 400).await {
+                            let lan_urls = if want_lan {
+                                probe_lan_reachable(existing_url, 250).await
+                            } else {
+                                Vec::new()
+                            };
+                            let mut guard = state.inner.lock().await;
+                            guard.status.allow_lan = !lan_urls.is_empty();
+                            guard.status.lan_urls = lan_urls;
+                            let snap = guard.status.clone();
+                            drop(guard);
+                            let _ = app.emit("project-server-update", snap.clone());
+                            return Ok(snap);
+                        }
                     }
                 }
-            } else if existing.allow_lan == want_lan {
+            } else if existing.allow_lan == want_lan && existing_port == effective_port {
                 if let Some(ref existing_url) = existing.url {
                     if probe_local_http(existing_url, 400).await || existing.starting {
                         return Ok(existing);
@@ -3795,15 +3881,19 @@ pub async fn start_project_dev_server(
     // 2. If the configured project URL (or Laravel .env APP_URL / Docker port) is already alive externally,
     // connect to it instead of launching a second server (skip for built-in static server).
     if info.kind != "static" {
-        let mut candidate_urls: Vec<String> = if info.kind == "laravel" {
+        let mut candidate_urls: Vec<String> = if let Some(p) = effective_port {
+            vec![format!("http://localhost:{}", p), format!("http://127.0.0.1:{}", p)]
+        } else if info.kind == "laravel" {
             laravel_candidate_urls(Path::new(&effective_root))
         } else {
             info.default_url.iter().cloned().collect()
         };
-        for p in parse_compose_ports(Path::new(&effective_root)) {
-            let u = format!("http://localhost:{}", p);
-            if !candidate_urls.iter().any(|x| x == &u) {
-                candidate_urls.push(u);
+        if effective_port.is_none() {
+            for p in parse_compose_ports(Path::new(&effective_root)) {
+                let u = format!("http://localhost:{}", p);
+                if !candidate_urls.iter().any(|x| x == &u) {
+                    candidate_urls.push(u);
+                }
             }
         }
 
@@ -3836,8 +3926,8 @@ pub async fn start_project_dev_server(
             }
         }
 
-        if let Some(ref default_url) = info.default_url {
-            if let Ok(parsed) = url::Url::parse(default_url) {
+        if let Some(ref check_url) = target_default_url {
+            if let Ok(parsed) = url::Url::parse(check_url) {
                 if let Some(port) = parsed.port() {
                     if is_local_port_bound(port, 250).await {
                         let msg = format!(
@@ -3865,7 +3955,7 @@ pub async fn start_project_dev_server(
         kill_existing_server(&mut guard).await;
     }
 
-    let runner = match resolve_runner(&effective_root, &info, script_name, want_lan) {
+    let runner = match resolve_runner(&effective_root, &info, script_name, want_lan, effective_port) {
         Ok(r) => r,
         Err(msg) => {
             emit_project_server_failure(
@@ -3883,12 +3973,11 @@ pub async fn start_project_dev_server(
 
     if matches!(runner, ResolvedRunner::StaticHttp) {
         let bind_host = if want_lan { "0.0.0.0" } else { "127.0.0.1" };
-        let listener = match TcpListener::bind(format!("{}:4173", bind_host)).await {
-            Ok(l) => l,
-            Err(_) => match TcpListener::bind(format!("{}:0", bind_host)).await {
+        let listener = if let Some(p) = effective_port {
+            match TcpListener::bind(format!("{}:{}", bind_host, p)).await {
                 Ok(l) => l,
                 Err(e) => {
-                    let msg = format!("Failed to start built-in static server: {}", e);
+                    let msg = format!("Failed to start built-in static server on port {}: {}", p, e);
                     emit_project_server_failure(
                         &app,
                         &state,
@@ -3900,7 +3989,27 @@ pub async fn start_project_dev_server(
                     .await;
                     return Err(msg);
                 }
-            },
+            }
+        } else {
+            match TcpListener::bind(format!("{}:4173", bind_host)).await {
+                Ok(l) => l,
+                Err(_) => match TcpListener::bind(format!("{}:0", bind_host)).await {
+                    Ok(l) => l,
+                    Err(e) => {
+                        let msg = format!("Failed to start built-in static server: {}", e);
+                        emit_project_server_failure(
+                            &app,
+                            &state,
+                            &effective_root,
+                            &info,
+                            info.dev_command_label.clone(),
+                            &msg,
+                        )
+                        .await;
+                        return Err(msg);
+                    }
+                },
+            }
         };
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let url = format!("http://127.0.0.1:{}", port);
@@ -3923,6 +4032,7 @@ pub async fn start_project_dev_server(
         let snapshot = {
             let mut guard = state.inner.lock().await;
             guard.generation = guard.generation.saturating_add(1);
+            guard.requested_port = effective_port;
             guard.static_server_task = Some(task);
             guard.status = ProjectServerStatus {
                 running: true,
@@ -3970,6 +4080,9 @@ pub async fn start_project_dev_server(
 
     if want_lan {
         cmd.env("HOST", "0.0.0.0");
+    }
+    if let Some(p) = effective_port {
+        cmd.env("PORT", p.to_string());
     }
     if let Some(scan_dir) = php_scan_dir {
         cmd.env("PHP_INI_SCAN_DIR", scan_dir);
@@ -4045,6 +4158,7 @@ pub async fn start_project_dev_server(
         let mut guard = state.inner.lock().await;
         guard.generation = guard.generation.saturating_add(1);
         let gen_id = guard.generation;
+        guard.requested_port = effective_port;
         guard.child = Some(child);
         guard.pid = pid;
         guard.aux_child = aux_child;
@@ -4202,7 +4316,7 @@ pub async fn start_project_dev_server(
     // Monitor child exit & fallback readiness check on default_url (plus docker compose up -d HTTP wait)
     let shared_wait = state.inner.clone();
     let app_wait = app.clone();
-    let fallback_url = info.default_url.clone();
+    let fallback_url = target_default_url;
     tokio::spawn(async move {
         let mut ticks: u32 = 0;
         let mut compose_started = false;
@@ -5503,6 +5617,16 @@ IF EXIST \"%NPM_PREFIX_NPM_CLI_JS%\" (\r\n\
         let mut existing_host = vec!["run".to_string(), "dev".to_string()];
         append_node_lan_args(&mut existing_host, "npm", "astro", Some("astro dev --host"));
         assert_eq!(existing_host, vec!["run", "dev"]);
+
+        // Vite with npm + custom port (without LAN) -> inserts `-- --port 5180`
+        let mut npm_vite_port = vec!["run".to_string(), "dev".to_string()];
+        append_node_dev_args(&mut npm_vite_port, "npm", "vite", Some("vite --port 5173"), false, Some(5180));
+        assert_eq!(npm_vite_port, vec!["run", "dev", "--", "--port", "5180"]);
+
+        // Next.js with npm + LAN + custom port -> inserts `-- -H 0.0.0.0 -p 3100`
+        let mut npm_next_both = vec!["run".to_string(), "dev".to_string()];
+        append_node_dev_args(&mut npm_next_both, "npm", "next", Some("next dev"), true, Some(3100));
+        assert_eq!(npm_next_both, vec!["run", "dev", "--", "-H", "0.0.0.0", "-p", "3100"]);
     }
 
     #[test]
@@ -5518,10 +5642,15 @@ IF EXIST \"%NPM_PREFIX_NPM_CLI_JS%\" (\r\n\
         let local_spec = detect_python_web_with_host(&py, false).unwrap();
         assert!(local_spec.args.contains(&"127.0.0.1".to_string()));
         assert!(!local_spec.args.contains(&"0.0.0.0".to_string()));
+        assert!(local_spec.args.contains(&"8000".to_string()));
 
         let lan_spec = detect_python_web_with_host(&py, true).unwrap();
         assert!(lan_spec.args.contains(&"0.0.0.0".to_string()));
         assert!(!lan_spec.args.contains(&"127.0.0.1".to_string()));
+
+        let custom_port_spec = detect_python_web_with_host_and_port(&py, false, Some(9001)).unwrap();
+        assert!(custom_port_spec.args.contains(&"9001".to_string()));
+        assert!(!custom_port_spec.args.contains(&"8000".to_string()));
 
         let _ = fs::remove_dir_all(&py);
     }

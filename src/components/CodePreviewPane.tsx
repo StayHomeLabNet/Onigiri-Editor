@@ -6,6 +6,7 @@ import type { EditorSettings, Locale, ProjectInfo, ProjectServerStatus } from '.
 import { resolveEditorLanguageLabel, resolveHljsLanguage } from '../utils/language';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
+import { ProjectPortInput } from './ProjectPortInput';
 
 const lowlight = createLowlight(all);
 
@@ -23,6 +24,8 @@ interface CodePreviewPaneProps {
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
   projectServerAllowLan?: boolean;
+  projectCustomPort?: string;
+  onProjectCustomPortChange?: (port: string) => void;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -127,6 +130,8 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   projectInfo,
   projectServer,
   projectServerAllowLan = false,
+  projectCustomPort = '',
+  onProjectCustomPortChange,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -266,6 +271,21 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
               )}
           </div>
           <div className="project-bar-actions">
+            {onProjectCustomPortChange && (
+              <ProjectPortInput
+                value={projectCustomPort}
+                onChange={onProjectCustomPortChange}
+                onSubmitStart={
+                  onStartProjectAndBrowse ? () => onStartProjectAndBrowse('builtin') : undefined
+                }
+                projectInfo={projectInfo}
+                projectServer={projectServer}
+                label={t.project.portLabel}
+                defaultPlaceholder={t.project.portPlaceholderDefault}
+                title={t.project.portInputTitle}
+                lockedTitle={t.project.portStopToChangeHint}
+              />
+            )}
             {onToggleProjectServerLan && (
               <button
                 type="button"

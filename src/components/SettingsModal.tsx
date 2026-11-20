@@ -1371,6 +1371,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       placeholder="https://www.google.com"
                     />
                   </div>
+                  <div className="ai-hint-text">
+                    {t.inspector.settingsLabels.builtinBrowserDefaultUrlHint}
+                  </div>
 
                   <div className="platform-hint-note">
                     <Info size={12} />

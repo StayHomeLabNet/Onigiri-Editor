@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ArrowRight,
   RotateCw,
+  Home,
+  Settings,
   ExternalLink,
   Globe,
   Play,
@@ -25,16 +27,21 @@ import {
 } from '../utils/platform';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
+import { ProjectPortInput } from './ProjectPortInput';
 
 interface RightBrowserPaneProps {
   t: Translations;
   locale: Locale;
   url: string;
+  homeUrl?: string;
   onUrlChange: (url: string) => void;
+  onOpenBrowserSettings?: () => void;
   visible: boolean;
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
   projectServerAllowLan?: boolean;
+  projectCustomPort?: string;
+  onProjectCustomPortChange?: (port: string) => void;
   setupBusy?: boolean;
   setupActionId?: string | null;
   setupLogs?: string[];
@@ -48,7 +55,7 @@ interface RightBrowserPaneProps {
   onRecheckProjectEnv?: () => void;
 }
 
-function normalizeDisplayUrl(raw: string): string {
+export function normalizeDisplayUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return 'https://www.google.com';
   if (/^(https?:|about:)/i.test(trimmed)) return trimmed;
@@ -57,15 +64,23 @@ function normalizeDisplayUrl(raw: string): string {
   return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
 }
 
+export function resolveBrowserHomeUrl(homeUrl?: string | null): string {
+  return normalizeDisplayUrl(homeUrl || 'https://www.google.com');
+}
+
 export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   t,
   locale,
   url,
+  homeUrl,
   onUrlChange,
+  onOpenBrowserSettings,
   visible,
   projectInfo,
   projectServer,
   projectServerAllowLan = false,
+  projectCustomPort = '',
+  onProjectCustomPortChange,
   setupBusy,
   setupActionId,
   setupLogs,
@@ -78,6 +93,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   onAssistProjectSetup,
   onRecheckProjectEnv,
 }) => {
+  const resolvedHomeUrl = resolveBrowserHomeUrl(homeUrl);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [draftUrl, setDraftUrl] = useState(url);
   const [iframeSrc, setIframeSrc] = useState(() => normalizeDisplayUrl(url));
@@ -332,6 +348,15 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         >
           {isLoadingPage ? <Loader2 size={13} className="spin" /> : <RotateCw size={13} />}
         </button>
+        <button
+          type="button"
+          className="icon-btn-sm"
+          onClick={() => navigateTo(resolvedHomeUrl)}
+          title={`${t.browser.home} (${resolvedHomeUrl})`}
+          aria-label={t.browser.home}
+        >
+          <Home size={14} />
+        </button>
 
         <div className="browser-url-wrap">
           <Globe size={13} className="browser-url-icon" />
@@ -357,6 +382,17 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         >
           <ExternalLink size={14} />
         </button>
+        {onOpenBrowserSettings && (
+          <button
+            type="button"
+            className="icon-btn-sm"
+            onClick={onOpenBrowserSettings}
+            title={t.browser.openSettings}
+            aria-label={t.browser.openSettings}
+          >
+            <Settings size={14} />
+          </button>
+        )}
       </form>
 
       {showProjectBar && (
@@ -404,6 +440,19 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             )}
           </div>
           <div className="browser-project-actions">
+            {onProjectCustomPortChange && (
+              <ProjectPortInput
+                value={projectCustomPort}
+                onChange={onProjectCustomPortChange}
+                onSubmitStart={onStartProjectServer}
+                projectInfo={projectInfo}
+                projectServer={projectServer}
+                label={t.project.portLabel}
+                defaultPlaceholder={t.project.portPlaceholderDefault}
+                title={t.project.portInputTitle}
+                lockedTitle={t.project.portStopToChangeHint}
+              />
+            )}
             {onToggleProjectServerLan && (
               <button
                 type="button"

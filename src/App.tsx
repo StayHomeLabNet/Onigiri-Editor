@@ -528,6 +528,20 @@ export function App() {
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
   const [projectServer, setProjectServer] = useState<ProjectServerStatus | null>(null);
+  const [projectPortOverrides, setProjectPortOverrides] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('onigiri-markdown.projectPortOverrides');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, string>;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return {};
+  });
   const [projectSetupBusy, setProjectSetupBusy] = useState(false);
   const [projectSetupActionId, setProjectSetupActionId] = useState<string | null>(null);
   const [projectSetupLogs, setProjectSetupLogs] = useState<string[]>([]);
@@ -537,6 +551,29 @@ export function App() {
   } | null>(null);
   const [projectRechecking, setProjectRechecking] = useState(false);
   const pendingBrowseTargetRef = useRef<'builtin' | 'external' | null>(null);
+
+  const projectPortKey = projectInfo?.rootPath || workspaceRoot || '__default__';
+  const projectCustomPort = projectPortOverrides[projectPortKey] ?? '';
+  const handleProjectCustomPortChange = useCallback(
+    (nextPort: string) => {
+      const cleaned = nextPort.replace(/\D/g, '').slice(0, 5);
+      setProjectPortOverrides((prev) => {
+        const next = { ...prev };
+        if (cleaned) {
+          next[projectPortKey] = cleaned;
+        } else {
+          delete next[projectPortKey];
+        }
+        try {
+          localStorage.setItem('onigiri-markdown.projectPortOverrides', JSON.stringify(next));
+        } catch {
+          // ignore storage errors
+        }
+        return next;
+      });
+    },
+    [projectPortKey]
+  );
 
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -4955,6 +4992,19 @@ export function App() {
     [notify, refreshProjectInfo, t.toasts.errorPrefix]
   );
 
+  const resolveRequestedPort = useCallback(
+    (rootPath: string): { valid: boolean; port: number | null } => {
+      const raw = (projectPortOverrides[rootPath] ?? '').trim();
+      if (!raw) return { valid: true, port: null };
+      const parsed = Number(raw);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+        return { valid: false, port: null };
+      }
+      return { valid: true, port: parsed };
+    },
+    [projectPortOverrides]
+  );
+
   const handleStartProjectAndBrowse = useCallback(
     async (target: 'builtin' | 'external') => {
       const root = projectInfo?.rootPath || workspaceRoot;
@@ -4967,12 +5017,18 @@ export function App() {
         await handleOpenProjectUrl(projectServer.url, target);
         return;
       }
+      const { valid, port: requestedPort } = resolveRequestedPort(root);
+      if (!valid) {
+        notify(`${t.toasts.errorPrefix} ${t.project.invalidPortError}`);
+        return;
+      }
       try {
         pendingBrowseTargetRef.current = target;
         const st = await startProjectDevServer(
           root,
           projectInfo?.devScript,
-          settings.projectServerAllowLan
+          settings.projectServerAllowLan,
+          requestedPort
         );
         setProjectServer(st);
         if (st.url && pendingBrowseTargetRef.current) {
@@ -5005,8 +5061,10 @@ export function App() {
       projectServer,
       workspaceRoot,
       settings.projectServerAllowLan,
+      resolveRequestedPort,
       handleOpenProjectUrl,
       notify,
+      t.project.invalidPortError,
       t.toasts.devServerStarted,
       t.toasts.errorPrefix,
     ]
@@ -5038,10 +5096,12 @@ export function App() {
       try {
         const scriptArg =
           projectInfo?.rootPath === projectServer.rootPath ? projectInfo.devScript : undefined;
+        const { valid, port: requestedPort } = resolveRequestedPort(projectServer.rootPath!);
         const st = await startProjectDevServer(
           projectServer.rootPath!,
           scriptArg,
-          settings.projectServerAllowLan
+          settings.projectServerAllowLan,
+          valid ? requestedPort : null
         );
         if (!cancelled) {
           setProjectServer(st);
@@ -6713,6 +6773,8 @@ export function App() {
             projectInfo={projectInfo}
             projectServer={projectServer}
             projectServerAllowLan={settings.projectServerAllowLan}
+            projectCustomPort={projectCustomPort}
+            onProjectCustomPortChange={handleProjectCustomPortChange}
             setupBusy={projectSetupBusy}
             setupActionId={projectSetupActionId}
             setupLogs={projectSetupLogs}
@@ -7253,6 +7315,8 @@ export function App() {
                       projectInfo={projectInfo}
                       projectServer={projectServer}
                       projectServerAllowLan={settings.projectServerAllowLan}
+                      projectCustomPort={projectCustomPort}
+                      onProjectCustomPortChange={handleProjectCustomPortChange}
                       setupBusy={projectSetupBusy}
                       setupActionId={projectSetupActionId}
                       setupLogs={projectSetupLogs}
@@ -7296,6 +7360,8 @@ export function App() {
                       projectInfo={projectInfo}
                       projectServer={projectServer}
                       projectServerAllowLan={settings.projectServerAllowLan}
+                      projectCustomPort={projectCustomPort}
+                      onProjectCustomPortChange={handleProjectCustomPortChange}
                       setupBusy={projectSetupBusy}
                       setupActionId={projectSetupActionId}
                       setupLogs={projectSetupLogs}
@@ -7344,11 +7410,15 @@ export function App() {
                     t={t}
                     locale={locale}
                     url={browserUrl}
+                    homeUrl={settings.builtinBrowserDefaultUrl}
                     onUrlChange={setBrowserUrl}
+                    onOpenBrowserSettings={() => openSettingsModal('integrations')}
                     visible={nativeBrowserVisible}
                     projectInfo={projectInfo}
                     projectServer={projectServer}
                     projectServerAllowLan={settings.projectServerAllowLan}
+                    projectCustomPort={projectCustomPort}
+                    onProjectCustomPortChange={handleProjectCustomPortChange}
                     setupBusy={projectSetupBusy}
                     setupActionId={projectSetupActionId}
                     setupLogs={projectSetupLogs}
