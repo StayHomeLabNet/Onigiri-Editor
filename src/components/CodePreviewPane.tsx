@@ -7,8 +7,15 @@ import { resolveEditorLanguageLabel, resolveHljsLanguage } from '../utils/langua
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
 import { ProjectPortInput } from './ProjectPortInput';
-import { ProjectTargetControls } from './ProjectTargetControls';
-import { ProjectServerLogsBox, ProjectServerLogsToggle } from './ProjectServerLogs';
+import {
+  isTargetCurrentlyActive,
+  ProjectTargetControls,
+} from './ProjectTargetControls';
+import {
+  countErrorLogLines,
+  ProjectServerLogsBox,
+  ProjectServerLogsToggle,
+} from './ProjectServerLogs';
 
 const lowlight = createLowlight(all);
 
@@ -36,7 +43,7 @@ interface CodePreviewPaneProps {
   setupFeedback?: { ok: boolean; text: string } | null;
   recheckingEnv?: boolean;
   onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
-  onStopProjectServer?: () => void;
+  onStopProjectServer?: (targetRoot?: string) => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
   onToggleProjectServerLan?: () => void;
   onCopyLanUrl?: (url: string) => void;
@@ -174,10 +181,19 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   const hasProjectServerOption = Boolean(
     projectInfo && projectInfo.kind !== 'none' && projectInfo.devCommandLabel
   );
-  const serverRunningHere =
-    Boolean(projectServer?.running) &&
-    (!projectInfo || !projectServer?.rootPath || projectServer.rootPath === projectInfo.rootPath);
-  const activeUrl = serverRunningHere ? projectServer?.url || projectInfo?.defaultUrl || null : null;
+  const matchingRunningTarget = projectInfo?.rootPath
+    ? projectServer?.runningTargets?.find((rt) => rt.rootPath === projectInfo.rootPath)
+    : undefined;
+  const serverRunningHere = projectInfo?.rootPath
+    ? isTargetCurrentlyActive(projectInfo.rootPath, projectServer)
+    : Boolean(projectServer?.running);
+  const activeUrl = serverRunningHere
+    ? matchingRunningTarget?.url || projectServer?.url || projectInfo?.defaultUrl || null
+    : null;
+  const logErrorCount = useMemo(
+    () => countErrorLogLines(projectServer?.logs || []),
+    [projectServer?.logs]
+  );
 
   const lines = useMemo(() => content.split(/\r?\n/), [content]);
 
@@ -263,7 +279,7 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
               <strong>{projectInfo!.name}</strong>
               {activeUrl ? ` • ${activeUrl}` : ` • ${projectInfo!.devCommandLabel}`}
             </span>
-            {serverRunningHere &&
+            {projectServer?.running &&
               projectServer?.lanUrls &&
               projectServer.lanUrls.length > 0 && (
                 <LanUrlList
@@ -275,20 +291,20 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
                   qrShowTitle={t.project.qrShowTitle}
                   qrHideTitle={t.project.qrHideTitle}
                   qrScanHint={t.project.qrScanHint}
+                  showOtherTemplate={t.project.lanShowOtherBtn}
+                  hideOtherLabel={t.project.lanHideOtherBtn}
                   onCopyUrl={onCopyLanUrl}
                   variant="inline"
                 />
               )}
-            {(!projectInfo ||
-              !projectServer?.rootPath ||
-              projectServer.rootPath === projectInfo.rootPath) &&
-              projectServer?.logs &&
+            {projectServer?.logs &&
               projectServer.logs.length > 0 && (
                 <ProjectServerLogsToggle
                   logCount={projectServer.logs.length}
+                  errorCount={logErrorCount}
                   expanded={logsExpanded}
                   onToggle={() => setLogsExpanded((prev) => !prev)}
-                  running={Boolean(serverRunningHere)}
+                  running={Boolean(projectServer?.running)}
                   hasError={Boolean(projectServer.error)}
                   label={t.project.liveLogsLabel}
                   showTitle={t.project.liveLogsShowTitle}
@@ -302,9 +318,14 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
               projectServer={projectServer}
               onSelectTargetRoot={onSelectTargetRoot}
               onSelectScript={onSelectScript}
+              onOpenTargetUrl={
+                onOpenProjectUrl ? (u) => onOpenProjectUrl(u, 'builtin') : undefined
+              }
+              onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
               targetLabel={t.project.targetLabel}
               scriptLabel={t.project.scriptLabel}
               lockedTitle={t.project.targetScriptLockedHint}
+              stopTargetTitleTemplate={t.project.stopTargetTitle}
             />
             {onProjectCustomPortChange && (
               <ProjectPortInput
@@ -356,7 +377,11 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
                   </button>
                 )}
                 {onStopProjectServer && (
-                  <button type="button" className="mini-pill-btn" onClick={onStopProjectServer}>
+                  <button
+                    type="button"
+                    className="mini-pill-btn"
+                    onClick={() => onStopProjectServer(projectInfo?.rootPath)}
+                  >
                     <Square size={11} />
                     <span>
                       {projectServer?.external
@@ -372,15 +397,15 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
                   type="button"
                   className="mini-pill-btn is-active"
                   onClick={() => onStartProjectAndBrowse('builtin')}
-                  disabled={projectServer?.starting}
+                  disabled={projectServer?.starting && projectServer.rootPath === projectInfo?.rootPath}
                 >
-                  {projectServer?.starting ? (
+                  {projectServer?.starting && projectServer.rootPath === projectInfo?.rootPath ? (
                     <Loader2 size={12} className="spin" />
                   ) : (
                     <Play size={12} />
                   )}
                   <span>
-                    {projectServer?.starting
+                    {projectServer?.starting && projectServer.rootPath === projectInfo?.rootPath
                       ? t.project.startingServer
                       : t.project.startAndBrowse}
                   </span>
@@ -389,13 +414,18 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
             )}
           </div>
           {logsExpanded &&
-            (!projectInfo ||
-              !projectServer?.rootPath ||
-              projectServer.rootPath === projectInfo.rootPath) &&
             projectServer?.logs &&
             projectServer.logs.length > 0 && (
               <div className="project-logs-drawer">
-                <ProjectServerLogsBox logs={projectServer.logs} expanded={logsExpanded} />
+                <ProjectServerLogsBox
+                  logs={projectServer.logs}
+                  expanded={logsExpanded}
+                  copyLabel={t.project.liveLogsCopyBtn}
+                  copiedLabel={t.project.liveLogsCopiedBtn}
+                  clearLabel={t.project.liveLogsClearBtn}
+                  askAiLabel={t.project.liveLogsAskAiBtn}
+                  askAiTitle={t.project.liveLogsAskAiTitle}
+                />
               </div>
             )}
         </div>

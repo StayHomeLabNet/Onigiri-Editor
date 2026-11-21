@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.2)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.3)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -203,13 +203,14 @@ Right-click inside the editor to access:
 
 When you open a project folder (`⌘⇧O` / `Ctrl+Shift+O`) or project file, Onigiri Editor automatically detects Vite, VitePress, SvelteKit, Astro, Nuxt (including serving built `dist/` folders), Docusaurus, Next.js, Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, MkDocs, Hugo, Docker Compose, monorepo subprojects, or static HTML projects, runs pre-flight environment diagnostics, and provides:
 
-- **Monorepo Target, Startup Script & Custom Port Controls**:
-  - Multi-project workspaces display a **Target** dropdown (e.g., switching between `gui (vite)` and `engine (fastapi)`), and multi-script projects display a **Script** selector (`dev`, `preview`, `start`, `artisan-serve`, etc.) remembered per project.
-  - Enter a custom port (`1–65535`) in the **`Port`** input before starting (blank uses the auto-detected default such as `5173` for Vite dev, `4173` for `vite preview`, or `8000` for Laravel/PHP). If the server starts on a different port than requested, a toast notice alerts you.
-- **Collapsible Live Server Console Logs (`> Logs`)**: Click **`> Logs (N)`** in the Sidebar, Built-in Web Browser, Web Page Preview, or Code Preview bars to expand or collapse live stdout/stderr output (up to 80 lines with auto-scroll) even while the server is running.
-- **Pattern 1 (Built-in Web Browser)**: Multi-WebView right-pane browser (`Settings → AI & Browser`) with Back/Forward/Reload/**Home** (configurable via **Built-in Browser Home URL**), URL bar, **DevTools (`F12`)**, **Browser Settings** shortcut, **Open in External Browser**, keyboard shortcuts (`⌘L`/`Ctrl+L` URL focus, `F5`/`⌘R`/`Ctrl+R` reload, `Alt+←`/`Alt+→` history, `F12` DevTools), and a **Server Stopped** recovery banner (one-click **Restart Server** or **Go Home**).
+- **Monorepo Multi-Server, Target, Startup Script & Custom Port Controls**:
+  - Multi-project workspaces display a **Target** dropdown (e.g., switching between `gui (vite)` and `engine (fastapi / python)`), and multi-script projects display a **Script** selector (`dev`, `preview`, `start`, `artisan-serve`, etc.) remembered per project.
+  - Starting another target inside the same monorepo keeps existing sibling servers running in the background and shows green running pills (`● gui :5173 [×]`, `● engine :8000 [×]`) for one-click URL switching or per-target stopping.
+  - Enter a custom port (`1–65535`) in the **`Port`** input before starting (blank uses the auto-detected default such as `5173` for Vite dev, `4173` for `vite preview`, or `8000` for Laravel/PHP/Python). If the server starts on a different port than requested, a toast notice alerts you.
+- **Collapsible Live Server Console Logs (`> Logs`) & 1-Click AI Diagnostics**: Click **`> Logs (N)`** in the Sidebar, Built-in Web Browser, Web Page Preview, or Code Preview bars to expand or collapse live stdout/stderr output (with automatic red/yellow error & warning highlighting, an error-count badge, and **Copy**, **Clear**, and **Ask AI** buttons to send server errors directly to AI Chat).
+- **Pattern 1 (Built-in Web Browser)**: Multi-WebView right-pane browser (`Settings → AI & Browser`) with Back/Forward/Reload/**Home** (configurable via **Built-in Browser Home URL**), URL bar with **★ Bookmark** toggle, **Bookmarks & Recent URLs** bar/drawer, **Responsive Viewport Switcher (`Full Width` / `Tablet 768px` / `Mobile 390px`)**, **DevTools (`F12`)**, **Browser Settings** shortcut, **Open in External Browser**, keyboard shortcuts (`⌘L`/`Ctrl+L` URL focus, `F5`/`⌘R`/`Ctrl+R` reload, `Alt+←`/`Alt+→` history, `F12` DevTools), and a **Server Stopped** recovery banner (one-click **Restart Server** or **Go Home**).
 - **Pattern 2 (External Browser Live Preview + LAN)**: Local HTTP live-reload server (`127.0.0.1`, or `0.0.0.0` with **LAN sharing** to preview on phones/other PCs on the same Wi-Fi).
-- **Project Dev Server LAN Access (`LAN: ON / OFF`) & QR Codes**: Toggle **`LAN: ON / OFF`** directly in the Sidebar project bar, Built-in Web Browser, Web Page Preview, Code Preview, or **Settings → AI & Browser → Allow LAN access to Project Dev Server**. When enabled, supported dev servers bind to `0.0.0.0` (`--host 0.0.0.0` / `-H 0.0.0.0` / `-S 0.0.0.0:8000`) and display a collapsed-by-default **`LAN URL (N)`** toggle with clickable **`LAN: <ip>:<port>/`** copy chips and an inline **QR code button** for instant smartphone/tablet camera scanning (toggling mid-run restarts the server automatically; OS firewall approval may be prompted; externally started `localhost`-only servers show a LAN-unreachable hint).
+- **Project Dev Server LAN Access (`LAN: ON / OFF`), Virtual-NIC Filtering & QR Codes**: Toggle **`LAN: ON / OFF`** directly in the Sidebar project bar, Built-in Web Browser, Web Page Preview, Code Preview, or **Settings → AI & Browser → Allow LAN access to Project Dev Server**. When enabled, supported dev servers bind to `0.0.0.0` (`--host 0.0.0.0` / `-H 0.0.0.0` / `-S 0.0.0.0:8000`) and display a collapsed-by-default **`LAN URL (N)`** toggle that prioritizes physical Wi-Fi/Ethernet IPs (collapsing VirtualBox/WSL/Docker/Tailscale virtual IPs under **`+N virtual/other`**) with clickable **`LAN: <ip>:<port>/`** copy chips and an inline **QR code button** for instant smartphone/tablet camera scanning.
 
 ---
 

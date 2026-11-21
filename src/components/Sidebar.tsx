@@ -73,7 +73,10 @@ import {
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
 import { ProjectPortInput } from './ProjectPortInput';
-import { ProjectTargetControls } from './ProjectTargetControls';
+import {
+  isTargetCurrentlyActive,
+  ProjectTargetControls,
+} from './ProjectTargetControls';
 import { ProjectServerLogs } from './ProjectServerLogs';
 
 const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
@@ -288,7 +291,7 @@ interface SidebarProps {
   setupFeedback?: { ok: boolean; text: string } | null;
   recheckingEnv?: boolean;
   onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
-  onStopProjectServer?: () => void;
+  onStopProjectServer?: (targetRoot?: string) => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
   onToggleProjectServerLan?: () => void;
   onCopyLanUrl?: (url: string) => void;
@@ -1074,35 +1077,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           projectServer={projectServer}
                           onSelectTargetRoot={onSelectTargetRoot}
                           onSelectScript={onSelectScript}
+                          onOpenTargetUrl={
+                            onOpenProjectUrl ? (u) => onOpenProjectUrl(u, 'builtin') : undefined
+                          }
+                          onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
                           targetLabel={t.project.targetLabel}
                           scriptLabel={t.project.scriptLabel}
                           lockedTitle={t.project.targetScriptLockedHint}
+                          stopTargetTitleTemplate={t.project.stopTargetTitle}
                         />
                         <div className="sidebar-project-actions">
-                        {projectServer?.running &&
-                        (!projectServer.rootPath ||
-                          projectServer.rootPath === projectInfo.rootPath) &&
-                        projectServer.url ? (
+                        {isTargetCurrentlyActive(projectInfo.rootPath, projectServer) ? (
                           <>
-                            {onOpenProjectUrl && (
-                              <button
-                                type="button"
-                                className="mini-pill-btn is-active"
-                                onClick={() => onOpenProjectUrl(projectServer.url!, 'builtin')}
-                              >
-                                <Globe size={11} />
-                                <span>{t.project.openInBuiltin}</span>
-                              </button>
-                            )}
+                            {onOpenProjectUrl &&
+                              (projectServer?.runningTargets?.find(
+                                (rt) => rt.rootPath === projectInfo.rootPath
+                              )?.url ||
+                                projectServer?.url) && (
+                                <button
+                                  type="button"
+                                  className="mini-pill-btn is-active"
+                                  onClick={() =>
+                                    onOpenProjectUrl(
+                                      projectServer?.runningTargets?.find(
+                                        (rt) => rt.rootPath === projectInfo.rootPath
+                                      )?.url || projectServer!.url!,
+                                      'builtin'
+                                    )
+                                  }
+                                >
+                                  <Globe size={11} />
+                                  <span>{t.project.openInBuiltin}</span>
+                                </button>
+                              )}
                             {onStopProjectServer && (
                               <button
                                 type="button"
                                 className="mini-pill-btn"
-                                onClick={onStopProjectServer}
+                                onClick={() => onStopProjectServer(projectInfo.rootPath)}
                               >
                                 <Square size={10} />
                                 <span>
-                                  {projectServer.external
+                                  {projectServer?.external
                                     ? t.project.disconnectServer
                                     : t.project.stopServer}
                                 </span>
@@ -1115,15 +1131,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               type="button"
                               className="mini-pill-btn is-active"
                               onClick={() => onStartProjectAndBrowse('builtin')}
-                              disabled={projectServer?.starting}
+                              disabled={
+                                projectServer?.starting &&
+                                projectServer.rootPath === projectInfo.rootPath
+                              }
                             >
-                              {projectServer?.starting ? (
+                              {projectServer?.starting &&
+                              projectServer.rootPath === projectInfo.rootPath ? (
                                 <Loader2 size={11} className="spin" />
                               ) : (
                                 <Play size={11} />
                               )}
                               <span>
-                                {projectServer?.starting
+                                {projectServer?.starting &&
+                                projectServer.rootPath === projectInfo.rootPath
                                   ? t.project.startingServer
                                   : t.project.startAndBrowse}
                               </span>
@@ -1165,8 +1186,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </>
                     )}
                     {projectServer?.running &&
-                      (!projectServer.rootPath ||
-                        projectServer.rootPath === projectInfo.rootPath) &&
                       projectServer.lanUrls &&
                       projectServer.lanUrls.length > 0 && (
                         <LanUrlList
@@ -1178,13 +1197,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           qrShowTitle={t.project.qrShowTitle}
                           qrHideTitle={t.project.qrHideTitle}
                           qrScanHint={t.project.qrScanHint}
+                          showOtherTemplate={t.project.lanShowOtherBtn}
+                          hideOtherLabel={t.project.lanHideOtherBtn}
                           onCopyUrl={onCopyLanUrl}
                           variant="block"
                         />
                       )}
-                    {(!projectServer?.rootPath ||
-                      projectServer.rootPath === projectInfo.rootPath) &&
-                      projectServer?.logs &&
+                    {projectServer?.logs &&
                       projectServer.logs.length > 0 && (
                         <ProjectServerLogs
                           logs={projectServer.logs}
@@ -1193,6 +1212,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           label={t.project.liveLogsLabel}
                           showTitle={t.project.liveLogsShowTitle}
                           hideTitle={t.project.liveLogsHideTitle}
+                          copyLabel={t.project.liveLogsCopyBtn}
+                          copiedLabel={t.project.liveLogsCopiedBtn}
+                          clearLabel={t.project.liveLogsClearBtn}
+                          askAiLabel={t.project.liveLogsAskAiBtn}
+                          askAiTitle={t.project.liveLogsAskAiTitle}
                         />
                       )}
                     {projectServer?.running &&

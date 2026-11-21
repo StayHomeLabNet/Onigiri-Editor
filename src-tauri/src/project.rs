@@ -79,6 +79,17 @@ pub struct ProjectInfo {
     pub targets: Vec<ProjectTarget>,
 }
 
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningProjectTarget {
+    pub root_path: String,
+    pub name: String,
+    pub kind: String,
+    pub url: Option<String>,
+    pub command_label: Option<String>,
+    pub starting: bool,
+}
+
 #[derive(Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectServerStatus {
@@ -95,10 +106,31 @@ pub struct ProjectServerStatus {
     pub requested_script: Option<String>,
     pub logs: Vec<String>,
     pub error: Option<String>,
+    pub running_targets: Vec<RunningProjectTarget>,
+}
+
+pub struct ExtraManagedServer {
+    pub server_id: u64,
+    pub root_path: String,
+    pub name: String,
+    pub kind: String,
+    pub url: Option<String>,
+    pub command_label: Option<String>,
+    pub starting: bool,
+    pub requested_port: Option<u16>,
+    pub requested_script: Option<String>,
+    pub allow_lan: bool,
+    pub lan_urls: Vec<String>,
+    pub child: Option<Child>,
+    pub pid: Option<u32>,
+    pub aux_child: Option<Child>,
+    pub aux_pid: Option<u32>,
+    pub static_server_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 pub struct ProjectServerInner {
     pub status: ProjectServerStatus,
+    pub primary_name: Option<String>,
     pub requested_port: Option<u16>,
     pub requested_script: Option<String>,
     pub child: Option<Child>,
@@ -107,6 +139,7 @@ pub struct ProjectServerInner {
     pub aux_pid: Option<u32>,
     pub static_server_task: Option<tokio::task::JoinHandle<()>>,
     pub generation: u64,
+    pub extra_servers: Vec<ExtraManagedServer>,
 }
 
 pub struct ProjectServerState {
@@ -119,6 +152,7 @@ impl ProjectServerState {
         Self {
             inner: Arc::new(Mutex::new(ProjectServerInner {
                 status: ProjectServerStatus::default(),
+                primary_name: None,
                 requested_port: None,
                 requested_script: None,
                 child: None,
@@ -127,6 +161,7 @@ impl ProjectServerState {
                 aux_pid: None,
                 static_server_task: None,
                 generation: 0,
+                extra_servers: Vec::new(),
             })),
             start_lock: Arc::new(Mutex::new(())),
         }
@@ -1320,6 +1355,35 @@ fn detect_python_web_with_host_and_port(
                 "--port".to_string(),
                 p.to_string(),
             ],
+            uses_uv_ok: true,
+        });
+    }
+
+    // Generic Python backend / API / engine script in a project with pyproject.toml or requirements.txt
+    if let Some(entry) = [
+        "server.py",
+        "api.py",
+        "app.py",
+        "main.py",
+        "run.py",
+        "src/main.py",
+        "src/server.py",
+        "src/app.py",
+    ]
+    .iter()
+    .find(|rel| root.join(rel).is_file())
+    .copied()
+    {
+        return Some(PythonWebSpec {
+            kind: "python",
+            dev_script: "python-run",
+            default_url: if deps_blob.contains("gradio") {
+                "http://127.0.0.1:7860"
+            } else {
+                "http://127.0.0.1:8000"
+            },
+            command_label: format!("python {}", entry),
+            args: vec![entry.to_string()],
             uses_uv_ok: true,
         });
     }
@@ -2688,10 +2752,10 @@ pub(crate) async fn diagnose_project(info: &mut ProjectInfo) {
         }
     }
 
-    // Python Web (Django, FastAPI, Flask, Streamlit) & MkDocs
+    // Python Web (Django, FastAPI, Flask, Streamlit, Python backend) & MkDocs
     if matches!(
         info.kind.as_str(),
-        "django" | "fastapi" | "flask" | "streamlit" | "mkdocs"
+        "django" | "fastapi" | "flask" | "streamlit" | "python" | "mkdocs"
     ) {
         let mkdocs_direct_bin = info.kind == "mkdocs"
             && (root.join(".venv/bin/mkdocs").is_file()
@@ -3037,7 +3101,19 @@ fn discover_monorepo_targets(root: &Path) -> Vec<ProjectTarget> {
 
             if matches!(
                 name.as_str(),
-                "apps" | "packages" | "services" | "sites" | "examples" | "frontend" | "backend" | "web" | "server"
+                "apps"
+                    | "packages"
+                    | "services"
+                    | "sites"
+                    | "examples"
+                    | "frontend"
+                    | "backend"
+                    | "web"
+                    | "server"
+                    | "gui"
+                    | "engine"
+                    | "api"
+                    | "client"
             ) {
                 if let Ok(sub_entries) = fs::read_dir(&p) {
                     for sub in sub_entries.flatten() {
@@ -3460,31 +3536,69 @@ async fn handle_static_connection(mut stream: TcpStream, root: PathBuf) {
     write_static_http_response(&mut stream, "404 Not Found", "text/plain; charset=utf-8", b"Not Found").await;
 }
 
-async fn kill_existing_server(guard: &mut ProjectServerInner) {
+fn kill_pid_sync(pid: u32) {
+    #[cfg(unix)]
+    {
+        let pgid = format!("-{}", pid);
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pgid])
+            .status();
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(0x0800_0000)
+            .status();
+    }
+}
+
+async fn kill_extra_server(srv: &mut ExtraManagedServer) {
+    if let Some(task) = srv.static_server_task.take() {
+        task.abort();
+    }
+    for pid_opt in [srv.pid.take(), srv.aux_pid.take()] {
+        if let Some(pid) = pid_opt {
+            kill_pid_sync(pid);
+        }
+    }
+    if let Some(mut child) = srv.child.take() {
+        let _ = child.kill().await;
+    }
+    if let Some(mut aux) = srv.aux_child.take() {
+        let _ = aux.kill().await;
+    }
+}
+
+fn kill_extra_server_sync(srv: &mut ExtraManagedServer) {
+    if let Some(task) = srv.static_server_task.take() {
+        task.abort();
+    }
+    for pid_opt in [srv.pid.take(), srv.aux_pid.take()] {
+        if let Some(pid) = pid_opt {
+            kill_pid_sync(pid);
+        }
+    }
+    if let Some(mut child) = srv.child.take() {
+        let _ = child.start_kill();
+    }
+    if let Some(mut aux) = srv.aux_child.take() {
+        let _ = aux.start_kill();
+    }
+}
+
+async fn kill_primary_server(guard: &mut ProjectServerInner) {
     guard.generation = guard.generation.saturating_add(1);
     if let Some(task) = guard.static_server_task.take() {
         task.abort();
     }
     for pid_opt in [guard.pid.take(), guard.aux_pid.take()] {
         if let Some(pid) = pid_opt {
-            #[cfg(unix)]
-            {
-                let pgid = format!("-{}", pid);
-                let _ = std::process::Command::new("kill")
-                    .args(["-TERM", &pgid])
-                    .status();
-                let _ = std::process::Command::new("kill")
-                    .args(["-TERM", &pid.to_string()])
-                    .status();
-            }
-            #[cfg(target_os = "windows")]
-            {
-                use std::os::windows::process::CommandExt;
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
-                    .creation_flags(0x0800_0000)
-                    .status();
-            }
+            kill_pid_sync(pid);
         }
     }
     if let Some(mut child) = guard.child.take() {
@@ -3493,6 +3607,7 @@ async fn kill_existing_server(guard: &mut ProjectServerInner) {
     if let Some(mut aux) = guard.aux_child.take() {
         let _ = aux.kill().await;
     }
+    guard.primary_name = None;
     guard.requested_port = None;
     guard.requested_script = None;
     guard.status.running = false;
@@ -3502,6 +3617,159 @@ async fn kill_existing_server(guard: &mut ProjectServerInner) {
     guard.status.requested_port = None;
     guard.status.requested_script = None;
     guard.status.lan_urls.clear();
+}
+
+async fn kill_existing_server(guard: &mut ProjectServerInner) {
+    kill_primary_server(guard).await;
+    for mut extra in guard.extra_servers.drain(..) {
+        kill_extra_server(&mut extra).await;
+    }
+    guard.status.running_targets.clear();
+}
+
+pub(crate) fn are_monorepo_related_paths(a: &str, b: &str) -> bool {
+    let norm_a = a.replace('\\', "/").trim_end_matches('/').to_string();
+    let norm_b = b.replace('\\', "/").trim_end_matches('/').to_string();
+    if norm_a.is_empty() || norm_b.is_empty() || norm_a == norm_b {
+        return false;
+    }
+    if norm_a.starts_with(&format!("{}/", norm_b)) || norm_b.starts_with(&format!("{}/", norm_a)) {
+        return true;
+    }
+    let pa = Path::new(&norm_a);
+    let pb = Path::new(&norm_b);
+    if let (Some(par_a), Some(par_b)) = (pa.parent(), pb.parent()) {
+        if par_a == par_b && par_a.file_name().is_some() {
+            return true;
+        }
+        if let (Some(gp_a), Some(gp_b)) = (par_a.parent(), par_b.parent()) {
+            if (gp_a == par_b || par_a == gp_b || gp_a == gp_b) && gp_a.file_name().is_some() {
+                // Check if common ancestor looks like a workspace root (has subdirectories or manifest)
+                return par_a == par_b || gp_a == par_b || par_a == gp_b;
+            }
+        }
+    }
+    false
+}
+
+fn target_display_name(root_path: &str, explicit_name: Option<&str>) -> String {
+    if let Some(n) = explicit_name.filter(|s| !s.trim().is_empty()) {
+        return n.to_string();
+    }
+    Path::new(root_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("server")
+        .to_string()
+}
+
+fn refresh_running_targets(guard: &mut ProjectServerInner) {
+    let mut list: Vec<RunningProjectTarget> = Vec::new();
+    if (guard.status.running || guard.status.starting) && guard.status.root_path.is_some() {
+        let rp = guard.status.root_path.clone().unwrap_or_default();
+        list.push(RunningProjectTarget {
+            name: target_display_name(&rp, guard.primary_name.as_deref()),
+            root_path: rp,
+            kind: guard.status.kind.clone().unwrap_or_else(|| "node".to_string()),
+            url: guard.status.url.clone(),
+            command_label: guard.status.command_label.clone(),
+            starting: guard.status.starting,
+        });
+    }
+    for extra in &guard.extra_servers {
+        if !list.iter().any(|t| t.root_path == extra.root_path) {
+            list.push(RunningProjectTarget {
+                root_path: extra.root_path.clone(),
+                name: extra.name.clone(),
+                kind: extra.kind.clone(),
+                url: extra.url.clone(),
+                command_label: extra.command_label.clone(),
+                starting: extra.starting,
+            });
+        }
+    }
+    guard.status.running_targets = list;
+}
+
+async fn prepare_for_target_start(guard: &mut ProjectServerInner, target_root: &str) {
+    // If target_root was already running in extra_servers, stop that old instance first
+    let mut i = 0;
+    while i < guard.extra_servers.len() {
+        if guard.extra_servers[i].root_path == target_root {
+            let mut old = guard.extra_servers.remove(i);
+            kill_extra_server(&mut old).await;
+        } else {
+            i += 1;
+        }
+    }
+
+    if let Some(prev_root) = guard.status.root_path.clone() {
+        if (guard.status.running || guard.status.starting)
+            && prev_root != target_root
+            && !guard.status.external
+            && are_monorepo_related_paths(&prev_root, target_root)
+            && (guard.child.is_some() || guard.static_server_task.is_some())
+        {
+            let prev_name = target_display_name(&prev_root, guard.primary_name.as_deref());
+            let moved = ExtraManagedServer {
+                server_id: guard.generation,
+                root_path: prev_root,
+                name: prev_name,
+                kind: guard.status.kind.clone().unwrap_or_else(|| "node".to_string()),
+                url: guard.status.url.clone(),
+                command_label: guard.status.command_label.clone(),
+                starting: guard.status.starting,
+                requested_port: guard.requested_port.take(),
+                requested_script: guard.requested_script.take(),
+                allow_lan: guard.status.allow_lan,
+                lan_urls: std::mem::take(&mut guard.status.lan_urls),
+                child: guard.child.take(),
+                pid: guard.pid.take(),
+                aux_child: guard.aux_child.take(),
+                aux_pid: guard.aux_pid.take(),
+                static_server_task: guard.static_server_task.take(),
+            };
+            guard.extra_servers.retain(|s| s.root_path != moved.root_path);
+            guard.extra_servers.push(moved);
+            guard.primary_name = None;
+            return;
+        }
+        if prev_root != target_root && !are_monorepo_related_paths(&prev_root, target_root) {
+            for mut extra in guard.extra_servers.drain(..) {
+                kill_extra_server(&mut extra).await;
+            }
+        }
+    }
+    kill_primary_server(guard).await;
+}
+
+fn promote_last_extra_server(guard: &mut ProjectServerInner) -> bool {
+    let Some(promoted) = guard.extra_servers.pop() else {
+        return false;
+    };
+    guard.generation = promoted.server_id;
+    guard.primary_name = Some(promoted.name);
+    guard.requested_port = promoted.requested_port;
+    guard.requested_script = promoted.requested_script.clone();
+    guard.child = promoted.child;
+    guard.pid = promoted.pid;
+    guard.aux_child = promoted.aux_child;
+    guard.aux_pid = promoted.aux_pid;
+    guard.static_server_task = promoted.static_server_task;
+    guard.status.running = true;
+    guard.status.starting = promoted.starting;
+    guard.status.external = false;
+    guard.status.allow_lan = promoted.allow_lan;
+    guard.status.lan_urls = promoted.lan_urls;
+    guard.status.root_path = Some(promoted.root_path);
+    guard.status.kind = Some(promoted.kind);
+    guard.status.url = promoted.url;
+    guard.status.command_label = promoted.command_label;
+    guard.status.requested_port = promoted.requested_port;
+    guard.status.requested_script = promoted.requested_script;
+    guard.status.error = None;
+    refresh_running_targets(guard);
+    true
 }
 
 pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
@@ -3516,24 +3784,7 @@ pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
         }
         for pid_opt in [guard.pid.take(), guard.aux_pid.take()] {
             if let Some(pid) = pid_opt {
-                #[cfg(unix)]
-                {
-                    let pgid = format!("-{}", pid);
-                    let _ = std::process::Command::new("kill")
-                        .args(["-TERM", &pgid])
-                        .status();
-                    let _ = std::process::Command::new("kill")
-                        .args(["-TERM", &pid.to_string()])
-                        .status();
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    use std::os::windows::process::CommandExt;
-                    let _ = std::process::Command::new("taskkill")
-                        .args(["/PID", &pid.to_string(), "/T", "/F"])
-                        .creation_flags(0x0800_0000)
-                        .status();
-                }
+                kill_pid_sync(pid);
             }
         }
         if let Some(mut child) = guard.child.take() {
@@ -3542,6 +3793,10 @@ pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
         if let Some(mut aux) = guard.aux_child.take() {
             let _ = aux.start_kill();
         }
+        for mut extra in guard.extra_servers.drain(..) {
+            kill_extra_server_sync(&mut extra);
+        }
+        guard.primary_name = None;
         guard.requested_port = None;
         guard.requested_script = None;
         guard.status.running = false;
@@ -3551,6 +3806,7 @@ pub fn stop_project_dev_server_sync(app_handle: &tauri::AppHandle) {
         guard.status.requested_port = None;
         guard.status.requested_script = None;
         guard.status.lan_urls.clear();
+        guard.status.running_targets.clear();
     };
 }
 
@@ -3878,7 +4134,10 @@ fn resolve_runner(
         });
     }
 
-    if matches!(info.kind.as_str(), "django" | "fastapi" | "flask" | "streamlit") {
+    if matches!(
+        info.kind.as_str(),
+        "django" | "fastapi" | "flask" | "streamlit" | "python"
+    ) {
         let spec = detect_python_web_with_host_and_port(root, allow_lan, custom_port)
             .ok_or_else(|| "Python web entry file not found in project root.".to_string())?;
         let (py_exe, mut prefix_args) = if spec.uses_uv_ok {
@@ -3942,7 +4201,7 @@ async fn emit_project_server_failure(
     msg: &str,
 ) {
     let mut guard = state.inner.lock().await;
-    kill_existing_server(&mut guard).await;
+    kill_primary_server(&mut guard).await;
     guard.status = ProjectServerStatus {
         running: false,
         starting: false,
@@ -3957,7 +4216,9 @@ async fn emit_project_server_failure(
         requested_script: None,
         logs: vec![msg.to_string()],
         error: Some(msg.to_string()),
+        running_targets: Vec::new(),
     };
+    refresh_running_targets(&mut guard);
     let snap = guard.status.clone();
     drop(guard);
     let _ = app.emit("project-server-update", snap);
@@ -4035,6 +4296,7 @@ pub async fn start_project_dev_server(
                             let mut guard = state.inner.lock().await;
                             guard.status.allow_lan = !lan_urls.is_empty();
                             guard.status.lan_urls = lan_urls;
+                            refresh_running_targets(&mut guard);
                             let snap = guard.status.clone();
                             drop(guard);
                             let _ = app.emit("project-server-update", snap.clone());
@@ -4084,9 +4346,16 @@ pub async fn start_project_dev_server(
                     Vec::new()
                 };
                 let mut guard = state.inner.lock().await;
-                kill_existing_server(&mut guard).await;
+                prepare_for_target_start(&mut guard, &effective_root).await;
+                guard.primary_name = Some(info.name.clone());
                 guard.requested_port = effective_port;
                 guard.requested_script = chosen_script.clone();
+                let mut prev_logs = std::mem::take(&mut guard.status.logs);
+                prev_logs.push(format!("Connected to already-running server at {}", candidate));
+                if prev_logs.len() > 120 {
+                    let excess = prev_logs.len() - 120;
+                    prev_logs.drain(0..excess);
+                }
                 guard.status = ProjectServerStatus {
                     running: true,
                     starting: false,
@@ -4099,9 +4368,11 @@ pub async fn start_project_dev_server(
                     command_label: info.dev_command_label.clone(),
                     requested_port: effective_port,
                     requested_script: chosen_script.clone(),
-                    logs: vec![format!("Connected to already-running server at {}", candidate)],
+                    logs: prev_logs,
                     error: None,
+                    running_targets: Vec::new(),
                 };
+                refresh_running_targets(&mut guard);
                 let snap = guard.status.clone();
                 drop(guard);
                 let _ = app.emit("project-server-update", snap.clone());
@@ -4135,7 +4406,7 @@ pub async fn start_project_dev_server(
 
     {
         let mut guard = state.inner.lock().await;
-        kill_existing_server(&mut guard).await;
+        prepare_for_target_start(&mut guard, &effective_root).await;
     }
 
     let runner = match resolve_runner(&effective_root, &info, script_name, want_lan, effective_port) {
@@ -4215,9 +4486,16 @@ pub async fn start_project_dev_server(
         let snapshot = {
             let mut guard = state.inner.lock().await;
             guard.generation = guard.generation.saturating_add(1);
+            guard.primary_name = Some(info.name.clone());
             guard.requested_port = effective_port;
             guard.requested_script = chosen_script.clone();
             guard.static_server_task = Some(task);
+            let mut prev_logs = if guard.extra_servers.is_empty() {
+                Vec::new()
+            } else {
+                std::mem::take(&mut guard.status.logs)
+            };
+            prev_logs.push(format!("Serving {} at {}", effective_root, url));
             guard.status = ProjectServerStatus {
                 running: true,
                 starting: false,
@@ -4230,9 +4508,11 @@ pub async fn start_project_dev_server(
                 command_label: Some(format!("Built-in Static HTTP ({})", url)),
                 requested_port: effective_port,
                 requested_script: chosen_script.clone(),
-                logs: vec![format!("Serving {} at {}", effective_root, url)],
+                logs: prev_logs,
                 error: None,
+                running_targets: Vec::new(),
             };
+            refresh_running_targets(&mut guard);
             guard.status.clone()
         };
         let _ = app.emit("project-server-update", snapshot.clone());
@@ -4344,12 +4624,23 @@ pub async fn start_project_dev_server(
         let mut guard = state.inner.lock().await;
         guard.generation = guard.generation.saturating_add(1);
         let gen_id = guard.generation;
+        guard.primary_name = Some(info.name.clone());
         guard.requested_port = effective_port;
         guard.requested_script = chosen_script.clone();
         guard.child = Some(child);
         guard.pid = pid;
         guard.aux_child = aux_child;
         guard.aux_pid = aux_pid;
+        let mut prev_logs = if guard.extra_servers.is_empty() {
+            Vec::new()
+        } else {
+            std::mem::take(&mut guard.status.logs)
+        };
+        prev_logs.push(format!("$ {}", command_label));
+        if prev_logs.len() > 120 {
+            let excess = prev_logs.len() - 120;
+            prev_logs.drain(0..excess);
+        }
         guard.status = ProjectServerStatus {
             running: true,
             starting: true,
@@ -4362,9 +4653,11 @@ pub async fn start_project_dev_server(
             command_label: Some(command_label.clone()),
             requested_port: effective_port,
             requested_script: chosen_script.clone(),
-            logs: vec![format!("$ {}", command_label)],
+            logs: prev_logs,
             error: None,
+            running_targets: Vec::new(),
         };
+        refresh_running_targets(&mut guard);
         (gen_id, guard.status.clone())
     };
 
@@ -4392,16 +4685,38 @@ pub async fn start_project_dev_server(
                 };
                 {
                     let mut guard = shared_out.lock().await;
-                    if guard.generation != gen_id {
+                    let is_primary = guard.generation == gen_id;
+                    let extra_name = if !is_primary {
+                        guard
+                            .extra_servers
+                            .iter_mut()
+                            .find(|s| s.server_id == gen_id)
+                            .map(|extra| {
+                                if let Some(ref lan_u) = maybe_lan {
+                                    merge_lan_url(&mut extra.lan_urls, lan_u.clone());
+                                }
+                                extra.name.clone()
+                            })
+                    } else {
+                        None
+                    };
+                    if !is_primary && extra_name.is_none() {
                         break;
                     }
-                    guard.status.logs.push(clean);
-                    if guard.status.logs.len() > 80 {
-                        let excess = guard.status.logs.len() - 80;
+                    let log_entry = if let Some(ref name) = extra_name {
+                        format!("[{}] {}", name, clean)
+                    } else {
+                        clean
+                    };
+                    guard.status.logs.push(log_entry);
+                    if guard.status.logs.len() > 120 {
+                        let excess = guard.status.logs.len() - 120;
                         guard.status.logs.drain(0..excess);
                     }
-                    if let Some(lan_u) = maybe_lan {
-                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                    if is_primary {
+                        if let Some(lan_u) = maybe_lan {
+                            merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                        }
                     }
                     if maybe_url.is_none() {
                         let snap = guard.status.clone();
@@ -4420,14 +4735,24 @@ pub async fn start_project_dev_server(
                     }
                     let computed_lan = compute_project_lan_urls(want_lan, Some(&u));
                     let mut guard = shared_out.lock().await;
-                    if guard.generation != gen_id {
+                    if guard.generation == gen_id {
+                        guard.status.url = Some(u);
+                        guard.status.starting = false;
+                        for lan_u in computed_lan {
+                            merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                        }
+                    } else if let Some(extra) =
+                        guard.extra_servers.iter_mut().find(|s| s.server_id == gen_id)
+                    {
+                        extra.url = Some(u);
+                        extra.starting = false;
+                        for lan_u in computed_lan {
+                            merge_lan_url(&mut extra.lan_urls, lan_u);
+                        }
+                    } else {
                         break;
                     }
-                    guard.status.url = Some(u);
-                    guard.status.starting = false;
-                    for lan_u in computed_lan {
-                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
-                    }
+                    refresh_running_targets(&mut guard);
                     let snap = guard.status.clone();
                     drop(guard);
                     let _ = app_out.emit("project-server-update", snap);
@@ -4458,16 +4783,38 @@ pub async fn start_project_dev_server(
                 };
                 {
                     let mut guard = shared_err.lock().await;
-                    if guard.generation != gen_id {
+                    let is_primary = guard.generation == gen_id;
+                    let extra_name = if !is_primary {
+                        guard
+                            .extra_servers
+                            .iter_mut()
+                            .find(|s| s.server_id == gen_id)
+                            .map(|extra| {
+                                if let Some(ref lan_u) = maybe_lan {
+                                    merge_lan_url(&mut extra.lan_urls, lan_u.clone());
+                                }
+                                extra.name.clone()
+                            })
+                    } else {
+                        None
+                    };
+                    if !is_primary && extra_name.is_none() {
                         break;
                     }
-                    guard.status.logs.push(clean);
-                    if guard.status.logs.len() > 80 {
-                        let excess = guard.status.logs.len() - 80;
+                    let log_entry = if let Some(ref name) = extra_name {
+                        format!("[{}] {}", name, clean)
+                    } else {
+                        clean
+                    };
+                    guard.status.logs.push(log_entry);
+                    if guard.status.logs.len() > 120 {
+                        let excess = guard.status.logs.len() - 120;
                         guard.status.logs.drain(0..excess);
                     }
-                    if let Some(lan_u) = maybe_lan {
-                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                    if is_primary {
+                        if let Some(lan_u) = maybe_lan {
+                            merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                        }
                     }
                     if maybe_url.is_none() {
                         let snap = guard.status.clone();
@@ -4486,14 +4833,24 @@ pub async fn start_project_dev_server(
                     }
                     let computed_lan = compute_project_lan_urls(want_lan, Some(&u));
                     let mut guard = shared_err.lock().await;
-                    if guard.generation != gen_id {
+                    if guard.generation == gen_id {
+                        guard.status.url = Some(u);
+                        guard.status.starting = false;
+                        for lan_u in computed_lan {
+                            merge_lan_url(&mut guard.status.lan_urls, lan_u);
+                        }
+                    } else if let Some(extra) =
+                        guard.extra_servers.iter_mut().find(|s| s.server_id == gen_id)
+                    {
+                        extra.url = Some(u);
+                        extra.starting = false;
+                        for lan_u in computed_lan {
+                            merge_lan_url(&mut extra.lan_urls, lan_u);
+                        }
+                    } else {
                         break;
                     }
-                    guard.status.url = Some(u);
-                    guard.status.starting = false;
-                    for lan_u in computed_lan {
-                        merge_lan_url(&mut guard.status.lan_urls, lan_u);
-                    }
+                    refresh_running_targets(&mut guard);
                     let snap = guard.status.clone();
                     drop(guard);
                     let _ = app_err.emit("project-server-update", snap);
@@ -4515,11 +4872,58 @@ pub async fn start_project_dev_server(
 
             let should_probe_fallback = {
                 let mut guard = shared_wait.lock().await;
-                if guard.generation != gen_id {
-                    break;
-                }
-                if !compose_started {
-                    let exited = if let Some(child) = guard.child.as_mut() {
+                if guard.generation == gen_id {
+                    if !compose_started {
+                        let exited = if let Some(child) = guard.child.as_mut() {
+                            match child.try_wait() {
+                                Ok(Some(status)) => Some(status),
+                                Ok(None) => None,
+                                Err(_) => None,
+                            }
+                        } else {
+                            break;
+                        };
+                        if let Some(exit_status) = exited {
+                            guard.child = None;
+                            guard.pid = None;
+                            if is_docker_compose && exit_status.success() {
+                                compose_started = true;
+                                guard.status.logs.push("Docker Compose started; waiting for HTTP...".to_string());
+                            } else {
+                                guard.status.running = false;
+                                guard.status.starting = false;
+                                guard.status.external = false;
+                                guard.status.allow_lan = false;
+                                guard.status.lan_urls.clear();
+                                if !exit_status.success() {
+                                    guard.status.error = Some(format!(
+                                        "Dev server exited with code {}",
+                                        exit_status
+                                            .code()
+                                            .map(|c| c.to_string())
+                                            .unwrap_or_else(|| "signal".to_string())
+                                    ));
+                                } else if guard.status.url.is_none() {
+                                    guard.status.error = Some(
+                                        "Dev server exited (code 0) before listening on a local URL. Check logs below."
+                                            .to_string(),
+                                    );
+                                }
+                                refresh_running_targets(&mut guard);
+                                let snap = guard.status.clone();
+                                drop(guard);
+                                let _ = app_wait.emit("project-server-update", snap);
+                                break;
+                            }
+                        }
+                    }
+                    guard.status.starting && guard.status.url.is_none() && ticks <= 120
+                } else if let Some(extra_idx) = guard
+                    .extra_servers
+                    .iter()
+                    .position(|s| s.server_id == gen_id)
+                {
+                    let exited = if let Some(child) = guard.extra_servers[extra_idx].child.as_mut() {
                         match child.try_wait() {
                             Ok(Some(status)) => Some(status),
                             Ok(None) => None,
@@ -4528,40 +4932,20 @@ pub async fn start_project_dev_server(
                     } else {
                         break;
                     };
-                    if let Some(exit_status) = exited {
-                        guard.child = None;
-                        guard.pid = None;
-                        if is_docker_compose && exit_status.success() {
-                            compose_started = true;
-                            guard.status.logs.push("Docker Compose started; waiting for HTTP...".to_string());
-                        } else {
-                            guard.status.running = false;
-                            guard.status.starting = false;
-                            guard.status.external = false;
-                            guard.status.allow_lan = false;
-                            guard.status.lan_urls.clear();
-                            if !exit_status.success() {
-                                guard.status.error = Some(format!(
-                                    "Dev server exited with code {}",
-                                    exit_status
-                                        .code()
-                                        .map(|c| c.to_string())
-                                        .unwrap_or_else(|| "signal".to_string())
-                                ));
-                            } else if guard.status.url.is_none() {
-                                guard.status.error = Some(
-                                    "Dev server exited (code 0) before listening on a local URL. Check logs below."
-                                        .to_string(),
-                                );
-                            }
-                            let snap = guard.status.clone();
-                            drop(guard);
-                            let _ = app_wait.emit("project-server-update", snap);
-                            break;
-                        }
+                    if let Some(_exit_status) = exited {
+                        guard.extra_servers.remove(extra_idx);
+                        refresh_running_targets(&mut guard);
+                        let snap = guard.status.clone();
+                        drop(guard);
+                        let _ = app_wait.emit("project-server-update", snap);
+                        break;
                     }
+                    guard.extra_servers[extra_idx].starting
+                        && guard.extra_servers[extra_idx].url.is_none()
+                        && ticks <= 120
+                } else {
+                    break;
                 }
-                guard.status.starting && guard.status.url.is_none() && ticks <= 120
             };
 
             if should_probe_fallback {
@@ -4578,11 +4962,26 @@ pub async fn start_project_dev_server(
                             if is_docker_compose {
                                 guard.status.external = true;
                             }
+                            refresh_running_targets(&mut guard);
                             let snap = guard.status.clone();
                             drop(guard);
                             let _ = app_wait.emit("project-server-update", snap);
                             if is_docker_compose {
                                 break;
+                            }
+                        } else if let Some(extra) =
+                            guard.extra_servers.iter_mut().find(|s| s.server_id == gen_id)
+                        {
+                            if extra.url.is_none() {
+                                extra.url = Some(fb.clone());
+                                extra.starting = false;
+                                for lan_u in computed_lan {
+                                    merge_lan_url(&mut extra.lan_urls, lan_u);
+                                }
+                                refresh_running_targets(&mut guard);
+                                let snap = guard.status.clone();
+                                drop(guard);
+                                let _ = app_wait.emit("project-server-update", snap);
                             }
                         }
                     }
@@ -4606,6 +5005,7 @@ pub async fn start_project_dev_server(
                             "Dev server did not expose a local URL within 60 seconds. Check logs below.".to_string()
                         });
                     }
+                    refresh_running_targets(&mut guard);
                     let snap = guard.status.clone();
                     drop(guard);
                     let _ = app_wait.emit("project-server-update", snap);
@@ -4626,13 +5026,54 @@ pub async fn start_project_dev_server(
 pub async fn stop_project_dev_server(
     app: AppHandle,
     state: State<'_, ProjectServerState>,
+    target_root: Option<String>,
 ) -> Result<ProjectServerStatus, String> {
     let mut guard = state.inner.lock().await;
+    if let Some(ref tr) = target_root {
+        if let Some(idx) = guard.extra_servers.iter().position(|s| &s.root_path == tr) {
+            let mut removed = guard.extra_servers.remove(idx);
+            kill_extra_server(&mut removed).await;
+            refresh_running_targets(&mut guard);
+            let snap = guard.status.clone();
+            drop(guard);
+            let _ = app.emit("project-server-update", snap.clone());
+            return Ok(snap);
+        }
+        if guard.status.root_path.as_deref() == Some(tr.as_str()) {
+            kill_primary_server(&mut guard).await;
+            if !promote_last_extra_server(&mut guard) {
+                guard.status.url = None;
+                guard.status.error = None;
+                guard.status.allow_lan = false;
+                guard.status.lan_urls.clear();
+                guard.status.running_targets.clear();
+            }
+            let snap = guard.status.clone();
+            drop(guard);
+            let _ = app.emit("project-server-update", snap.clone());
+            return Ok(snap);
+        }
+    }
+
     kill_existing_server(&mut guard).await;
     guard.status.url = None;
     guard.status.error = None;
     guard.status.allow_lan = false;
     guard.status.lan_urls.clear();
+    guard.status.running_targets.clear();
+    let snap = guard.status.clone();
+    drop(guard);
+    let _ = app.emit("project-server-update", snap.clone());
+    Ok(snap)
+}
+
+#[tauri::command]
+pub async fn clear_project_dev_server_logs(
+    app: AppHandle,
+    state: State<'_, ProjectServerState>,
+) -> Result<ProjectServerStatus, String> {
+    let mut guard = state.inner.lock().await;
+    guard.status.logs.clear();
     let snap = guard.status.clone();
     drop(guard);
     let _ = app.emit("project-server-update", snap.clone());
@@ -5968,6 +6409,29 @@ IF EXIST \"%NPM_PREFIX_NPM_CLI_JS%\" (\r\n\
             Some(3050),
         );
         assert_eq!(next_long_port, vec!["run", "dev", "--", "--port", "3050"]);
+
+        // Monorepo path relationship check
+        assert!(are_monorepo_related_paths(
+            &gui.to_string_lossy(),
+            &engine.to_string_lossy()
+        ));
+        assert!(are_monorepo_related_paths(
+            &root.to_string_lossy(),
+            &gui.to_string_lossy()
+        ));
+        assert!(!are_monorepo_related_paths(
+            &gui.to_string_lossy(),
+            &gui.to_string_lossy()
+        ));
+
+        // Generic Python script in monorepo subfolder (e.g. engine with requirements.txt + server.py)
+        let py_engine = root.join("py-engine");
+        fs::create_dir_all(&py_engine).unwrap();
+        fs::write(py_engine.join("requirements.txt"), "requests==2.31.0\n").unwrap();
+        fs::write(py_engine.join("server.py"), "print('running')\n").unwrap();
+        let py_info = inspect_root_dir(&py_engine).unwrap();
+        assert_eq!(py_info.kind, "python");
+        assert_eq!(py_info.dev_command_label.as_deref(), Some("python server.py"));
 
         let _ = fs::remove_dir_all(&root);
     }

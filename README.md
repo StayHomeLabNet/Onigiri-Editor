@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v132">What's New in v1.3.2</a> ・
+    <a href="#whats-new-in-v133">What's New in v1.3.3</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.3.2-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.3.3-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.3.2`
+Current version: `v1.3.3`
 
 ## Key Features
 
@@ -54,10 +54,10 @@ Current version: `v1.3.2`
   - Shows a **line-by-line Diff Preview Modal** before applying AI document/selection replacements (with optional pre-apply snapshot) or workspace file writes.
 - **Project-Scoped Session Restore, `.editorconfig` / `.onigiri.json`, Keybindings & Backup**: Saves and restores open tabs, unsaved drafts, cursor & scroll positions, folding state, bookmarks, language overrides, recent history, and window geometry per workspace folder across restarts; auto-applies hierarchical **`.editorconfig`** & **`.onigiri.json`** project rules; lets you customize shortcuts across 27 commands (**Settings → Keybindings**); and supports selective **JSON Settings / AI / Snippets / Templates / Keybindings Backup Export & Import** plus granular **Factory Reset & Cache Cleaner**.
 - **External File Change Detection & Conflict Banner**: Watches open files on disk (including changes from external editors or AI CLIs)—auto-reloading clean tabs or displaying a conflict banner with **Reload**, **Compare Diff**, and **Keep Mine** actions when unsaved edits exist.
-- **Web Dev & Dual Browser Preview (Monorepo, Custom Port, Logs, QR & LAN Sharing)**:
-  - Auto-detects Vite, Next.js, Astro, Nuxt, Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, Hugo, MkDocs, Docker Compose, monorepo subprojects, and static projects, runs pre-flight environment diagnostics, and lets you select **Target Folder**, **Script**, and custom **Port (`1–65535`)** with collapsible live **`> Logs`** console output.
-  - **Pattern 1**: Native multi-WebView **Embedded Web Browser** in the right pane (`Settings` toggleable) with **Home** button (configurable Home URL), **DevTools (`F12`)**, keyboard shortcuts (`⌘L`/`Ctrl+L`, `F5`/`⌘R`, `Alt+←/→`), and **Server Stopped** recovery banner.
-  - **Pattern 2**: **External Live Browser Preview** (`127.0.0.1` or LAN `0.0.0.0`) with real-time auto-reload, plus **Project Dev Server LAN Access** (`LAN: ON / OFF` toggle, `0.0.0.0` binding, collapsible copy chips, and **QR Code** cards) to preview projects on phones or other PCs over local Wi-Fi.
+- **Web Dev & Dual Browser Preview (Monorepo Multi-Server, Custom Port, AI Log Diagnostics, QR & LAN Sharing)**:
+  - Auto-detects Vite, Next.js, Astro, Nuxt, Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, Python backends, Hugo, MkDocs, Docker Compose, monorepo subprojects, and static projects, runs pre-flight environment diagnostics, supports **simultaneous multi-server execution across monorepo targets** (e.g. `gui` frontend + `engine` backend with individual running pills and stop controls), and lets you select **Target Folder**, **Script**, and custom **Port (`1–65535`)** with collapsible live **`> Logs`** console output (Copy, Clear, error auto-highlighting & 1-click **Ask AI** diagnosis).
+  - **Pattern 1**: Native multi-WebView **Embedded Web Browser** in the right pane (`Settings` toggleable) with **Home** button (configurable Home URL), **Responsive Viewport Presets (`Full` / `Tablet 768px` / `Mobile 390px`)**, **★ Bookmarks & Recent URL History bar**, **DevTools (`F12`)**, keyboard shortcuts (`⌘L`/`Ctrl+L`, `F5`/`⌘R`, `Alt+←/→`), and **Server Stopped** recovery banner.
+  - **Pattern 2**: **External Live Browser Preview** (`127.0.0.1` or LAN `0.0.0.0`) with real-time auto-reload, plus **Project Dev Server LAN Access** (`LAN: ON / OFF` toggle, `0.0.0.0` binding, smart physical LAN prioritization with **`+N virtual/other`** collapse, copy chips, and **QR Code** cards) to preview projects on phones or other PCs over local Wi-Fi.
 - **Productivity Extras & Update Checker**: **Quick Open (`⌘P` / `@headings`)**, Keyboard macro recording & playback (`⌘⇧M` / `F8`), Format Toolbar edit/zoom controls & Status Bar zoom popover (`25%`–`400%`), Smart Line Copy (`⌘C` / `Ctrl+C`), Mermaid diagrams, KaTeX math, GitHub callouts, YAML Frontmatter editor, AI output cleanup & table formatter, estimated LLM token counter, **Copy as Rich Text** & HTML/TSV smart paste, Find & Replace, Command Palette (`⌘K` / `Ctrl+K`), Zen Mode (`⌘⇧F` / `Ctrl+Shift+F`), **Self-Contained Word (`.docx`) / HTML** (embedded local images) / PDF export, and **In-App Update Checker** via GitHub Releases.
 - **OS-Aware First-Launch Language**: Automatically launches in Japanese when the OS language is Japanese, and English for all other languages (manual switch available anytime in Settings or TopBar).
 
@@ -99,12 +99,22 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.3.2
+## What's New in v1.3.3
+
+- **Simultaneous Multi-Server Management in Monorepos**: Launch multiple monorepo targets concurrently (e.g., `gui` Vite frontend + `engine` FastAPI/Python backend) without stopping existing sibling servers. Active targets appear as green running pills (`● gui :5173 [×]`, `● engine :8000 [×]`) with one-click URL switching, per-target stop buttons, and combined `[target]` live logs.
+- **Live Server Logs: Copy, Clear, Auto Error Highlighting & 1-Click "Ask AI"**: Added **Copy**, **Clear**, and **Ask AI** actions to the **`> Logs (N)`** drawer, automatic red/yellow highlighting for error and warning lines with an error-count badge, and 1-click AI Chat error diagnosis.
+- **Smart LAN URL Virtual-NIC Filtering**: Prioritizes physical Wi-Fi / Ethernet LAN URLs and automatically collapses virtual/secondary adapters (`VirtualBox 192.168.56.x`, `WSL / Docker 172.16–31.x.x`, `Tailscale 100.64.0.0/10`) behind a **`+N virtual/other`** toggle.
+- **Built-in Web Browser Responsive Viewports (`Full` / `768px` / `390px`) & Bookmarks / History**: Added **Full Width / Tablet (`768px`) / Mobile (`390px`)** viewport toggles and a **★ Bookmark** button + **Bookmarks & Recent URLs** bar in the Built-in Web Browser.
+
+<details>
+<summary>Previous release: v1.3.2</summary>
 
 - **Monorepo Target & Startup Script Selector + Custom Port UI**: Added compact **Target** and **Script** dropdowns alongside a **Port (`1–65535`)** input across the Sidebar, Built-in Web Browser, Web Page Preview, and Code Preview bars (remembered per project), improved Next.js/Storybook/Webpack/Angular/Vite preview (`4173`) port flags, and added a toast warning if a server falls back to another port.
 - **Collapsible Live Dev Server Console Logs (`> Logs`)**: Added a default-collapsed **`> Logs (N)`** toggle across all project bars so you can inspect live stdout/stderr output while the server is running.
 - **Built-in Web Browser Home Button, DevTools (`F12`), Shortcuts & Recovery Banner**: Added a **Home** button + **Browser Settings** shortcut linked to **Built-in Browser Home URL**, a **DevTools** toggle button (`F12`), browser keyboard shortcuts (`⌘L`/`Ctrl+L`, `F5`/`⌘R`/`Ctrl+R`, `Alt+←`/`Alt+→`), and a **Server Stopped** banner with one-click Restart / Go Home.
 - **LAN URL QR Code Popover**: Added a **QR code button** next to each collapsible LAN URL chip (and in Settings) for instant smartphone/tablet scanning over local Wi-Fi.
+
+</details>
 
 <details>
 <summary>Previous release: v1.3.1</summary>

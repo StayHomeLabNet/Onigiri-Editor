@@ -850,7 +850,9 @@ export async function startProjectDevServer(
   });
 }
 
-export async function stopProjectDevServer(): Promise<ProjectServerStatus> {
+export async function stopProjectDevServer(
+  targetRoot?: string | null
+): Promise<ProjectServerStatus> {
   if (!isTauri()) {
     return {
       running: false,
@@ -866,10 +868,23 @@ export async function stopProjectDevServer(): Promise<ProjectServerStatus> {
       requestedScript: null,
       logs: [],
       error: null,
+      runningTargets: [],
     };
   }
   const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<ProjectServerStatus>('stop_project_dev_server');
+  return invoke<ProjectServerStatus>('stop_project_dev_server', {
+    targetRoot: targetRoot || null,
+  });
+}
+
+export async function clearProjectDevServerLogs(): Promise<ProjectServerStatus | null> {
+  if (!isTauri()) return null;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<ProjectServerStatus>('clear_project_dev_server_logs');
+  } catch {
+    return null;
+  }
 }
 
 export async function getProjectDevServerStatus(): Promise<ProjectServerStatus | null> {

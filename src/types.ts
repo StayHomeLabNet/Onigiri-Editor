@@ -328,6 +328,7 @@ export type ProjectKind =
   | 'fastapi'
   | 'flask'
   | 'streamlit'
+  | 'python'
   | 'vite'
   | 'next'
   | 'astro'
@@ -398,6 +399,15 @@ export interface ProjectInfo {
   targets?: ProjectTarget[];
 }
 
+export interface RunningProjectTarget {
+  rootPath: string;
+  name: string;
+  kind: string;
+  url: string | null;
+  commandLabel: string | null;
+  starting: boolean;
+}
+
 export interface ProjectServerStatus {
   running: boolean;
   starting: boolean;
@@ -412,6 +422,7 @@ export interface ProjectServerStatus {
   requestedScript?: string | null;
   logs: string[];
   error: string | null;
+  runningTargets?: RunningProjectTarget[];
 }
 
 export interface GitStatusResult {

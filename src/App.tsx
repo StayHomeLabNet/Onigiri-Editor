@@ -5135,6 +5135,13 @@ export function App() {
         pendingBrowseTargetRef.current = target;
         return;
       }
+      const existingTarget = projectServer?.runningTargets?.find(
+        (rt) => rt.rootPath === root && !rt.starting && rt.url
+      );
+      if (existingTarget?.url) {
+        await handleOpenProjectUrl(existingTarget.url, target);
+        return;
+      }
       if (projectServer?.running && projectServer.rootPath === root && projectServer.url) {
         await handleOpenProjectUrl(projectServer.url, target);
         return;
@@ -5290,16 +5297,29 @@ export function App() {
     t.project.externalLanUnavailableHint,
   ]);
 
-  const handleStopProjectServer = useCallback(async () => {
-    try {
-      pendingBrowseTargetRef.current = null;
-      const st = await stopProjectDevServer();
-      setProjectServer(st);
-      notify(t.toasts.devServerStopped);
-    } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-    }
-  }, [notify, t.toasts.devServerStopped, t.toasts.errorPrefix]);
+  const handleStopProjectServer = useCallback(
+    async (targetRoot?: string) => {
+      try {
+        pendingBrowseTargetRef.current = null;
+        const st = await stopProjectDevServer(targetRoot);
+        setProjectServer(st);
+        notify(t.toasts.devServerStopped);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+      }
+    },
+    [notify, t.toasts.devServerStopped, t.toasts.errorPrefix]
+  );
+
+  useEffect(() => {
+    const onAskAiWithPrompt = () => {
+      if (mode === 'simple') handleModeChange('basic');
+      setShowInspector(true);
+      setInspectorTab('chat');
+    };
+    window.addEventListener('onigiri:ask-ai-with-prompt', onAskAiWithPrompt);
+    return () => window.removeEventListener('onigiri:ask-ai-with-prompt', onAskAiWithPrompt);
+  }, [mode, handleModeChange]);
 
   const handleServeDistPreview = useCallback(
     async (target: 'builtin' | 'external') => {

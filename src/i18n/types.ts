@@ -494,7 +494,15 @@ export interface Translations {
     htmlLiveLabel: string;
     svgLiveLabel: string;
     viewportFull: string;
+    viewportTablet: string;
     viewportMobile: string;
+    bookmarkAddTitle: string;
+    bookmarkRemoveTitle: string;
+    bookmarksMenuTitle: string;
+    bookmarksLabel: string;
+    recentUrlsLabel: string;
+    clearHistoryBtn: string;
+    noBookmarksYet: string;
     codePreviewLabel: string;
     phpServerHint: string;
     openBuiltinBrowserBtn: string;
@@ -569,9 +577,17 @@ export interface Translations {
     liveLogsLabel: string;
     liveLogsShowTitle: string;
     liveLogsHideTitle: string;
+    liveLogsCopyBtn: string;
+    liveLogsCopiedBtn: string;
+    liveLogsClearBtn: string;
+    liveLogsAskAiBtn: string;
+    liveLogsAskAiTitle: string;
     qrShowTitle: string;
     qrHideTitle: string;
     qrScanHint: string;
+    lanShowOtherBtn: string;
+    lanHideOtherBtn: string;
+    stopTargetTitle: string;
   };
   imageModal: {
     title: string;

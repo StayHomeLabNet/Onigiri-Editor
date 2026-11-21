@@ -2739,6 +2739,7 @@ pub fn run() {
             project::inspect_project_for_path,
             project::start_project_dev_server,
             project::stop_project_dev_server,
+            project::clear_project_dev_server_logs,
             project::get_project_dev_server_status,
             project::assist_project_setup,
             clear_app_caches,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -15,6 +15,12 @@ import {
   Info,
   Wifi,
   X,
+  Star,
+  History,
+  Monitor,
+  Tablet,
+  Smartphone,
+  Trash2,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
@@ -32,8 +38,25 @@ import {
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
 import { ProjectPortInput } from './ProjectPortInput';
-import { ProjectTargetControls } from './ProjectTargetControls';
-import { ProjectServerLogsBox, ProjectServerLogsToggle } from './ProjectServerLogs';
+import {
+  isTargetCurrentlyActive,
+  ProjectTargetControls,
+} from './ProjectTargetControls';
+import {
+  countErrorLogLines,
+  ProjectServerLogsBox,
+  ProjectServerLogsToggle,
+} from './ProjectServerLogs';
+
+export type BrowserViewportMode = 'full' | 'tablet' | 'mobile';
+
+export interface BrowserBookmarkItem {
+  url: string;
+  label: string;
+}
+
+const BROWSER_BOOKMARKS_KEY = 'onigiri-markdown.browserBookmarks';
+const BROWSER_HISTORY_KEY = 'onigiri-markdown.browserHistory';
 
 interface RightBrowserPaneProps {
   t: Translations;
@@ -56,7 +79,7 @@ interface RightBrowserPaneProps {
   setupFeedback?: { ok: boolean; text: string } | null;
   recheckingEnv?: boolean;
   onStartProjectServer?: () => void;
-  onStopProjectServer?: () => void;
+  onStopProjectServer?: (targetRoot?: string) => void;
   onToggleProjectServerLan?: () => void;
   onCopyLanUrl?: (url: string) => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
@@ -92,6 +115,60 @@ export function urlsShareOrigin(a?: string | null, b?: string | null): boolean {
   } catch {
     return false;
   }
+}
+
+export function computeBrowserViewportBounds(
+  rect: { left: number; top: number; width: number; height: number },
+  viewport: BrowserViewportMode
+): { x: number; y: number; width: number; height: number } {
+  const availW = Math.max(120, Math.round(rect.width));
+  const availH = Math.max(120, Math.round(rect.height));
+  const maxW = viewport === 'mobile' ? 390 : viewport === 'tablet' ? 768 : availW;
+  const width = Math.max(120, Math.min(availW, maxW));
+  const x = Math.round(rect.left + Math.max(0, (availW - width) / 2));
+  const y = Math.round(rect.top);
+  return { x, y, width, height: availH };
+}
+
+export function formatBookmarkShortLabel(rawUrl: string): string {
+  try {
+    const parsed = new URL(normalizeDisplayUrl(rawUrl));
+    const host = parsed.host.replace(/^www\./i, '');
+    const path = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname : '';
+    const combined = `${host}${path}`;
+    return combined.length > 28 ? `${combined.slice(0, 26)}…` : combined;
+  } catch {
+    return rawUrl.slice(0, 28);
+  }
+}
+
+export function toggleBrowserBookmark(
+  list: BrowserBookmarkItem[],
+  rawUrl: string
+): BrowserBookmarkItem[] {
+  const normalized = normalizeDisplayUrl(rawUrl);
+  const exists = list.some((b) => b.url === normalized);
+  if (exists) {
+    return list.filter((b) => b.url !== normalized);
+  }
+  return [
+    ...list,
+    {
+      url: normalized,
+      label: formatBookmarkShortLabel(normalized),
+    },
+  ];
+}
+
+export function pushBrowserHistory(
+  list: string[],
+  rawUrl: string,
+  maxItems = 12
+): string[] {
+  const normalized = normalizeDisplayUrl(rawUrl);
+  if (!normalized || normalized === 'about:blank') return list;
+  const filtered = list.filter((item) => item !== normalized);
+  return [normalized, ...filtered].slice(0, maxItems);
 }
 
 export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
@@ -131,6 +208,34 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [logsExpanded, setLogsExpanded] = useState(false);
   const [dismissedStoppedBannerUrl, setDismissedStoppedBannerUrl] = useState<string | null>(null);
+  const [viewport, setViewport] = useState<BrowserViewportMode>('full');
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+
+  const [bookmarks, setBookmarks] = useState<BrowserBookmarkItem[]>(() => {
+    try {
+      const raw = localStorage.getItem(BROWSER_BOOKMARKS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  const [history, setHistory] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(BROWSER_HISTORY_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
 
   const initializedRef = useRef(false);
   const initializingRef = useRef(false);
@@ -139,6 +244,63 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   latestUrlRef.current = url;
   const latestVisibleRef = useRef(visible);
   latestVisibleRef.current = visible;
+  const latestViewportRef = useRef<BrowserViewportMode>(viewport);
+  latestViewportRef.current = viewport;
+
+  const recordHistoryUrl = useCallback((targetUrl: string) => {
+    setHistory((prev) => {
+      const next = pushBrowserHistory(prev, targetUrl);
+      try {
+        localStorage.setItem(BROWSER_HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleBookmark = useCallback(() => {
+    const target = draftUrl.trim() || url;
+    setBookmarks((prev) => {
+      const next = toggleBrowserBookmark(prev, target);
+      try {
+        localStorage.setItem(BROWSER_BOOKMARKS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, [draftUrl, url]);
+
+  const handleRemoveBookmark = useCallback((bookmarkUrl: string) => {
+    setBookmarks((prev) => {
+      const next = prev.filter((b) => b.url !== bookmarkUrl);
+      try {
+        localStorage.setItem(BROWSER_BOOKMARKS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearHistory = useCallback(() => {
+    setHistory([]);
+    try {
+      localStorage.removeItem(BROWSER_HISTORY_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const currentNormalizedUrl = useMemo(
+    () => normalizeDisplayUrl(draftUrl.trim() || url),
+    [draftUrl, url]
+  );
+  const isCurrentBookmarked = useMemo(
+    () => bookmarks.some((b) => b.url === currentNormalizedUrl),
+    [bookmarks, currentNormalizedUrl]
+  );
 
   if (projectServer?.running && projectServer.url) {
     lastServerUrlRef.current = projectServer.url;
@@ -154,10 +316,13 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     Boolean(projectServer?.running) ||
     Boolean(projectInfo && projectInfo.kind !== 'none' && projectInfo.devCommandLabel);
 
-  const serverLogs =
-    !projectInfo || !projectServer?.rootPath || projectServer.rootPath === projectInfo.rootPath
-      ? projectServer?.logs || []
-      : [];
+  const serverLogs = projectServer?.logs || [];
+  const logErrorCount = useMemo(() => countErrorLogLines(serverLogs), [serverLogs]);
+
+  const isSelectedTargetActive = useMemo(() => {
+    if (!projectInfo?.rootPath) return Boolean(projectServer?.running);
+    return isTargetCurrentlyActive(projectInfo.rootPath, projectServer);
+  }, [projectInfo?.rootPath, projectServer]);
 
   const showStoppedBanner =
     Boolean(showProjectBar) &&
@@ -170,6 +335,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
 
   useEffect(() => {
     setDraftUrl(url);
+    recordHistoryUrl(url);
     if (url !== lastNavigatedPropUrlRef.current) {
       lastNavigatedPropUrlRef.current = url;
       if (isTauri()) {
@@ -183,7 +349,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         setIframeSrc(normalizeDisplayUrl(url));
       }
     }
-  }, [url, t.project.browserErrorHint]);
+  }, [url, t.project.browserErrorHint, recordHistoryUrl]);
 
   const syncBounds = useCallback(
     async (isVisible: boolean) => {
@@ -191,10 +357,10 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       const el = hostRef.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
-      const x = Math.round(rect.left);
-      const y = Math.round(rect.top);
-      const width = Math.max(120, Math.round(rect.width));
-      const height = Math.max(120, Math.round(rect.height));
+      const { x, y, width, height } = computeBrowserViewportBounds(
+        rect,
+        latestViewportRef.current
+      );
 
       const effectiveVisible =
         isVisible && !browserError && rect.width > 20 && rect.height > 20;
@@ -222,11 +388,12 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           const postEl = hostRef.current;
           if (postEl) {
             const postRect = postEl.getBoundingClientRect();
+            const postBounds = computeBrowserViewportBounds(
+              postRect,
+              latestViewportRef.current
+            );
             await browserSetBounds({
-              x: Math.round(postRect.left),
-              y: Math.round(postRect.top),
-              width: Math.max(120, Math.round(postRect.width)),
-              height: Math.max(120, Math.round(postRect.height)),
+              ...postBounds,
               visible:
                 latestVisibleRef.current && postRect.width > 20 && postRect.height > 20,
             });
@@ -256,7 +423,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     [onUrlChange, browserError, t.project.browserErrorHint]
   );
 
-  // Sync visibility and container geometry continuously (including when project bar toggles)
+  // Sync visibility and container geometry continuously (including when project bar or viewport toggles)
   useEffect(() => {
     if (!isTauri()) return;
     const raf = requestAnimationFrame(() => {
@@ -281,9 +448,13 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     };
   }, [
     visible,
+    viewport,
+    bookmarks.length,
+    showHistoryDrawer,
     showProjectBar,
     projectServer?.running,
     projectServer?.url,
+    projectServer?.runningTargets?.length,
     logsExpanded,
     showStoppedBanner,
     syncBounds,
@@ -309,6 +480,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           if (typeof ev.payload === 'string' && ev.payload) {
             lastNavigatedPropUrlRef.current = ev.payload;
             setDraftUrl(ev.payload);
+            recordHistoryUrl(ev.payload);
             onUrlChange(ev.payload);
           }
         });
@@ -330,23 +502,27 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       unlistenUrl?.();
       unlistenLoad?.();
     };
-  }, [onUrlChange]);
+  }, [onUrlChange, recordHistoryUrl]);
 
   const navigateTo = async (targetRaw: string) => {
     const target = targetRaw.trim() || 'https://www.google.com';
     setBrowserError(null);
+    recordHistoryUrl(target);
     if (isTauri()) {
       try {
         const finalUrl = initializedRef.current
           ? await browserNavigate(target)
           : await (async () => {
-              const rect = hostRef.current?.getBoundingClientRect();
+              const rect = hostRef.current?.getBoundingClientRect() ?? {
+                left: 400,
+                top: 120,
+                width: 500,
+                height: 500,
+              };
+              const bounds = computeBrowserViewportBounds(rect, latestViewportRef.current);
               const res = await browserOpenOrUpdate({
                 url: target,
-                x: Math.round(rect?.left ?? 400),
-                y: Math.round(rect?.top ?? 120),
-                width: Math.max(120, Math.round(rect?.width ?? 500)),
-                height: Math.max(120, Math.round(rect?.height ?? 500)),
+                ...bounds,
                 visible,
               });
               initializedRef.current = true;
@@ -488,11 +664,70 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             placeholder={t.browser.urlPlaceholder}
             aria-label={t.browser.urlPlaceholder}
           />
+          <button
+            type="button"
+            className={`browser-bookmark-star-btn ${isCurrentBookmarked ? 'is-active' : ''}`}
+            onClick={handleToggleBookmark}
+            title={
+              isCurrentBookmarked
+                ? t.browser.bookmarkRemoveTitle
+                : t.browser.bookmarkAddTitle
+            }
+            aria-label={
+              isCurrentBookmarked
+                ? t.browser.bookmarkRemoveTitle
+                : t.browser.bookmarkAddTitle
+            }
+            aria-pressed={isCurrentBookmarked}
+          >
+            <Star size={12} fill={isCurrentBookmarked ? 'currentColor' : 'none'} />
+          </button>
         </div>
 
         <button type="submit" className="mini-pill-btn">
           {t.browser.go}
         </button>
+
+        <button
+          type="button"
+          className={`icon-btn-sm ${showHistoryDrawer ? 'is-active' : ''}`}
+          onClick={() => setShowHistoryDrawer((prev) => !prev)}
+          title={t.browser.bookmarksMenuTitle}
+          aria-label={t.browser.bookmarksMenuTitle}
+          aria-expanded={showHistoryDrawer}
+        >
+          <History size={14} />
+        </button>
+
+        <div className="browser-viewport-group" role="group" aria-label="Viewport Width">
+          <button
+            type="button"
+            className={`icon-btn-sm ${viewport === 'full' ? 'is-active' : ''}`}
+            onClick={() => setViewport('full')}
+            title={t.browser.viewportFull}
+            aria-label={t.browser.viewportFull}
+          >
+            <Monitor size={13} />
+          </button>
+          <button
+            type="button"
+            className={`icon-btn-sm ${viewport === 'tablet' ? 'is-active' : ''}`}
+            onClick={() => setViewport('tablet')}
+            title={t.browser.viewportTablet}
+            aria-label={t.browser.viewportTablet}
+          >
+            <Tablet size={13} />
+          </button>
+          <button
+            type="button"
+            className={`icon-btn-sm ${viewport === 'mobile' ? 'is-active' : ''}`}
+            onClick={() => setViewport('mobile')}
+            title={t.browser.viewportMobile}
+            aria-label={t.browser.viewportMobile}
+          >
+            <Smartphone size={13} />
+          </button>
+        </div>
 
         {isTauri() && (
           <button
@@ -526,6 +761,74 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           </button>
         )}
       </form>
+
+      {(bookmarks.length > 0 || showHistoryDrawer) && (
+        <div className="browser-bookmarks-bar">
+          {bookmarks.length > 0 && (
+            <div className="browser-bookmarks-row">
+              <span className="browser-bookmarks-section-label">
+                <Star size={10} />
+                <span>{t.browser.bookmarksLabel}</span>
+              </span>
+              {bookmarks.map((bm) => (
+                <span key={bm.url} className="browser-bookmark-chip">
+                  <button
+                    type="button"
+                    className="browser-bookmark-chip-btn"
+                    onClick={() => void navigateTo(bm.url)}
+                    title={bm.url}
+                  >
+                    <span>{bm.label}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="browser-bookmark-chip-del"
+                    onClick={() => handleRemoveBookmark(bm.url)}
+                    title={t.browser.bookmarkRemoveTitle}
+                    aria-label={t.browser.bookmarkRemoveTitle}
+                  >
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {showHistoryDrawer && bookmarks.length === 0 && (
+            <div className="browser-bookmarks-empty">{t.browser.noBookmarksYet}</div>
+          )}
+          {showHistoryDrawer && history.length > 0 && (
+            <div className="browser-bookmarks-row is-history">
+              <span className="browser-bookmarks-section-label">
+                <History size={10} />
+                <span>{t.browser.recentUrlsLabel}</span>
+              </span>
+              {history.slice(0, 8).map((hUrl) => (
+                <button
+                  key={hUrl}
+                  type="button"
+                  className="browser-history-chip"
+                  onClick={() => {
+                    void navigateTo(hUrl);
+                    setShowHistoryDrawer(false);
+                  }}
+                  title={hUrl}
+                >
+                  <span>{formatBookmarkShortLabel(hUrl)}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className="browser-history-clear-btn"
+                onClick={handleClearHistory}
+                title={t.browser.clearHistoryBtn}
+              >
+                <Trash2 size={10} />
+                <span>{t.browser.clearHistoryBtn}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {showProjectBar && (
         <div className="browser-project-bar">
@@ -566,6 +869,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                   qrShowTitle={t.project.qrShowTitle}
                   qrHideTitle={t.project.qrHideTitle}
                   qrScanHint={t.project.qrScanHint}
+                  showOtherTemplate={t.project.lanShowOtherBtn}
+                  hideOtherLabel={t.project.lanHideOtherBtn}
                   onCopyUrl={onCopyLanUrl}
                   variant="inline"
                 />
@@ -573,6 +878,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             {serverLogs.length > 0 && (
               <ProjectServerLogsToggle
                 logCount={serverLogs.length}
+                errorCount={logErrorCount}
                 expanded={logsExpanded}
                 onToggle={() => setLogsExpanded((prev) => !prev)}
                 running={Boolean(projectServer?.running)}
@@ -582,7 +888,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                 hideTitle={t.project.liveLogsHideTitle}
               />
             )}
-            {!projectServer?.running && projectInfo?.devCommandLabel && (
+            {!isSelectedTargetActive && projectInfo?.devCommandLabel && (
               <span className="browser-project-cmd">{projectInfo.devCommandLabel}</span>
             )}
           </div>
@@ -592,9 +898,12 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
               projectServer={projectServer}
               onSelectTargetRoot={onSelectTargetRoot}
               onSelectScript={onSelectScript}
+              onOpenTargetUrl={(u) => void navigateTo(u)}
+              onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
               targetLabel={t.project.targetLabel}
               scriptLabel={t.project.scriptLabel}
               lockedTitle={t.project.targetScriptLockedHint}
+              stopTargetTitleTemplate={t.project.stopTargetTitle}
             />
             {onProjectCustomPortChange && (
               <ProjectPortInput
@@ -621,15 +930,15 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                 <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
               </button>
             )}
-            {projectServer?.running ? (
+            {isSelectedTargetActive ? (
               <button
                 type="button"
                 className="mini-pill-btn"
-                onClick={onStopProjectServer}
+                onClick={() => onStopProjectServer?.(projectInfo?.rootPath)}
               >
                 <Square size={11} />
                 <span>
-                  {projectServer.external ? t.project.disconnectServer : t.project.stopServer}
+                  {projectServer?.external ? t.project.disconnectServer : t.project.stopServer}
                 </span>
               </button>
             ) : (
@@ -638,9 +947,9 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                   type="button"
                   className="mini-pill-btn is-active"
                   onClick={onStartProjectServer}
-                  disabled={projectServer?.starting}
+                  disabled={projectServer?.starting && projectServer?.rootPath === projectInfo?.rootPath}
                 >
-                  {projectServer?.starting ? (
+                  {projectServer?.starting && projectServer?.rootPath === projectInfo?.rootPath ? (
                     <Loader2 size={11} className="spin" />
                   ) : (
                     <Play size={11} />
@@ -652,7 +961,15 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           </div>
           {logsExpanded && serverLogs.length > 0 && (
             <div className="project-logs-drawer">
-              <ProjectServerLogsBox logs={serverLogs} expanded={logsExpanded} />
+              <ProjectServerLogsBox
+                logs={serverLogs}
+                expanded={logsExpanded}
+                copyLabel={t.project.liveLogsCopyBtn}
+                copiedLabel={t.project.liveLogsCopiedBtn}
+                clearLabel={t.project.liveLogsClearBtn}
+                askAiLabel={t.project.liveLogsAskAiBtn}
+                askAiTitle={t.project.liveLogsAskAiTitle}
+              />
             </div>
           )}
         </div>
@@ -698,7 +1015,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         </div>
       )}
 
-      {showProjectBar && (!projectServer?.running || Boolean(projectServer?.error) || setupBusy) && (
+      {showProjectBar && (!isSelectedTargetActive || Boolean(projectServer?.error) || setupBusy) && (
         <ProjectSetupCard
           t={t}
           locale={locale}
@@ -715,7 +1032,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         />
       )}
 
-      <div ref={hostRef} className="native-browser-host">
+      <div ref={hostRef} className={`native-browser-host is-viewport-${viewport}`}>
         {isTauri() && browserError && (
           <div className="browser-error-state">
             <AlertCircle size={20} />
@@ -754,11 +1071,11 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           </div>
         )}
         {!isTauri() && (
-          <div className="web-browser-fallback">
+          <div className={`web-browser-fallback is-viewport-${viewport}`}>
             <iframe
               src={iframeSrc}
               title="Embedded Web Browser"
-              className="web-browser-iframe"
+              className={`web-browser-iframe is-viewport-${viewport}`}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
             <div className="web-browser-hint">{t.browser.webOnlyHint}</div>

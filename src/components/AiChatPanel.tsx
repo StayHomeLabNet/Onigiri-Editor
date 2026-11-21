@@ -970,6 +970,27 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     }
   };
 
+  const sendMessageRef = useRef(sendMessage);
+  sendMessageRef.current = sendMessage;
+
+  useEffect(() => {
+    const consumePendingPrompt = (explicitPrompt?: string) => {
+      const win = window as unknown as { __onigiriPendingAiPrompt?: string };
+      const text = explicitPrompt || win.__onigiriPendingAiPrompt;
+      if (!text) return;
+      delete win.__onigiriPendingAiPrompt;
+      setInput(text);
+      void sendMessageRef.current(text);
+    };
+    consumePendingPrompt();
+    const onPromptEvent = (ev: Event) => {
+      const custom = ev as CustomEvent<{ prompt?: string }>;
+      consumePendingPrompt(custom.detail?.prompt);
+    };
+    window.addEventListener('onigiri:ask-ai-with-prompt', onPromptEvent);
+    return () => window.removeEventListener('onigiri:ask-ai-with-prompt', onPromptEvent);
+  }, []);
+
   const applyProposalNow = async (msgId: string, prop: WriteProposal) => {
     if (!workspaceRoot) return;
     const key = `${msgId}::${prop.id}`;

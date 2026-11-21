@@ -47,18 +47,25 @@ export const ProjectPortInput: React.FC<ProjectPortInputProps> = ({
     return null;
   }
 
+  const matchingRunningTarget = projectInfo?.rootPath
+    ? projectServer?.runningTargets?.find((t) => t.rootPath === projectInfo.rootPath)
+    : undefined;
   const sameRootRunning = Boolean(
-    projectServer?.running &&
-      (!projectInfo || !projectServer.rootPath || projectServer.rootPath === projectInfo.rootPath)
+    (projectServer?.running &&
+      (!projectInfo || !projectServer.rootPath || projectServer.rootPath === projectInfo.rootPath)) ||
+      (matchingRunningTarget && !matchingRunningTarget.starting)
   );
   const sameRootStarting = Boolean(
-    projectServer?.starting &&
-      (!projectInfo || !projectServer.rootPath || projectServer.rootPath === projectInfo.rootPath)
+    (projectServer?.starting &&
+      (!projectInfo || !projectServer.rootPath || projectServer.rootPath === projectInfo.rootPath)) ||
+      matchingRunningTarget?.starting
   );
   const isLocked = sameRootRunning || sameRootStarting;
 
   const detectedPort =
-    extractPortFromUrl(sameRootRunning ? projectServer?.url : null) ||
+    extractPortFromUrl(
+      matchingRunningTarget?.url || (sameRootRunning ? projectServer?.url : null)
+    ) ||
     extractPortFromUrl(projectInfo?.defaultUrl) ||
     defaultPlaceholder;
 

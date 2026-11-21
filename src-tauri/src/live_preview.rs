@@ -448,6 +448,10 @@ fn is_virtual_or_vpn_interface(name: &str, is_p2p: bool, ip: std::net::Ipv4Addr)
     if octets[0] == 100 && (64..=127).contains(&octets[1]) {
         return true;
     }
+    // VirtualBox Host-Only default (192.168.56.x) & libvirt default bridge (192.168.122.x)
+    if octets[0] == 192 && octets[1] == 168 && (octets[2] == 56 || octets[2] == 122) {
+        return true;
+    }
     let lower = name.to_ascii_lowercase();
     [
         "utun",
@@ -462,8 +466,17 @@ fn is_virtual_or_vpn_interface(name: &str, is_p2p: bool, ip: std::net::Ipv4Addr)
         "virbr",
         "veth",
         "vmnet",
+        "vmware",
         "vboxnet",
+        "virtualbox",
         "vethernet",
+        "virtual",
+        "parallels",
+        "vnic",
+        "bridge",
+        "awdl",
+        "llw",
+        "anpi",
         "wsl",
         "hyper-v",
         "hamachi",
@@ -912,6 +925,16 @@ mod tests {
             "Ethernet",
             false,
             Ipv4Addr::new(100, 100, 10, 1)
+        ));
+        assert!(is_virtual_or_vpn_interface(
+            "Ethernet 2",
+            false,
+            Ipv4Addr::new(192, 168, 56, 1)
+        ));
+        assert!(is_virtual_or_vpn_interface(
+            "virbr0",
+            false,
+            Ipv4Addr::new(192, 168, 122, 1)
         ));
 
         for ip_str in detect_lan_ipv4s() {
