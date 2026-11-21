@@ -289,7 +289,13 @@ export interface EditorSettings {
   embedImagesOnHtmlExport?: boolean;
   inspectorTabStyle?: InspectorTabStyle;
   checkUpdatesOnStartup?: boolean;
+  updateCheckIntervalHours?: number;
+  autoUpdateEnabled?: boolean;
+  updateAvailableBehavior?: UpdateAvailableBehavior;
+  skippedUpdateVersion?: string;
 }
+
+export type UpdateAvailableBehavior = 'banner' | 'modal' | 'badge-only' | 'auto-install';
 
 export interface DocumentStats {
   chars: number;
@@ -548,6 +554,14 @@ export interface MigrateTempImagesResult {
   migratedFiles: string[];
 }
 
+export interface AppUpdateAsset {
+  name: string;
+  downloadUrl: string;
+  size: number;
+  platform: 'macos' | 'windows' | 'linux' | 'other' | string;
+  kind: 'dmg' | 'app-archive' | 'exe' | 'msi' | 'appimage' | 'deb' | 'other' | string;
+}
+
 export interface AppUpdateInfo {
   currentVersion: string;
   latestVersion: string;
@@ -557,4 +571,24 @@ export interface AppUpdateInfo {
   publishedAt: string | null;
   notes: string;
   downloadUrl: string | null;
+  autoUpdateUrl?: string | null;
+  canInPlaceUpdate?: boolean;
+  assets?: AppUpdateAsset[];
+  checkedAtMs?: number;
+}
+
+export interface AppUpdateProgressEvent {
+  phase: 'downloading' | 'extracting' | 'ready' | 'installing' | 'error' | string;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  percent: number | null;
+  filePath: string | null;
+  message: string;
+}
+
+export interface AppUpdateDownloadResult {
+  filePath: string;
+  fileName: string;
+  bytes: number;
+  canAutoApply: boolean;
 }

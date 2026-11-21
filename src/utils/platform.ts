@@ -1,7 +1,9 @@
 import type {
   AiCapabilities,
   AiProviderId,
+  AppUpdateDownloadResult,
   AppUpdateInfo,
+  AppUpdateProgressEvent,
   ClearAppCacheResult,
   FetchedUrlContent,
   FileSyncInfo,
@@ -1286,4 +1288,46 @@ export async function checkAppUpdates(): Promise<AppUpdateInfo> {
   }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<AppUpdateInfo>('check_app_updates');
+}
+
+export async function downloadAppUpdate(
+  url: string,
+  fileName?: string
+): Promise<AppUpdateDownloadResult> {
+  if (!isTauri()) {
+    throw new Error('Update download requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<AppUpdateDownloadResult>('download_app_update', {
+    url,
+    fileName: fileName || null,
+  });
+}
+
+export async function applyDownloadedAppUpdate(
+  filePath: string,
+  restartApp = true
+): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Applying updates requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('apply_downloaded_app_update', {
+    filePath,
+    restartApp,
+  });
+}
+
+export async function listenAppUpdateProgress(
+  handler: (event: AppUpdateProgressEvent) => void
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<AppUpdateProgressEvent>('app-update-progress', (ev) => {
+      handler(ev.payload);
+    });
+  } catch {
+    return () => {};
+  }
 }

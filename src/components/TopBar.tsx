@@ -73,6 +73,9 @@ interface TopBarProps {
   isMarkdown?: boolean;
   isDirty: boolean;
   activeTitle: string;
+  updateAvailableVersion?: string | null;
+  updateReadyToInstall?: boolean;
+  onOpenUpdateModal?: () => void;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -113,6 +116,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   isMarkdown = true,
   isDirty,
   activeTitle,
+  updateAvailableVersion,
+  updateReadyToInstall,
+  onOpenUpdateModal,
 }) => {
   const isMac = isMacOs();
   const nextTheme = (): ThemeId => {
@@ -137,6 +143,22 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span className="brand-name">{t.appName}</span>
           <span className="version-pill">{t.versionLabel}</span>
         </button>
+
+        {updateAvailableVersion && onOpenUpdateModal && (
+          <button
+            type="button"
+            className={`topbar-update-pill ${updateReadyToInstall ? 'is-ready' : ''}`}
+            onClick={onOpenUpdateModal}
+            title={t.updates.availableBannerTitle.replace('{version}', updateAvailableVersion)}
+          >
+            <Download size={11} />
+            <span>
+              {updateReadyToInstall
+                ? t.updates.statusBadgeReady.replace('{version}', updateAvailableVersion)
+                : t.updates.statusBadgeAvailable.replace('{version}', updateAvailableVersion)}
+            </span>
+          </button>
+        )}
 
         {mode === 'advanced' && (
           <button

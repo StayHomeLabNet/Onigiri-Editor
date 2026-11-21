@@ -2705,6 +2705,8 @@ pub fn run() {
             images::save_pasted_image,
             images::migrate_temp_images_on_save,
             updates::check_app_updates,
+            updates::download_app_update,
+            updates::apply_downloaded_app_update,
             get_os_locale,
             get_git_status,
             get_git_head_file,

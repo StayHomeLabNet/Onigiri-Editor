@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, RefreshCw, X } from 'lucide-react';
+import { Download, FileText, RefreshCw, Rocket, X } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { AppUpdateInfo } from '../types';
 import { formatShortcut, isTauri } from '../utils/platform';
@@ -12,6 +12,9 @@ interface AboutModalProps {
   checkingUpdates?: boolean;
   onCheckUpdates?: () => void;
   onOpenExternalUrl?: (url: string) => void;
+  onOpenUpdateModal?: () => void;
+  onAutoUpdateNow?: () => void;
+  isUpdatingApp?: boolean;
 }
 
 export const AboutModal: React.FC<AboutModalProps> = ({
@@ -22,6 +25,9 @@ export const AboutModal: React.FC<AboutModalProps> = ({
   checkingUpdates,
   onCheckUpdates,
   onOpenExternalUrl,
+  onOpenUpdateModal,
+  onAutoUpdateNow,
+  isUpdatingApp,
 }) => {
   if (!open) return null;
 
@@ -58,7 +64,20 @@ export const AboutModal: React.FC<AboutModalProps> = ({
               ) : null}
             </div>
             <div className="about-update-actions">
-              {updateInfo?.hasUpdate && onOpenExternalUrl && (
+              {updateInfo?.hasUpdate && onAutoUpdateNow && (
+                <button
+                  type="button"
+                  className="primary-btn compact-btn"
+                  disabled={isUpdatingApp}
+                  onClick={onAutoUpdateNow}
+                >
+                  <Rocket size={13} />
+                  <span>
+                    {isUpdatingApp ? t.updates.updatingBtn : t.updates.autoUpdateNowBtn}
+                  </span>
+                </button>
+              )}
+              {updateInfo?.hasUpdate && !onAutoUpdateNow && onOpenExternalUrl && (
                 <button
                   type="button"
                   className="primary-btn compact-btn"
@@ -66,6 +85,19 @@ export const AboutModal: React.FC<AboutModalProps> = ({
                 >
                   <Download size={13} />
                   <span>{t.updates.downloadBtn}</span>
+                </button>
+              )}
+              {updateInfo && onOpenUpdateModal && (
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={() => {
+                    onClose();
+                    onOpenUpdateModal();
+                  }}
+                >
+                  <FileText size={13} />
+                  <span>{t.updates.openDetailsModalBtn}</span>
                 </button>
               )}
               <button

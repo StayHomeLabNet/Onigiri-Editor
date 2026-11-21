@@ -2,13 +2,18 @@ import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useStat
 import 'katex/dist/katex.min.css';
 import {
   AlertTriangle,
+  CheckCircle2,
   Download,
   Eye,
   ExternalLink,
+  FileText,
+  FolderOpen,
   GitCompare,
   Globe,
   RefreshCw,
+  Rocket,
   Save,
+  SkipForward,
   Square,
   X,
 } from 'lucide-react';
@@ -16,7 +21,9 @@ import type {
   AiCleanOptions,
   AiProviderConfig,
   AppMode,
+  AppUpdateDownloadResult,
   AppUpdateInfo,
+  AppUpdateProgressEvent,
   ClearAppCacheResult,
   DocumentTab,
   EditorSettings,
@@ -108,6 +115,7 @@ import {
   saveCustomKeybindings,
 } from './utils/keybindings';
 import {
+  applyDownloadedAppUpdate,
   assistProjectSetup,
   browserClose,
   browserNavAction,
@@ -118,6 +126,7 @@ import {
   createFileInDir,
   createWorkspaceFolder,
   deleteWorkspaceEntry,
+  downloadAppUpdate,
   duplicateWorkspaceFile,
   formatShortcut,
   getGitHeadFile,
@@ -136,6 +145,7 @@ import {
   inspectProjectForPath,
   inspectWorkspaceProject,
   isTauri,
+  listenAppUpdateProgress,
   migrateTempImagesOnSave,
   openFolderDialog,
   openInExternalBrowser,
@@ -286,6 +296,15 @@ const CitationModal = lazy(() =>
 const KnowledgeGraphModal = lazy(() =>
   import('./components/KnowledgeGraphModal').then((m) => ({ default: m.KnowledgeGraphModal }))
 );
+import {
+  UpdateModal,
+  buildReleaseNotesDocument,
+  isVersionSkipped,
+  normalizeVersionString,
+  resolvePrimaryAutoUpdateUrl,
+  shouldShowAutoUpdateNotification,
+  shouldTriggerPeriodicUpdateCheck,
+} from './components/UpdateModal';
 
 const ONLINE_MANUAL_URL = 'https://stayhomelab.net/help/onigiri-editor/';
 
@@ -318,6 +337,10 @@ const DEFAULT_SETTINGS: EditorSettings = {
   embedImagesOnHtmlExport: true,
   inspectorTabStyle: 'icons',
   checkUpdatesOnStartup: true,
+  updateCheckIntervalHours: 6,
+  autoUpdateEnabled: false,
+  updateAvailableBehavior: 'banner',
+  skippedUpdateVersion: '',
   showFrontmatterCard: true,
   imageAssetFolder: 'assets',
   dailyNotesFolder: '',
@@ -483,9 +506,14 @@ export function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<AppUpdateProgressEvent | null>(null);
+  const [downloadedUpdate, setDownloadedUpdate] = useState<AppUpdateDownloadResult | null>(null);
+  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
+  const [isApplyingUpdate, setIsApplyingUpdate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
   const [dataSummaryTick, setDataSummaryTick] = useState(0);
@@ -5386,6 +5414,127 @@ export function App() {
     });
   }, [notify, t.toasts.errorPrefix]);
 
+  useEffect(() => {
+    if (!isTauri()) return;
+    let dispose: (() => void) | null = null;
+    void listenAppUpdateProgress((ev) => {
+      setUpdateProgress(ev);
+    }).then((unlisten) => {
+      dispose = unlisten;
+    });
+    return () => {
+      if (dispose) dispose();
+    };
+  }, []);
+
+  const handleDownloadUpdateInstaller = useCallback(
+    async (
+      targetUrl?: string,
+      fileName?: string,
+      silent = false
+    ): Promise<AppUpdateDownloadResult | null> => {
+      if (!isTauri()) return null;
+      const url =
+        targetUrl ||
+        updateInfo?.downloadUrl ||
+        updateInfo?.autoUpdateUrl ||
+        resolvePrimaryAutoUpdateUrl(updateInfo);
+      if (!url) {
+        if (updateInfo?.releaseUrl) {
+          void openInExternalBrowser(updateInfo.releaseUrl);
+        }
+        return null;
+      }
+      setIsDownloadingUpdate(true);
+      try {
+        const res = await downloadAppUpdate(url, fileName);
+        setDownloadedUpdate(res);
+        if (!silent) {
+          notify(t.updates.downloadedToast.replace('{name}', res.fileName));
+        }
+        return res;
+      } catch (err) {
+        if (!silent) {
+          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+        }
+        return null;
+      } finally {
+        setIsDownloadingUpdate(false);
+      }
+    },
+    [notify, t.toasts.errorPrefix, t.updates.downloadedToast, updateInfo]
+  );
+
+  const handleApplyDownloadedUpdate = useCallback(
+    async (filePath: string, restartApp = true) => {
+      if (!isTauri() || !filePath) return;
+      setIsApplyingUpdate(true);
+      try {
+        notify(t.updates.applyingUpdateToast);
+        await applyDownloadedAppUpdate(filePath, restartApp);
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+      } finally {
+        setIsApplyingUpdate(false);
+      }
+    },
+    [notify, t.toasts.errorPrefix, t.updates.applyingUpdateToast]
+  );
+
+  const handleAutoUpdateNow = useCallback(async () => {
+    if (!isTauri() || !updateInfo) return;
+    if (downloadedUpdate?.filePath) {
+      await handleApplyDownloadedUpdate(downloadedUpdate.filePath, true);
+      return;
+    }
+    const autoUrl = resolvePrimaryAutoUpdateUrl(updateInfo);
+    if (!autoUrl) {
+      void openInExternalBrowser(updateInfo.releaseUrl);
+      return;
+    }
+    const res = await handleDownloadUpdateInstaller(autoUrl, undefined, false);
+    if (res?.filePath) {
+      await handleApplyDownloadedUpdate(res.filePath, true);
+    }
+  }, [downloadedUpdate, handleApplyDownloadedUpdate, handleDownloadUpdateInstaller, updateInfo]);
+
+  const handleOpenReleaseNotesInTab = useCallback(
+    (info: AppUpdateInfo) => {
+      const doc = buildReleaseNotesDocument(info, locale);
+      const nextTab = makeTab(doc.title, doc.content);
+      setTabs((prev) => [...prev, nextTab]);
+      setActiveTabId(nextTab.id);
+      if (layout === 'editor') {
+        setLayout('split');
+      }
+    },
+    [layout, locale]
+  );
+
+  const handleSkipUpdateVersion = useCallback(
+    (version: string) => {
+      const normalized = normalizeVersionString(version);
+      if (!normalized) return;
+      setSettings((prev) => ({
+        ...prev,
+        skippedUpdateVersion: normalized,
+      }));
+      setUpdateBannerDismissed(true);
+      notify(t.updates.skippedVersionToast.replace('{version}', normalized));
+    },
+    [notify, t.updates.skippedVersionToast]
+  );
+
+  const handleUnskipUpdateVersion = useCallback(() => {
+    setSettings((prev) => ({
+      ...prev,
+      skippedUpdateVersion: '',
+    }));
+    setUpdateBannerDismissed(false);
+  }, []);
+
+  const autoDownloadedVersionRef = useRef<string | null>(null);
+
   const handleCheckUpdates = useCallback(
     async (silent = false) => {
       if (!isTauri()) return;
@@ -5394,9 +5543,34 @@ export function App() {
         const info = await checkAppUpdates();
         setUpdateInfo(info);
         if (info.hasUpdate) {
-          setUpdateBannerDismissed(false);
+          const isSkipped = isVersionSkipped(info.latestVersion, settings.skippedUpdateVersion);
+          const behavior = settings.updateAvailableBehavior ?? 'banner';
+
           if (!silent) {
+            setUpdateBannerDismissed(false);
             notify(t.toasts.updateAvailable.replace('{version}', info.latestVersion));
+            if (!showSettings && !showAbout) {
+              setShowUpdateModal(true);
+            }
+          } else if (!isSkipped) {
+            if (behavior === 'badge-only') {
+              setUpdateBannerDismissed(true);
+            } else {
+              setUpdateBannerDismissed(false);
+            }
+            if (behavior === 'modal') {
+              setShowUpdateModal(true);
+            }
+            if (
+              (settings.autoUpdateEnabled || behavior === 'auto-install') &&
+              autoDownloadedVersionRef.current !== info.latestVersion
+            ) {
+              const autoUrl = resolvePrimaryAutoUpdateUrl(info);
+              if (autoUrl) {
+                autoDownloadedVersionRef.current = info.latestVersion;
+                void handleDownloadUpdateInstaller(autoUrl, undefined, false);
+              }
+            }
           }
         } else if (!silent) {
           notify(t.toasts.upToDate.replace('{version}', info.currentVersion));
@@ -5410,7 +5584,18 @@ export function App() {
         setCheckingUpdates(false);
       }
     },
-    [notify, t.toasts.upToDate, t.toasts.updateAvailable, t.toasts.updateCheckFailed]
+    [
+      handleDownloadUpdateInstaller,
+      notify,
+      settings.autoUpdateEnabled,
+      settings.skippedUpdateVersion,
+      settings.updateAvailableBehavior,
+      showAbout,
+      showSettings,
+      t.toasts.upToDate,
+      t.toasts.updateAvailable,
+      t.toasts.updateCheckFailed,
+    ]
   );
 
   const startupUpdateCheckedRef = useRef(false);
@@ -5423,6 +5608,41 @@ export function App() {
     }, 2500);
     return () => window.clearTimeout(timer);
   }, [handleCheckUpdates, settings.checkUpdatesOnStartup]);
+
+  // Periodic background update check & window focus check
+  useEffect(() => {
+    if (!isTauri()) return;
+    if (settings.checkUpdatesOnStartup === false) return;
+    const intervalHours = settings.updateCheckIntervalHours ?? 6;
+    if (intervalHours <= 0) return;
+
+    const maybeRunPeriodicCheck = () => {
+      if (
+        shouldTriggerPeriodicUpdateCheck({
+          autoCheckEnabled: settings.checkUpdatesOnStartup !== false,
+          intervalHours,
+          lastCheckedAtMs: updateInfo?.checkedAtMs ?? null,
+          nowMs: Date.now(),
+          isChecking: checkingUpdates,
+        })
+      ) {
+        void handleCheckUpdates(true);
+      }
+    };
+
+    const timer = window.setInterval(maybeRunPeriodicCheck, 60 * 1000);
+    window.addEventListener('focus', maybeRunPeriodicCheck);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', maybeRunPeriodicCheck);
+    };
+  }, [
+    checkingUpdates,
+    handleCheckUpdates,
+    settings.checkUpdatesOnStartup,
+    settings.updateCheckIntervalHours,
+    updateInfo?.checkedAtMs,
+  ]);
 
   const openSettingsModal = useCallback((tab: SettingsTab = 'general') => {
     setSettingsInitialTab(tab);
@@ -6803,6 +7023,9 @@ export function App() {
               isMarkdown={previewKind === 'markdown'}
               isDirty={activeTab.dirty}
               activeTitle={activeTab.title}
+              updateAvailableVersion={updateInfo?.hasUpdate ? updateInfo.latestVersion : null}
+              updateReadyToInstall={Boolean(downloadedUpdate)}
+              onOpenUpdateModal={() => setShowUpdateModal(true)}
             />
           )}
           {isFormatToolbarVisible && (
@@ -6818,45 +7041,123 @@ export function App() {
               macroStepCount={macroSteps.length}
             />
           )}
-          {updateInfo?.hasUpdate && !updateBannerDismissed && (
-            <div className="update-banner" role="status">
-              <div className="update-banner-left">
-                <Download size={14} />
-                <span>
-                  {t.updates.availableBannerTitle.replace('{version}', updateInfo.latestVersion)}
-                </span>
+          {shouldShowAutoUpdateNotification(
+            updateInfo,
+            settings.skippedUpdateVersion,
+            updateBannerDismissed
+          ) &&
+            updateInfo &&
+            (settings.updateAvailableBehavior ?? 'banner') !== 'badge-only' && (
+              <div className="update-banner" role="status">
+                <div className="update-banner-left">
+                  {isDownloadingUpdate || isApplyingUpdate ? (
+                    <RefreshCw size={14} className="spin" />
+                  ) : downloadedUpdate ? (
+                    <CheckCircle2 size={14} className="update-ready-icon" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                  <span>
+                    {isDownloadingUpdate
+                      ? t.updates.downloadingProgressLabel.replace(
+                          '{percent}',
+                          String(updateProgress?.percent ?? 0)
+                        )
+                      : downloadedUpdate
+                        ? t.updates.readyToInstallLabel.replace(
+                            '{version}',
+                            updateInfo.latestVersion
+                          )
+                        : t.updates.availableBannerTitle.replace(
+                            '{version}',
+                            updateInfo.latestVersion
+                          )}
+                  </span>
+                </div>
+                <div className="update-banner-actions">
+                  {downloadedUpdate ? (
+                    <>
+                      <button
+                        type="button"
+                        className="primary-btn compact-btn"
+                        disabled={isApplyingUpdate}
+                        onClick={() =>
+                          void handleApplyDownloadedUpdate(downloadedUpdate.filePath, true)
+                        }
+                      >
+                        <Rocket size={12} />
+                        <span>{t.updates.applyAndRestartBtn}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-btn compact-btn"
+                        onClick={() => void revealInFileManager(downloadedUpdate.filePath)}
+                      >
+                        <FolderOpen size={12} />
+                        <span>{t.updates.revealInstallerBtn}</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="primary-btn compact-btn"
+                        disabled={isDownloadingUpdate || isApplyingUpdate}
+                        onClick={() => void handleAutoUpdateNow()}
+                      >
+                        <Rocket size={12} />
+                        <span>
+                          {isDownloadingUpdate || isApplyingUpdate
+                            ? t.updates.updatingBtn
+                            : t.updates.autoUpdateNowBtn}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-btn compact-btn"
+                        disabled={isDownloadingUpdate || isApplyingUpdate}
+                        onClick={() =>
+                          void handleDownloadUpdateInstaller(
+                            updateInfo.downloadUrl || updateInfo.autoUpdateUrl || undefined
+                          )
+                        }
+                      >
+                        <Download size={12} />
+                        <span>{t.updates.downloadInstallerBtn}</span>
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => setShowUpdateModal(true)}
+                  >
+                    <FileText size={12} />
+                    <span>{t.updates.openDetailsModalBtn}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-btn compact-btn"
+                    onClick={() => handleSkipUpdateVersion(updateInfo.latestVersion)}
+                    title={t.updates.skipVersionBtn.replace('{version}', updateInfo.latestVersion)}
+                  >
+                    <SkipForward size={12} />
+                    <span>
+                      {t.updates.skipVersionBtn.replace('{version}', updateInfo.latestVersion)}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    title={t.updates.remindLaterBtn}
+                    aria-label={t.updates.dismissBtn}
+                    onClick={() => setUpdateBannerDismissed(true)}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
               </div>
-              <div className="update-banner-actions">
-                <button
-                  type="button"
-                  className="primary-btn compact-btn"
-                  onClick={() =>
-                    void openInExternalBrowser(updateInfo.downloadUrl || updateInfo.releaseUrl)
-                  }
-                >
-                  <Download size={12} />
-                  <span>{t.updates.downloadBtn}</span>
-                </button>
-                <button
-                  type="button"
-                  className="secondary-btn compact-btn"
-                  onClick={() => void openInExternalBrowser(updateInfo.releaseUrl)}
-                >
-                  <ExternalLink size={12} />
-                  <span>{t.updates.releaseNotesBtn}</span>
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  title={t.updates.dismissBtn}
-                  aria-label={t.updates.dismissBtn}
-                  onClick={() => setUpdateBannerDismissed(true)}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            </div>
-          )}
+            )}
         </>
       )}
 
@@ -7718,8 +8019,43 @@ export function App() {
           isRecordingMacro={isRecordingMacro}
           macroStepCount={recordingMacroSteps.length}
           onToggleMacroRecording={handleToggleMacroRecording}
+          updateAvailableVersion={updateInfo?.hasUpdate ? updateInfo.latestVersion : null}
+          updateReadyToInstall={Boolean(downloadedUpdate)}
+          onOpenUpdateModal={() => setShowUpdateModal(true)}
         />
       )}
+
+      <UpdateModal
+        t={t}
+        locale={locale}
+        open={showUpdateModal}
+        onClose={() => setShowUpdateModal(false)}
+        updateInfo={updateInfo}
+        checkingUpdates={checkingUpdates}
+        onCheckUpdates={() => void handleCheckUpdates(false)}
+        updateProgress={updateProgress}
+        downloadedUpdate={downloadedUpdate}
+        isDownloadingUpdate={isDownloadingUpdate}
+        isApplyingUpdate={isApplyingUpdate}
+        onAutoUpdateNow={() => void handleAutoUpdateNow()}
+        onDownloadInstaller={(url, fileName) =>
+          void handleDownloadUpdateInstaller(url, fileName, false)
+        }
+        onApplyDownloadedUpdate={(fp, restart) => void handleApplyDownloadedUpdate(fp, restart)}
+        onRevealDownloadedUpdate={(fp) => void revealInFileManager(fp)}
+        onOpenReleaseNotesInTab={handleOpenReleaseNotesInTab}
+        onOpenInBuiltinBrowser={(url) => void handleOpenProjectUrl(url, 'builtin')}
+        onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
+        onCopyUrl={(url) => {
+          void writeClipboardText(url);
+          notify(t.updates.copiedDownloadUrlToast);
+        }}
+        onSkipVersion={handleSkipUpdateVersion}
+        onUnskipVersion={handleUnskipUpdateVersion}
+        onRemindLater={() => setUpdateBannerDismissed(true)}
+        settings={settings}
+        onSettingsChange={setSettings}
+      />
 
       <Suspense fallback={null}>
         <QuickOpenModal
@@ -7751,6 +8087,9 @@ export function App() {
           checkingUpdates={checkingUpdates}
           onCheckUpdates={() => void handleCheckUpdates(false)}
           onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
+          onOpenUpdateModal={() => setShowUpdateModal(true)}
+          onAutoUpdateNow={() => void handleAutoUpdateNow()}
+          isUpdatingApp={isDownloadingUpdate || isApplyingUpdate}
         />
 
         <SettingsModal
@@ -7786,6 +8125,12 @@ export function App() {
           checkingUpdates={checkingUpdates}
           onCheckUpdates={() => void handleCheckUpdates(false)}
           onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
+          onOpenUpdateModal={() => {
+            setShowSettings(false);
+            setShowUpdateModal(true);
+          }}
+          onAutoUpdateNow={() => void handleAutoUpdateNow()}
+          isUpdatingApp={isDownloadingUpdate || isApplyingUpdate}
         />
 
         <ImageModal

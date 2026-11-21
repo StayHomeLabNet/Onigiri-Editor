@@ -20,8 +20,12 @@ import {
   FileCode,
   RefreshCw,
   QrCode,
+  Rocket,
+  Clock,
+  FileText,
 } from 'lucide-react';
 import { QrCodeCard } from './LanUrlList';
+import { formatUpdateCheckTime, isVersionSkipped } from './UpdateModal';
 import type {
   AiFolderMode,
   AppUpdateInfo,
@@ -38,6 +42,7 @@ import type {
   SyntaxPresetId,
   TextEncodingId,
   ThemeId,
+  UpdateAvailableBehavior,
   UserDataClearSelection,
   WrapMode,
 } from '../types';
@@ -140,6 +145,9 @@ interface SettingsModalProps {
   checkingUpdates?: boolean;
   onCheckUpdates?: () => void;
   onOpenExternalUrl?: (url: string) => void;
+  onOpenUpdateModal?: () => void;
+  onAutoUpdateNow?: () => void;
+  isUpdatingApp?: boolean;
 }
 
 const TOKEN_KEYS: Array<keyof SyntaxColorMap> = [
@@ -188,6 +196,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   checkingUpdates,
   onCheckUpdates,
   onOpenExternalUrl,
+  onOpenUpdateModal,
+  onAutoUpdateNow,
+  isUpdatingApp,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab || 'general');
   const [resetSel, setResetSel] = useState<SettingsResetSelection>(DEFAULT_RESET_SELECTION);
@@ -606,21 +617,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                     <span>{t.inspector.settingsLabels.embedImagesOnHtmlExport}</span>
                   </label>
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={settings.checkUpdatesOnStartup ?? true}
-                      onChange={(e) =>
-                        onSettingsChange({
-                          ...settings,
-                          checkUpdatesOnStartup: e.target.checked,
-                        })
-                      }
-                    />
-                    <span>{t.inspector.settingsLabels.checkUpdatesOnStartup}</span>
-                  </label>
+                </div>
+
+                <div className="settings-card settings-update-card">
+                  <div className="settings-data-card-header">
+                    <div className="settings-data-card-title">
+                      <RefreshCw size={14} className={checkingUpdates ? 'spin' : ''} />
+                      <span>{t.updates.sectionTitle}</span>
+                    </div>
+                    {updateInfo?.checkedAtMs ? (
+                      <span className="settings-update-last-checked">
+                        <Clock size={11} />
+                        <span>
+                          {t.updates.lastCheckedLabel.replace(
+                            '{time}',
+                            formatUpdateCheckTime(updateInfo.checkedAtMs, locale) || ''
+                          )}
+                        </span>
+                      </span>
+                    ) : null}
+                  </div>
+
                   {isTauri() && onCheckUpdates && (
-                    <div className="about-update-row" style={{ marginTop: 6 }}>
+                    <div className="about-update-row" style={{ marginTop: 4, marginBottom: 10 }}>
                       <div className="about-update-status">
                         {updateInfo?.hasUpdate ? (
                           <span className="update-badge-new">
@@ -634,11 +653,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             {t.updates.upToDateLabel.replace('{version}', updateInfo.currentVersion)}
                           </span>
                         ) : (
-                          <span className="ai-hint-text">{t.updates.sectionTitle}</span>
+                          <span className="ai-hint-text">{t.updates.notCheckedYetLabel}</span>
                         )}
                       </div>
                       <div className="about-update-actions">
-                        {updateInfo?.hasUpdate && onOpenExternalUrl && (
+                        {updateInfo?.hasUpdate && onAutoUpdateNow && (
+                          <button
+                            type="button"
+                            className="primary-btn compact-btn"
+                            disabled={isUpdatingApp}
+                            onClick={onAutoUpdateNow}
+                          >
+                            <Rocket size={13} />
+                            <span>
+                              {isUpdatingApp ? t.updates.updatingBtn : t.updates.autoUpdateNowBtn}
+                            </span>
+                          </button>
+                        )}
+                        {updateInfo?.hasUpdate && !onAutoUpdateNow && onOpenExternalUrl && (
                           <button
                             type="button"
                             className="primary-btn compact-btn"
@@ -648,6 +680,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           >
                             <Download size={13} />
                             <span>{t.updates.downloadBtn}</span>
+                          </button>
+                        )}
+                        {updateInfo && onOpenUpdateModal && (
+                          <button
+                            type="button"
+                            className="secondary-btn compact-btn"
+                            onClick={onOpenUpdateModal}
+                          >
+                            <FileText size={13} />
+                            <span>{t.updates.openDetailsModalBtn}</span>
                           </button>
                         )}
                         <button
@@ -662,6 +704,113 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </div>
                   )}
+
+                  <div className="check-list">
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.checkUpdatesOnStartup ?? true}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            checkUpdatesOnStartup: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>{t.inspector.settingsLabels.checkUpdatesOnStartup}</span>
+                    </label>
+
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.autoUpdateEnabled ?? false}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            autoUpdateEnabled: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>{t.inspector.settingsLabels.autoUpdateEnabled}</span>
+                    </label>
+                    <p className="field-hint">{t.inspector.settingsLabels.autoUpdateEnabledHint}</p>
+                  </div>
+
+                  <div className="settings-grid-2" style={{ marginTop: 8 }}>
+                    <div className="field-row">
+                      <label>{t.inspector.settingsLabels.updateCheckInterval}</label>
+                      <select
+                        className="select-input"
+                        disabled={settings.checkUpdatesOnStartup === false}
+                        value={String(settings.updateCheckIntervalHours ?? 6)}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            updateCheckIntervalHours: Number(e.target.value),
+                          })
+                        }
+                      >
+                        <option value="0">
+                          {t.inspector.settingsLabels.updateIntervalStartupOnly}
+                        </option>
+                        <option value="1">{t.inspector.settingsLabels.updateInterval1h}</option>
+                        <option value="6">{t.inspector.settingsLabels.updateInterval6h}</option>
+                        <option value="12">{t.inspector.settingsLabels.updateInterval12h}</option>
+                        <option value="24">{t.inspector.settingsLabels.updateInterval24h}</option>
+                      </select>
+                    </div>
+
+                    <div className="field-row">
+                      <label>{t.inspector.settingsLabels.updateAvailableBehavior}</label>
+                      <select
+                        className="select-input"
+                        value={settings.updateAvailableBehavior ?? 'banner'}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            updateAvailableBehavior: e.target.value as UpdateAvailableBehavior,
+                          })
+                        }
+                      >
+                        <option value="banner">
+                          {t.inspector.settingsLabels.updateBehaviorBanner}
+                        </option>
+                        <option value="modal">
+                          {t.inspector.settingsLabels.updateBehaviorModal}
+                        </option>
+                        <option value="badge-only">
+                          {t.inspector.settingsLabels.updateBehaviorBadgeOnly}
+                        </option>
+                        <option value="auto-install">
+                          {t.inspector.settingsLabels.updateBehaviorAutoInstall}
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {settings.skippedUpdateVersion &&
+                    isVersionSkipped(settings.skippedUpdateVersion, settings.skippedUpdateVersion) && (
+                      <div className="settings-skipped-version-row">
+                        <span>
+                          {t.updates.skippedVersionLabel.replace(
+                            '{version}',
+                            settings.skippedUpdateVersion
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          className="mini-pill-btn"
+                          onClick={() =>
+                            onSettingsChange({
+                              ...settings,
+                              skippedUpdateVersion: '',
+                            })
+                          }
+                        >
+                          {t.updates.unskipVersionBtn}
+                        </button>
+                      </div>
+                    )}
                 </div>
 
                 <div className="field-row">

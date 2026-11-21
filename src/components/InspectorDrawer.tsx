@@ -1122,6 +1122,32 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                 />
                 <span>{t.inspector.settingsLabels.showFormatToolbarInSimpleMode}</span>
               </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.checkUpdatesOnStartup ?? true}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      checkUpdatesOnStartup: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.checkUpdatesOnStartup}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
+                  checked={settings.autoUpdateEnabled ?? false}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      autoUpdateEnabled: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.autoUpdateEnabled}</span>
+              </label>
             </div>
 
             <div className="field-row">

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, FilePlus2, Minus, Plus, RefreshCw, Save, Settings } from 'lucide-react';
+import { Check, Download, FilePlus2, Minus, Plus, RefreshCw, Save, Settings } from 'lucide-react';
 import type { AppMode, DocumentStats, Locale, TextEncodingId } from '../types';
 import type { Translations } from '../i18n/types';
 import { formatShortcut } from '../utils/platform';
@@ -44,6 +44,9 @@ interface StatusBarProps {
   isRecordingMacro?: boolean;
   macroStepCount?: number;
   onToggleMacroRecording?: () => void;
+  updateAvailableVersion?: string | null;
+  updateReadyToInstall?: boolean;
+  onOpenUpdateModal?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -78,6 +81,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   isRecordingMacro,
   macroStepCount,
   onToggleMacroRecording,
+  updateAvailableVersion,
+  updateReadyToInstall,
+  onOpenUpdateModal,
 }) => {
   const goalPct = wordGoal > 0 ? Math.min(100, Math.round((stats.words / wordGoal) * 100)) : 0;
   const [encMenuOpen, setEncMenuOpen] = useState(false);
@@ -209,6 +215,22 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
         {autoSaveEnabled && filePath && (
           <span className="status-autosave-pill">{t.status.autoSaveOn}</span>
+        )}
+
+        {updateAvailableVersion && onOpenUpdateModal && (
+          <button
+            type="button"
+            className={`status-update-pill ${updateReadyToInstall ? 'is-ready' : ''}`}
+            onClick={onOpenUpdateModal}
+            title={t.updates.availableBannerTitle.replace('{version}', updateAvailableVersion)}
+          >
+            <Download size={11} />
+            <span>
+              {updateReadyToInstall
+                ? t.updates.statusBadgeReady.replace('{version}', updateAvailableVersion)
+                : t.updates.statusBadgeAvailable.replace('{version}', updateAvailableVersion)}
+            </span>
+          </button>
         )}
 
         {topBarHidden && activeTitle && (
