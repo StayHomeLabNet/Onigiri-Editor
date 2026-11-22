@@ -2664,6 +2664,7 @@ pub fn run() {
         .manage(project::ProjectServerState::new())
         .manage(window_state::WindowStateManager::new())
         .manage(ai::AiChatState::new())
+        .manage(updates::UpdateManagerState::new())
         .setup(|app| {
             window_state::restore_main_window_state(app.handle());
             let initial_locale = detect_os_locale_impl();
@@ -2706,7 +2707,10 @@ pub fn run() {
             images::migrate_temp_images_on_save,
             updates::check_app_updates,
             updates::download_app_update,
+            updates::cancel_app_update_download,
             updates::apply_downloaded_app_update,
+            updates::schedule_app_update_on_exit,
+            updates::check_file_exists_local,
             get_os_locale,
             get_git_status,
             get_git_head_file,
@@ -2732,6 +2736,7 @@ pub fn run() {
             browser::browser_nav_action,
             browser::browser_open_devtools,
             browser::browser_close,
+            browser::browser_capture_screenshot,
             browser::open_in_external_browser,
             live_preview::start_external_preview,
             live_preview::update_external_preview,
@@ -2743,6 +2748,7 @@ pub fn run() {
             project::stop_project_dev_server,
             project::clear_project_dev_server_logs,
             project::get_project_dev_server_status,
+            project::find_free_project_port,
             project::assist_project_setup,
             clear_app_caches,
             reset_window_state
@@ -2775,7 +2781,13 @@ pub fn run() {
             } => {
                 project::stop_project_dev_server_sync(app_handle);
             }
-            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. } => {
+            tauri::RunEvent::Exit => {
+                window_state::capture_main_window_state(app_handle, true);
+                window_state::flush_window_state(app_handle);
+                project::stop_project_dev_server_sync(app_handle);
+                updates::run_pending_update_on_exit_sync(app_handle);
+            }
+            tauri::RunEvent::ExitRequested { .. } => {
                 window_state::capture_main_window_state(app_handle, true);
                 window_state::flush_window_state(app_handle);
                 project::stop_project_dev_server_sync(app_handle);

@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
-import { FolderTree, Terminal, X } from 'lucide-react';
+import { AlertTriangle, FolderTree, Play, RotateCw, Square, Terminal, X } from 'lucide-react';
 import type { ProjectInfo, ProjectServerStatus, RunningProjectTarget } from '../types';
 import { extractPortFromUrl } from './ProjectPortInput';
+import { getTargetErrorCount } from './ProjectServerLogs';
 
 const PREFERRED_SERVER_SCRIPT_ORDER = [
   'dev',
@@ -84,10 +85,16 @@ interface ProjectTargetControlsProps {
   onSelectScript?: (scriptName: string) => void;
   onOpenTargetUrl?: (url: string) => void;
   onStopTargetRoot?: (targetRoot: string) => void;
+  onRestartTargetRoot?: (targetRoot: string) => void;
+  onStartAllTargets?: () => void;
+  onStopAllTargets?: () => void;
   targetLabel: string;
   scriptLabel: string;
   lockedTitle: string;
   stopTargetTitleTemplate?: string;
+  restartTargetTitleTemplate?: string;
+  startAllLabel?: string;
+  stopAllLabel?: string;
 }
 
 export const ProjectTargetControls: React.FC<ProjectTargetControlsProps> = ({
@@ -97,10 +104,16 @@ export const ProjectTargetControls: React.FC<ProjectTargetControlsProps> = ({
   onSelectScript,
   onOpenTargetUrl,
   onStopTargetRoot,
+  onRestartTargetRoot,
+  onStartAllTargets,
+  onStopAllTargets,
   targetLabel,
   scriptLabel,
   lockedTitle,
   stopTargetTitleTemplate = 'Stop {name}',
+  restartTargetTitleTemplate = 'Restart {name}',
+  startAllLabel = 'Start All',
+  stopAllLabel = 'Stop All',
 }) => {
   const targets = projectInfo?.targets || [];
   const showTargetSelect = Boolean(onSelectTargetRoot && targets.length > 1);
@@ -116,6 +129,8 @@ export const ProjectTargetControls: React.FC<ProjectTargetControlsProps> = ({
     [projectServer]
   );
   const showRunningChips = runningTargets.length > 1 || (targets.length > 1 && runningTargets.length > 0);
+  const hasInactiveMonorepoTarget =
+    targets.length > 1 && targets.some((tgt) => !isTargetCurrentlyActive(tgt.rootPath, projectServer));
 
   if (!showTargetSelect && !showScriptSelect && !showRunningChips) {
     return null;
@@ -131,10 +146,13 @@ export const ProjectTargetControls: React.FC<ProjectTargetControlsProps> = ({
           {runningTargets.map((rt) => {
             const port = extractPortFromUrl(rt.url);
             const isSelected = rt.rootPath === currentRoot;
+            const errCount = getTargetErrorCount(rt);
             return (
               <span
                 key={rt.rootPath}
-                className={`project-running-target-pill ${isSelected ? 'is-selected' : ''}`}
+                className={`project-running-target-pill ${isSelected ? 'is-selected' : ''} ${
+                  errCount > 0 ? 'has-error' : ''
+                }`}
               >
                 <button
                   type="button"
@@ -152,7 +170,27 @@ export const ProjectTargetControls: React.FC<ProjectTargetControlsProps> = ({
                   />
                   <span>{rt.name}</span>
                   {port && <span className="project-running-target-port">:{port}</span>}
+                  {errCount > 0 && (
+                    <span className="project-logs-err-badge">
+                      <AlertTriangle size={8} />
+                      <span>{errCount}</span>
+                    </span>
+                  )}
                 </button>
+                {onRestartTargetRoot && (
+                  <button
+                    type="button"
+                    className="project-running-target-restart"
+                    title={restartTargetTitleTemplate.replace('{name}', rt.name)}
+                    aria-label={restartTargetTitleTemplate.replace('{name}', rt.name)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRestartTargetRoot(rt.rootPath);
+                    }}
+                  >
+                    <RotateCw size={9} />
+                  </button>
+                )}
                 {onStopTargetRoot && (
                   <button
                     type="button"
@@ -193,6 +231,28 @@ export const ProjectTargetControls: React.FC<ProjectTargetControlsProps> = ({
             })}
           </select>
         </label>
+      )}
+      {targets.length > 1 && onStartAllTargets && hasInactiveMonorepoTarget && (
+        <button
+          type="button"
+          className="mini-pill-btn project-batch-btn"
+          onClick={onStartAllTargets}
+          title={startAllLabel}
+        >
+          <Play size={10} />
+          <span>{startAllLabel}</span>
+        </button>
+      )}
+      {targets.length > 1 && onStopAllTargets && runningTargets.length > 0 && (
+        <button
+          type="button"
+          className="mini-pill-btn project-batch-btn"
+          onClick={onStopAllTargets}
+          title={stopAllLabel}
+        >
+          <Square size={10} />
+          <span>{stopAllLabel}</span>
+        </button>
       )}
       {showScriptSelect && (
         <label

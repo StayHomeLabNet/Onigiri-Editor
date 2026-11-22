@@ -1,12 +1,38 @@
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
+use url::Url;
 
 const GITHUB_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/StayHomeLabNet/Onigiri-Editor/releases/latest";
+
+const ALLOWED_GITHUB_REPO_PREFIX: &str = "/stayhomelabnet/onigiri-editor/";
+
+pub struct UpdateManagerState {
+    download_cancel: Arc<AtomicBool>,
+    last_etag: Mutex<Option<String>>,
+    cached_info: Mutex<Option<AppUpdateInfo>>,
+    pending_update_on_exit: Mutex<Option<String>>,
+}
+
+impl UpdateManagerState {
+    pub fn new() -> Self {
+        Self {
+            download_cancel: Arc::new(AtomicBool::new(false)),
+            last_etag: Mutex::new(None),
+            cached_info: Mutex::new(None),
+            pending_update_on_exit: Mutex::new(None),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -16,9 +42,10 @@ pub struct AppUpdateAsset {
     pub size: u64,
     pub platform: String,
     pub kind: String,
+    pub digest: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUpdateInfo {
     pub current_version: String,
@@ -33,6 +60,8 @@ pub struct AppUpdateInfo {
     pub can_in_place_update: bool,
     pub assets: Vec<AppUpdateAsset>,
     pub checked_at_ms: u64,
+    pub etag: Option<String>,
+    pub not_modified: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -46,13 +75,15 @@ pub struct AppUpdateProgressEvent {
     pub message: String,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUpdateDownloadResult {
     pub file_path: String,
     pub file_name: String,
     pub bytes: u64,
     pub can_auto_apply: bool,
+    pub sha256: String,
+    pub verified: bool,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +92,8 @@ struct GithubAsset {
     browser_download_url: String,
     #[serde(default)]
     size: u64,
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +120,43 @@ pub fn parse_semver_tuple(raw: &str) -> Option<(u64, u64, u64)> {
 pub fn is_newer_version(current: &str, latest: &str) -> bool {
     match (parse_semver_tuple(current), parse_semver_tuple(latest)) {
         (Some(cur), Some(lat)) => lat > cur,
+        _ => false,
+    }
+}
+
+pub fn normalize_sha256_hex(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let hex_part = trimmed
+        .strip_prefix("sha256:")
+        .or_else(|| trimmed.strip_prefix("SHA256:"))
+        .unwrap_or(trimmed)
+        .trim()
+        .to_ascii_lowercase();
+    if hex_part.len() == 64 && hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(hex_part)
+    } else {
+        None
+    }
+}
+
+pub fn is_allowed_update_download_url(raw_url: &str) -> bool {
+    let Ok(parsed) = Url::parse(raw_url.trim()) else {
+        return false;
+    };
+    if parsed.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = parsed.host_str().map(|h| h.to_ascii_lowercase()) else {
+        return false;
+    };
+    match host.as_str() {
+        "github.com" => parsed
+            .path()
+            .to_ascii_lowercase()
+            .starts_with(ALLOWED_GITHUB_REPO_PREFIX),
+        "objects.githubusercontent.com"
+        | "release-assets.githubusercontent.com"
+        | "github-releases.githubusercontent.com" => true,
         _ => false,
     }
 }
@@ -163,7 +233,13 @@ fn now_epoch_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn resolve_downloads_dir() -> PathBuf {
+fn resolve_downloads_dir(app: &tauri::AppHandle) -> PathBuf {
+    if let Ok(dl) = app.path().download_dir() {
+        if dl.is_dir() || fs::create_dir_all(&dl).is_ok() {
+            return dl;
+        }
+    }
+
     #[cfg(target_os = "windows")]
     let home = std::env::var_os("USERPROFILE").map(PathBuf::from);
     #[cfg(not(target_os = "windows"))]
@@ -214,7 +290,6 @@ fn emit_update_progress(app: &tauri::AppHandle, ev: AppUpdateProgressEvent) {
 #[cfg(target_os = "macos")]
 fn locate_current_macos_app_bundle() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
-        // Look up ancestors for a directory ending with `.app`
         for ancestor in exe.ancestors() {
             if let Some(ext) = ancestor.extension().and_then(|e| e.to_str()) {
                 if ext.eq_ignore_ascii_case("app") {
@@ -230,8 +305,98 @@ fn locate_current_macos_app_bundle() -> Option<PathBuf> {
     None
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn build_atomic_macos_swap_script() -> &'static str {
+    r#"
+sleep 0.7
+SRC="$1"
+DST="$2"
+RELAUNCH="$3"
+BAK="${DST}.bak.$$"
+rm -rf "$BAK"
+if [ -d "$DST" ]; then
+  if ! mv "$DST" "$BAK"; then
+    exit 1
+  fi
+fi
+if mv "$SRC" "$DST"; then
+  rm -rf "$BAK"
+  xattr -cr "$DST" >/dev/null 2>&1 || true
+  if [ "$RELAUNCH" = "1" ]; then
+    open -n "$DST"
+  fi
+else
+  if [ -d "$BAK" ]; then
+    mv "$BAK" "$DST" >/dev/null 2>&1 || true
+  fi
+  exit 1
+fi
+"#
+}
+
+#[cfg(any(all(unix, not(target_os = "macos")), test))]
+fn build_atomic_linux_appimage_swap_script() -> &'static str {
+    r#"
+sleep 0.7
+SRC="$1"
+DST="$2"
+RELAUNCH="$3"
+TMP="${DST}.new.$$"
+BAK="${DST}.bak.$$"
+rm -f "$TMP" "$BAK"
+if ! cp "$SRC" "$TMP"; then
+  exit 1
+fi
+chmod 755 "$TMP" 2>/dev/null || true
+if [ -e "$DST" ]; then
+  cp -p "$DST" "$BAK" 2>/dev/null || true
+fi
+if mv -f "$TMP" "$DST"; then
+  rm -f "$BAK"
+  if [ "$RELAUNCH" = "1" ]; then
+    "$DST" >/dev/null 2>&1 &
+  fi
+else
+  rm -f "$TMP"
+  if [ -e "$BAK" ]; then
+    mv -f "$BAK" "$DST" >/dev/null 2>&1 || true
+  fi
+  exit 1
+fi
+"#
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn build_windows_update_launch_ps(file_path: &str, is_msi: bool, delay_ms: u64) -> String {
+    let escaped = file_path.replace('\'', "''");
+    if is_msi {
+        format!(
+            "Start-Sleep -Milliseconds {}; Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', '{}')",
+            delay_ms, escaped
+        )
+    } else {
+        format!(
+            "Start-Sleep -Milliseconds {}; Start-Process -FilePath '{}'",
+            delay_ms, escaped
+        )
+    }
+}
+
+fn can_auto_apply_for_os(file_name: &str, os: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    match os {
+        "macos" => lower.ends_with(".app.tar.gz") || lower.ends_with(".dmg"),
+        "windows" => lower.ends_with(".exe") || lower.ends_with(".msi"),
+        "linux" => lower.ends_with(".appimage") || lower.ends_with(".deb"),
+        _ => false,
+    }
+}
+
 #[tauri::command]
-pub async fn check_app_updates() -> Result<AppUpdateInfo, String> {
+pub async fn check_app_updates(
+    state: tauri::State<'_, UpdateManagerState>,
+    if_none_match: Option<String>,
+) -> Result<AppUpdateInfo, String> {
     let current_version = env!("CARGO_PKG_VERSION").to_string();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -239,16 +404,67 @@ pub async fn check_app_updates() -> Result<AppUpdateInfo, String> {
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 
-    let resp = client
+    let effective_etag = if_none_match
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| state.last_etag.lock().ok().and_then(|g| g.clone()));
+
+    let mut req = client
         .get(GITHUB_LATEST_RELEASE_API)
-        .header("Accept", "application/vnd.github+json")
+        .header("Accept", "application/vnd.github+json");
+
+    if let Some(ref etag) = effective_etag {
+        req = req.header("If-None-Match", etag);
+    }
+
+    let resp = req
         .send()
         .await
         .map_err(|e| format!("Update check request failed: {}", e))?;
 
+    if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+        let now_ms = now_epoch_ms();
+        if let Ok(mut guard) = state.cached_info.lock() {
+            if let Some(ref mut cached) = *guard {
+                cached.checked_at_ms = now_ms;
+                cached.not_modified = true;
+                cached.current_version = current_version.clone();
+                cached.has_update = is_newer_version(&current_version, &cached.latest_version);
+                return Ok(cached.clone());
+            }
+        }
+        // Cache missed on backend (e.g., frontend passed saved ETag after restart): re-fetch without ETag once
+        let fresh_resp = client
+            .get(GITHUB_LATEST_RELEASE_API)
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+            .map_err(|e| format!("Update check request failed: {}", e))?;
+        if !fresh_resp.status().is_success() {
+            return Err(format!(
+                "GitHub API returned status {}",
+                fresh_resp.status()
+            ));
+        }
+        return parse_and_cache_release(&state, current_version, fresh_resp).await;
+    }
+
     if !resp.status().is_success() {
         return Err(format!("GitHub API returned status {}", resp.status()));
     }
+
+    parse_and_cache_release(&state, current_version, resp).await
+}
+
+async fn parse_and_cache_release(
+    state: &UpdateManagerState,
+    current_version: String,
+    resp: reqwest::Response,
+) -> Result<AppUpdateInfo, String> {
+    let etag = resp
+        .headers()
+        .get(reqwest::header::ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
 
     let release: GithubReleaseResponse = resp
         .json()
@@ -276,13 +492,14 @@ pub async fn check_app_updates() -> Result<AppUpdateInfo, String> {
                 size: a.size,
                 platform,
                 kind,
+                digest: a.digest.clone(),
             }
         })
         .collect();
 
     let can_in_place_update = auto_update_url.is_some();
 
-    Ok(AppUpdateInfo {
+    let info = AppUpdateInfo {
         current_version,
         latest_version,
         has_update,
@@ -295,19 +512,68 @@ pub async fn check_app_updates() -> Result<AppUpdateInfo, String> {
         can_in_place_update,
         assets,
         checked_at_ms: now_epoch_ms(),
-    })
+        etag: etag.clone(),
+        not_modified: false,
+    };
+
+    if let Ok(mut guard) = state.last_etag.lock() {
+        *guard = etag;
+    }
+    if let Ok(mut guard) = state.cached_info.lock() {
+        *guard = Some(info.clone());
+    }
+
+    Ok(info)
+}
+
+#[tauri::command]
+pub fn cancel_app_update_download(state: tauri::State<'_, UpdateManagerState>) -> Result<bool, String> {
+    state.download_cancel.store(true, Ordering::SeqCst);
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn schedule_app_update_on_exit(
+    state: tauri::State<'_, UpdateManagerState>,
+    file_path: Option<String>,
+) -> Result<Option<String>, String> {
+    if let Some(ref p) = file_path {
+        if !PathBuf::from(p).exists() {
+            return Err(format!("Update file not found: {}", p));
+        }
+    }
+    if let Ok(mut guard) = state.pending_update_on_exit.lock() {
+        *guard = file_path.clone();
+    }
+    Ok(file_path)
+}
+
+#[tauri::command]
+pub fn check_file_exists_local(path: String) -> bool {
+    !path.trim().is_empty() && PathBuf::from(path).is_file()
 }
 
 #[tauri::command]
 pub async fn download_app_update(
     app: tauri::AppHandle,
+    state: tauri::State<'_, UpdateManagerState>,
     url: String,
     file_name: Option<String>,
+    expected_sha256: Option<String>,
 ) -> Result<AppUpdateDownloadResult, String> {
     let trimmed_url = url.trim();
-    if !trimmed_url.starts_with("https://") && !trimmed_url.starts_with("http://") {
-        return Err("Invalid download URL".to_string());
+    if !is_allowed_update_download_url(trimmed_url) {
+        return Err(
+            "Download blocked: URL must belong to official Onigiri Editor GitHub Releases."
+                .to_string(),
+        );
     }
+
+    let expected_hex = expected_sha256
+        .as_deref()
+        .and_then(normalize_sha256_hex);
+
+    state.download_cancel.store(false, Ordering::SeqCst);
 
     let resolved_name = file_name
         .as_deref()
@@ -315,7 +581,7 @@ pub async fn download_app_update(
         .map(sanitize_download_file_name)
         .unwrap_or_else(|| sanitize_download_file_name(trimmed_url));
 
-    let downloads_dir = resolve_downloads_dir();
+    let downloads_dir = resolve_downloads_dir(&app);
     let dest_path = downloads_dir.join(&resolved_name);
     let part_path = downloads_dir.join(format!("{}.part", resolved_name));
 
@@ -353,16 +619,40 @@ pub async fn download_app_update(
     let mut file = fs::File::create(&part_path)
         .map_err(|e| format!("Failed to create download file {}: {}", part_path.display(), e))?;
 
+    let mut hasher = Sha256::new();
     let mut downloaded_bytes: u64 = 0;
     let mut last_emit = Instant::now();
 
     while let Some(chunk) = resp
         .chunk()
         .await
-        .map_err(|e| format!("Network stream error while downloading update: {}", e))?
+        .map_err(|e| {
+            let _ = fs::remove_file(&part_path);
+            format!("Network stream error while downloading update: {}", e)
+        })?
     {
-        file.write_all(&chunk)
-            .map_err(|e| format!("Failed writing downloaded data: {}", e))?;
+        if state.download_cancel.load(Ordering::SeqCst) {
+            drop(file);
+            let _ = fs::remove_file(&part_path);
+            emit_update_progress(
+                &app,
+                AppUpdateProgressEvent {
+                    phase: "cancelled".to_string(),
+                    downloaded_bytes,
+                    total_bytes,
+                    percent: None,
+                    file_path: None,
+                    message: "Download cancelled".to_string(),
+                },
+            );
+            return Err("Download cancelled by user".to_string());
+        }
+
+        file.write_all(&chunk).map_err(|e| {
+            let _ = fs::remove_file(&part_path);
+            format!("Failed writing downloaded data: {}", e)
+        })?;
+        hasher.update(&chunk);
         downloaded_bytes += chunk.len() as u64;
 
         if last_emit.elapsed() >= Duration::from_millis(80) {
@@ -392,6 +682,47 @@ pub async fn download_app_update(
         .map_err(|e| format!("Failed to flush downloaded file: {}", e))?;
     drop(file);
 
+    let computed_sha256: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
+
+    let mut verified = false;
+    if let Some(expected) = expected_hex {
+        emit_update_progress(
+            &app,
+            AppUpdateProgressEvent {
+                phase: "verifying".to_string(),
+                downloaded_bytes,
+                total_bytes: Some(downloaded_bytes),
+                percent: Some(100),
+                file_path: None,
+                message: "Verifying SHA-256 checksum...".to_string(),
+            },
+        );
+        if computed_sha256 != expected {
+            let _ = fs::remove_file(&part_path);
+            emit_update_progress(
+                &app,
+                AppUpdateProgressEvent {
+                    phase: "error".to_string(),
+                    downloaded_bytes,
+                    total_bytes: Some(downloaded_bytes),
+                    percent: None,
+                    file_path: None,
+                    message: "SHA-256 checksum mismatch".to_string(),
+                },
+            );
+            return Err(format!(
+                "SHA-256 verification failed (expected {}, got {}). Downloaded file was removed.",
+                &expected[..12],
+                &computed_sha256[..12]
+            ));
+        }
+        verified = true;
+    }
+
     if dest_path.exists() {
         let _ = fs::remove_file(&dest_path);
     }
@@ -411,13 +742,7 @@ pub async fn download_app_update(
     }
 
     let final_path_str = dest_path.to_string_lossy().to_string();
-    let lower_name = resolved_name.to_ascii_lowercase();
-    let can_auto_apply = lower_name.ends_with(".app.tar.gz")
-        || lower_name.ends_with(".dmg")
-        || lower_name.ends_with(".exe")
-        || lower_name.ends_with(".msi")
-        || lower_name.ends_with(".appimage")
-        || lower_name.ends_with(".deb");
+    let can_auto_apply = can_auto_apply_for_os(&resolved_name, current_os_name());
 
     emit_update_progress(
         &app,
@@ -436,6 +761,8 @@ pub async fn download_app_update(
         file_name: resolved_name,
         bytes: downloaded_bytes,
         can_auto_apply,
+        sha256: computed_sha256,
+        verified,
     })
 }
 
@@ -461,13 +788,13 @@ fn find_extracted_app_bundle(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-#[tauri::command]
-pub async fn apply_downloaded_app_update(
-    app: tauri::AppHandle,
-    file_path: String,
+fn apply_update_internal(
+    app: Option<&tauri::AppHandle>,
+    file_path: &str,
     restart_app: bool,
+    exit_after_spawn: bool,
 ) -> Result<String, String> {
-    let path = PathBuf::from(&file_path);
+    let path = PathBuf::from(file_path);
     if !path.exists() {
         return Err(format!("Downloaded update file not found: {}", file_path));
     }
@@ -477,17 +804,19 @@ pub async fn apply_downloaded_app_update(
     #[cfg(target_os = "macos")]
     {
         if lower.ends_with(".app.tar.gz") {
-            emit_update_progress(
-                &app,
-                AppUpdateProgressEvent {
-                    phase: "extracting".to_string(),
-                    downloaded_bytes: 0,
-                    total_bytes: None,
-                    percent: Some(100),
-                    file_path: Some(file_path.clone()),
-                    message: "Extracting update bundle...".to_string(),
-                },
-            );
+            if let Some(handle) = app {
+                emit_update_progress(
+                    handle,
+                    AppUpdateProgressEvent {
+                        phase: "extracting".to_string(),
+                        downloaded_bytes: 0,
+                        total_bytes: None,
+                        percent: Some(100),
+                        file_path: Some(file_path.to_string()),
+                        message: "Extracting update bundle...".to_string(),
+                    },
+                );
+            }
 
             let staging_dir =
                 std::env::temp_dir().join(format!("onigiri-update-{}", now_epoch_ms()));
@@ -495,12 +824,7 @@ pub async fn apply_downloaded_app_update(
                 .map_err(|e| format!("Failed to create staging directory: {}", e))?;
 
             let tar_status = std::process::Command::new("tar")
-                .args([
-                    "-xzf",
-                    &file_path,
-                    "-C",
-                    &staging_dir.to_string_lossy(),
-                ])
+                .args(["-xzf", file_path, "-C", &staging_dir.to_string_lossy()])
                 .status()
                 .map_err(|e| format!("Failed to run tar to extract update: {}", e))?;
 
@@ -522,46 +846,46 @@ pub async fn apply_downloaded_app_update(
                     .map(|m| !m.permissions().readonly())
                     .unwrap_or(false);
 
-                if target_parent_writable && restart_app {
-                    emit_update_progress(
-                        &app,
-                        AppUpdateProgressEvent {
-                            phase: "installing".to_string(),
-                            downloaded_bytes: 0,
-                            total_bytes: None,
-                            percent: Some(100),
-                            file_path: Some(target_app.to_string_lossy().to_string()),
-                            message: "Installing update and restarting...".to_string(),
-                        },
-                    );
+                if target_parent_writable && (restart_app || !exit_after_spawn) {
+                    if let Some(handle) = app {
+                        emit_update_progress(
+                            handle,
+                            AppUpdateProgressEvent {
+                                phase: "installing".to_string(),
+                                downloaded_bytes: 0,
+                                total_bytes: None,
+                                percent: Some(100),
+                                file_path: Some(target_app.to_string_lossy().to_string()),
+                                message: "Installing update...".to_string(),
+                            },
+                        );
+                    }
 
-                    let script = r#"
-sleep 0.7
-rm -rf "$2"
-mv "$1" "$2"
-xattr -cr "$2" >/dev/null 2>&1 || true
-open -n "$2"
-"#;
+                    let script = build_atomic_macos_swap_script();
                     std::process::Command::new("sh")
                         .arg("-c")
                         .arg(script)
                         .arg("onigiri-updater")
                         .arg(&extracted_app)
                         .arg(&target_app)
+                        .arg(if restart_app { "1" } else { "0" })
                         .spawn()
                         .map_err(|e| format!("Failed to launch update installer script: {}", e))?;
 
-                    let app_clone = app.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(Duration::from_millis(250));
-                        app_clone.exit(0);
-                    });
+                    if exit_after_spawn {
+                        if let Some(handle) = app {
+                            let app_clone = handle.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(Duration::from_millis(250));
+                                app_clone.exit(0);
+                            });
+                        }
+                    }
 
                     return Ok(target_app.to_string_lossy().to_string());
                 }
             }
 
-            // Fallback: reveal extracted .app in Finder
             std::process::Command::new("open")
                 .args(["-R", &extracted_app.to_string_lossy()])
                 .spawn()
@@ -569,36 +893,52 @@ open -n "$2"
             return Ok(extracted_app.to_string_lossy().to_string());
         }
 
-        // Default on macOS (e.g., .dmg): open the installer with `open`
         std::process::Command::new("open")
-            .arg(&file_path)
+            .arg(file_path)
             .spawn()
             .map_err(|e| format!("Failed to open installer: {}", e))?;
-        return Ok(file_path);
+        return Ok(file_path.to_string());
     }
 
     #[cfg(target_os = "windows")]
     {
-        if lower.ends_with(".msi") {
-            std::process::Command::new("msiexec")
-                .args(["/i", &file_path])
-                .spawn()
-                .map_err(|e| format!("Failed to launch MSI installer: {}", e))?;
-        } else {
-            std::process::Command::new("cmd")
-                .args(["/C", "start", "", &file_path])
-                .spawn()
-                .map_err(|e| format!("Failed to launch installer: {}", e))?;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        let is_msi = lower.ends_with(".msi");
+        let delay_ms = if restart_app || !exit_after_spawn { 900 } else { 0 };
+        let ps_cmd = build_windows_update_launch_ps(file_path, is_msi, delay_ms);
+        let launched = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_cmd])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn();
+
+        if launched.is_err() {
+            if is_msi {
+                std::process::Command::new("msiexec")
+                    .args(["/i", file_path])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch MSI installer: {}", e))?;
+            } else {
+                std::process::Command::new("explorer.exe")
+                    .arg(file_path)
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch installer: {}", e))?;
+            }
         }
 
-        if restart_app {
-            let app_clone = app.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(500));
-                app_clone.exit(0);
-            });
+        if restart_app && exit_after_spawn {
+            if let Some(handle) = app {
+                let app_clone = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(250));
+                    app_clone.exit(0);
+                });
+            }
         }
-        return Ok(file_path);
+        return Ok(file_path.to_string());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -610,34 +950,86 @@ open -n "$2"
                 perms.set_mode(0o755);
                 let _ = fs::set_permissions(&path, perms);
             }
+            if let Ok(current_appimage) = std::env::var("APPIMAGE") {
+                let target_path = PathBuf::from(&current_appimage);
+                let target_parent_writable = target_path
+                    .parent()
+                    .and_then(|p| fs::metadata(p).ok())
+                    .map(|m| !m.permissions().readonly())
+                    .unwrap_or(false);
+
+                if target_parent_writable {
+                    let script = build_atomic_linux_appimage_swap_script();
+                    std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(script)
+                        .arg("onigiri-updater")
+                        .arg(&path)
+                        .arg(&target_path)
+                        .arg(if restart_app { "1" } else { "0" })
+                        .spawn()
+                        .map_err(|e| format!("Failed to launch Linux AppImage updater: {}", e))?;
+
+                    if exit_after_spawn {
+                        if let Some(handle) = app {
+                            let app_clone = handle.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(Duration::from_millis(250));
+                                app_clone.exit(0);
+                            });
+                        }
+                    }
+                    return Ok(current_appimage);
+                }
+            }
             if restart_app {
-                if let Ok(current_appimage) = std::env::var("APPIMAGE") {
-                    let target_path = PathBuf::from(&current_appimage);
-                    if fs::copy(&path, &target_path).is_ok() {
-                        let _ = std::process::Command::new(&target_path).spawn();
-                        let app_clone = app.clone();
+                std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg("sleep 0.7; \"$1\" >/dev/null 2>&1 &")
+                    .arg("onigiri-updater")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch downloaded AppImage: {}", e))?;
+                if exit_after_spawn {
+                    if let Some(handle) = app {
+                        let app_clone = handle.clone();
                         std::thread::spawn(move || {
-                            std::thread::sleep(Duration::from_millis(300));
+                            std::thread::sleep(Duration::from_millis(250));
                             app_clone.exit(0);
                         });
-                        return Ok(current_appimage);
                     }
                 }
-                if std::process::Command::new(&path).spawn().is_ok() {
-                    let app_clone = app.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(Duration::from_millis(300));
-                        app_clone.exit(0);
-                    });
-                    return Ok(file_path);
-                }
+                return Ok(file_path.to_string());
             }
         }
         std::process::Command::new("xdg-open")
-            .arg(&file_path)
+            .arg(file_path)
             .spawn()
             .map_err(|e| format!("Failed to open downloaded update package: {}", e))?;
-        return Ok(file_path);
+        return Ok(file_path.to_string());
+    }
+}
+
+#[tauri::command]
+pub async fn apply_downloaded_app_update(
+    app: tauri::AppHandle,
+    file_path: String,
+    restart_app: bool,
+) -> Result<String, String> {
+    apply_update_internal(Some(&app), &file_path, restart_app, restart_app)
+}
+
+pub fn run_pending_update_on_exit_sync(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<UpdateManagerState>() else {
+        return;
+    };
+    let pending = state
+        .pending_update_on_exit
+        .lock()
+        .ok()
+        .and_then(|mut g| g.take());
+    if let Some(file_path) = pending {
+        let _ = apply_update_internal(None, &file_path, false, false);
     }
 }
 
@@ -656,27 +1048,69 @@ mod tests {
     }
 
     #[test]
+    fn enforces_official_github_download_allowlist() {
+        assert!(is_allowed_update_download_url(
+            "https://github.com/StayHomeLabNet/Onigiri-Editor/releases/download/v1.3.3/Onigiri.Editor_1.3.3_universal.dmg"
+        ));
+        assert!(is_allowed_update_download_url(
+            "https://objects.githubusercontent.com/github-production-release-asset-2e65be/12345"
+        ));
+        assert!(is_allowed_update_download_url(
+            "https://release-assets.githubusercontent.com/github-production-release-asset/12345"
+        ));
+        assert!(!is_allowed_update_download_url(
+            "http://github.com/StayHomeLabNet/Onigiri-Editor/releases/download/v1.3.3/file.dmg"
+        ));
+        assert!(!is_allowed_update_download_url(
+            "https://github.com/OtherUser/MaliciousRepo/releases/download/v1.0.0/file.dmg"
+        ));
+        assert!(!is_allowed_update_download_url(
+            "https://github.com.evil.com/StayHomeLabNet/Onigiri-Editor/file.dmg"
+        ));
+    }
+
+    #[test]
+    fn normalizes_and_validates_sha256_digests() {
+        let valid = "sha256:902be4c5d15dec9831dbd5c79161b15304277e0e03649f530205b78670986c28";
+        assert_eq!(
+            normalize_sha256_hex(valid).as_deref(),
+            Some("902be4c5d15dec9831dbd5c79161b15304277e0e03649f530205b78670986c28")
+        );
+        assert_eq!(
+            normalize_sha256_hex("SHA256:ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789")
+                .as_deref(),
+            Some("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+        );
+        assert_eq!(normalize_sha256_hex("sha256:short"), None);
+        assert_eq!(normalize_sha256_hex("not-a-hash"), None);
+    }
+
+    #[test]
     fn picks_matching_os_installer_and_auto_update_assets() {
         let assets = vec![
             GithubAsset {
                 name: "Onigiri.Editor_1.3.3_universal.dmg".into(),
                 browser_download_url: "https://example.com/mac.dmg".into(),
                 size: 21_500_000,
+                digest: None,
             },
             GithubAsset {
                 name: "Onigiri_Editor_v1.3.3_macos-universal.app.tar.gz".into(),
                 browser_download_url: "https://example.com/mac.app.tar.gz".into(),
                 size: 20_300_000,
+                digest: None,
             },
             GithubAsset {
                 name: "Onigiri.Editor_1.3.3_x64-setup.exe".into(),
                 browser_download_url: "https://example.com/win.exe".into(),
                 size: 7_800_000,
+                digest: None,
             },
             GithubAsset {
                 name: "Onigiri.Editor_1.3.3_amd64.AppImage".into(),
                 browser_download_url: "https://example.com/linux.AppImage".into(),
                 size: 88_900_000,
+                digest: None,
             },
         ];
 
@@ -738,5 +1172,34 @@ mod tests {
             sanitize_download_file_name("../evil/path/file name.dmg"),
             "file_name.dmg"
         );
+    }
+
+    #[test]
+    fn builds_safe_windows_and_linux_update_launchers() {
+        let exe_ps = build_windows_update_launch_ps(
+            r"C:\Users\O'Brien & Co\Downloads\Onigiri.Editor_1.3.3_x64-setup.exe",
+            false,
+            900,
+        );
+        assert!(exe_ps.contains("Start-Sleep -Milliseconds 900"));
+        assert!(exe_ps.contains("O''Brien & Co"));
+        assert!(exe_ps.contains("Start-Process -FilePath"));
+
+        let msi_ps = build_windows_update_launch_ps(
+            r"C:\Users\山田\Downloads\Onigiri.msi",
+            true,
+            900,
+        );
+        assert!(msi_ps.contains("'msiexec.exe'"));
+        assert!(msi_ps.contains("'/i'"));
+
+        let linux_sh = build_atomic_linux_appimage_swap_script();
+        assert!(linux_sh.contains("mv -f \"$TMP\" \"$DST\""));
+        assert!(linux_sh.contains("sleep 0.7"));
+
+        assert!(can_auto_apply_for_os("Onigiri_1.3.3_x64-setup.exe", "windows"));
+        assert!(!can_auto_apply_for_os("Onigiri_1.3.3_universal.dmg", "windows"));
+        assert!(can_auto_apply_for_os("Onigiri_1.3.3_amd64.AppImage", "linux"));
+        assert!(!can_auto_apply_for_os("Onigiri_1.3.3_x64-setup.exe", "linux"));
     }
 }

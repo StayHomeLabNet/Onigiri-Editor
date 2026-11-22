@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildReleaseNotesDocument,
   computeCheckIntervalMs,
+  findExpectedSha256ForUrl,
   formatAssetSize,
   isVersionSkipped,
   normalizeVersionString,
@@ -111,5 +112,28 @@ describe('App update & auto-update helpers', () => {
     expect(docJa.content).toContain('# Onigiri Editor v1.4.0');
     expect(docJa.content).toContain('Auto-update support');
     expect(formatAssetSize(21_505_280)).toBe('20.5 MB');
+  });
+
+  it('finds matching SHA-256 digest for a selected release asset URL', () => {
+    const withAssets: AppUpdateInfo = {
+      ...SAMPLE_UPDATE,
+      assets: [
+        {
+          name: 'Onigiri.Editor_1.4.0_universal.dmg',
+          downloadUrl: 'https://example.com/Onigiri.Editor_1.4.0_universal.dmg',
+          size: 21_500_000,
+          platform: 'macos',
+          kind: 'dmg',
+          digest: 'sha256:902be4c5d15dec9831dbd5c79161b15304277e0e03649f530205b78670986c28',
+        },
+      ],
+    };
+    expect(
+      findExpectedSha256ForUrl(
+        withAssets,
+        'https://example.com/Onigiri.Editor_1.4.0_universal.dmg'
+      )
+    ).toBe('sha256:902be4c5d15dec9831dbd5c79161b15304277e0e03649f530205b78670986c28');
+    expect(findExpectedSha256ForUrl(withAssets, 'https://example.com/other.dmg')).toBeNull();
   });
 });

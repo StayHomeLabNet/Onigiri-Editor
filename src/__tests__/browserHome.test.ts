@@ -52,6 +52,18 @@ describe('RightBrowserPane home URL resolution', () => {
       width: 390,
       height: 700,
     });
+    expect(computeBrowserViewportBounds(rect, 'mobile', 'landscape')).toEqual({
+      x: 478,
+      y: 255,
+      width: 844,
+      height: 390,
+    });
+    expect(computeBrowserViewportBounds(rect, 'tablet', 'landscape')).toEqual({
+      x: 400,
+      y: 100,
+      width: 1000,
+      height: 700,
+    });
   });
 
   it('toggles bookmarks and maintains deduplicated recent URL history', () => {

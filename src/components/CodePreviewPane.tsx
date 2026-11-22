@@ -43,7 +43,11 @@ interface CodePreviewPaneProps {
   setupFeedback?: { ok: boolean; text: string } | null;
   recheckingEnv?: boolean;
   onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
+  onRestartProjectServer?: (targetRoot?: string) => void;
   onStopProjectServer?: (targetRoot?: string) => void;
+  onStartAllProjectTargets?: () => void;
+  onStopAllProjectTargets?: () => void;
+  onRetryWithFreePort?: (conflictPort: number) => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
   onToggleProjectServerLan?: () => void;
   onCopyLanUrl?: (url: string) => void;
@@ -151,7 +155,11 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
   setupFeedback,
   recheckingEnv,
   onStartProjectAndBrowse,
+  onRestartProjectServer,
   onStopProjectServer,
+  onStartAllProjectTargets,
+  onStopAllProjectTargets,
+  onRetryWithFreePort,
   onOpenProjectUrl,
   onToggleProjectServerLan,
   onCopyLanUrl,
@@ -321,11 +329,17 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
               onOpenTargetUrl={
                 onOpenProjectUrl ? (u) => onOpenProjectUrl(u, 'builtin') : undefined
               }
+              onRestartTargetRoot={onRestartProjectServer}
               onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
+              onStartAllTargets={onStartAllProjectTargets}
+              onStopAllTargets={onStopAllProjectTargets}
               targetLabel={t.project.targetLabel}
               scriptLabel={t.project.scriptLabel}
               lockedTitle={t.project.targetScriptLockedHint}
               stopTargetTitleTemplate={t.project.stopTargetTitle}
+              restartTargetTitleTemplate={t.project.restartTargetTitle}
+              startAllLabel={t.project.startAllTargetsBtn}
+              stopAllLabel={t.project.stopAllTargetsBtn}
             />
             {onProjectCustomPortChange && (
               <ProjectPortInput
@@ -420,11 +434,19 @@ export const CodePreviewPane: React.FC<CodePreviewPaneProps> = ({
                 <ProjectServerLogsBox
                   logs={projectServer.logs}
                   expanded={logsExpanded}
+                  runningTargets={projectServer.runningTargets}
+                  activeTargetRoot={projectInfo?.rootPath}
+                  allLogsLabel={t.project.allLogsTab}
+                  errorText={projectServer.error}
+                  requestedPort={projectServer.requestedPort}
                   copyLabel={t.project.liveLogsCopyBtn}
                   copiedLabel={t.project.liveLogsCopiedBtn}
                   clearLabel={t.project.liveLogsClearBtn}
                   askAiLabel={t.project.liveLogsAskAiBtn}
                   askAiTitle={t.project.liveLogsAskAiTitle}
+                  portConflictTemplate={t.project.portConflictBanner}
+                  portConflictRetryLabel={t.project.portConflictRetryBtn}
+                  onRetryWithFreePort={onRetryWithFreePort}
                 />
               </div>
             )}

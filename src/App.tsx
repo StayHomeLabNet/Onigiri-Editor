@@ -21,9 +21,6 @@ import type {
   AiCleanOptions,
   AiProviderConfig,
   AppMode,
-  AppUpdateDownloadResult,
-  AppUpdateInfo,
-  AppUpdateProgressEvent,
   ClearAppCacheResult,
   DocumentTab,
   EditorSettings,
@@ -33,9 +30,6 @@ import type {
   InspectorTab,
   Locale,
   ProjectConfigBundle,
-  ProjectInfo,
-  ProjectServerStatus,
-  ProjectSetupProgress,
   ReviewFinding,
   RightPaneMode,
   SearchMatch,
@@ -115,25 +109,20 @@ import {
   saveCustomKeybindings,
 } from './utils/keybindings';
 import {
-  applyDownloadedAppUpdate,
-  assistProjectSetup,
   browserClose,
   browserNavAction,
   browserSetBounds,
-  checkAppUpdates,
   checkFilesSync,
   clearAppCaches,
   createFileInDir,
   createWorkspaceFolder,
   deleteWorkspaceEntry,
-  downloadAppUpdate,
   duplicateWorkspaceFile,
   formatShortcut,
   getGitHeadFile,
   getGitPanelState,
   getGitStatus,
   getOsLocale,
-  getProjectDevServerStatus,
   gitCommit,
   gitDiscardFiles,
   gitGetDiff,
@@ -142,10 +131,7 @@ import {
   gitStageFiles,
   gitUnstageFiles,
   indexWorkspaceNotes,
-  inspectProjectForPath,
-  inspectWorkspaceProject,
   isTauri,
-  listenAppUpdateProgress,
   migrateTempImagesOnSave,
   openFolderDialog,
   openInExternalBrowser,
@@ -168,7 +154,6 @@ import {
   setWindowFullscreen,
   setWindowTitle,
   startExternalPreview,
-  startProjectDevServer,
   stopExternalPreview,
   stopProjectDevServer,
   updateExternalPreview,
@@ -298,13 +283,10 @@ const KnowledgeGraphModal = lazy(() =>
 );
 import {
   UpdateModal,
-  buildReleaseNotesDocument,
-  isVersionSkipped,
-  normalizeVersionString,
-  resolvePrimaryAutoUpdateUrl,
   shouldShowAutoUpdateNotification,
-  shouldTriggerPeriodicUpdateCheck,
 } from './components/UpdateModal';
+import { useAppUpdates } from './hooks/useAppUpdates';
+import { useProjectServer } from './hooks/useProjectServer';
 
 const ONLINE_MANUAL_URL = 'https://stayhomelab.net/help/onigiri-editor/';
 
@@ -506,14 +488,6 @@ export function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
-  const [checkingUpdates, setCheckingUpdates] = useState(false);
-  const [updateBannerDismissed, setUpdateBannerDismissed] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState<AppUpdateProgressEvent | null>(null);
-  const [downloadedUpdate, setDownloadedUpdate] = useState<AppUpdateDownloadResult | null>(null);
-  const [isDownloadingUpdate, setIsDownloadingUpdate] = useState(false);
-  const [isApplyingUpdate, setIsApplyingUpdate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
   const [dataSummaryTick, setDataSummaryTick] = useState(0);
@@ -555,83 +529,6 @@ export function App() {
   const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntry[]>([]);
   const [workspaceNoteIndex, setWorkspaceNoteIndex] = useState<WorkspaceNoteIndexEntry[]>([]);
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
-  const [projectInfo, setProjectInfo] = useState<ProjectInfo | null>(null);
-  const [projectServer, setProjectServer] = useState<ProjectServerStatus | null>(null);
-  const [projectPortOverrides, setProjectPortOverrides] = useState<Record<string, string>>(() => {
-    try {
-      const raw = localStorage.getItem('onigiri-markdown.projectPortOverrides');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed as Record<string, string>;
-        }
-      }
-    } catch {
-      // ignore storage errors
-    }
-    return {};
-  });
-  const [projectSelectedTargets, setProjectSelectedTargets] = useState<Record<string, string>>(() => {
-    try {
-      const raw = localStorage.getItem('onigiri-markdown.projectSelectedTargets');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed as Record<string, string>;
-        }
-      }
-    } catch {
-      // ignore storage errors
-    }
-    return {};
-  });
-  const [projectSelectedScripts, setProjectSelectedScripts] = useState<Record<string, string>>(() => {
-    try {
-      const raw = localStorage.getItem('onigiri-markdown.projectSelectedScripts');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          return parsed as Record<string, string>;
-        }
-      }
-    } catch {
-      // ignore storage errors
-    }
-    return {};
-  });
-  const [projectSetupBusy, setProjectSetupBusy] = useState(false);
-  const [projectSetupActionId, setProjectSetupActionId] = useState<string | null>(null);
-  const [projectSetupLogs, setProjectSetupLogs] = useState<string[]>([]);
-  const [projectSetupFeedback, setProjectSetupFeedback] = useState<{
-    ok: boolean;
-    text: string;
-  } | null>(null);
-  const [projectRechecking, setProjectRechecking] = useState(false);
-  const pendingBrowseTargetRef = useRef<'builtin' | 'external' | null>(null);
-  const notifiedPortMismatchRef = useRef<string | null>(null);
-
-  const projectPortKey = projectInfo?.rootPath || workspaceRoot || '__default__';
-  const projectCustomPort = projectPortOverrides[projectPortKey] ?? '';
-  const handleProjectCustomPortChange = useCallback(
-    (nextPort: string) => {
-      const cleaned = nextPort.replace(/\D/g, '').slice(0, 5);
-      setProjectPortOverrides((prev) => {
-        const next = { ...prev };
-        if (cleaned) {
-          next[projectPortKey] = cleaned;
-        } else {
-          delete next[projectPortKey];
-        }
-        try {
-          localStorage.setItem('onigiri-markdown.projectPortOverrides', JSON.stringify(next));
-        } catch {
-          // ignore storage errors
-        }
-        return next;
-      });
-    },
-    [projectPortKey]
-  );
 
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | null>(null);
@@ -870,6 +767,128 @@ export function App() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
+
+  const openProjectUrlBridgeRef = useRef<
+    (url: string, target: 'builtin' | 'external') => Promise<void> | void
+  >(() => {});
+
+  const {
+    projectInfo,
+    setProjectInfo,
+    projectServer,
+    setProjectServer,
+    activeProjectCustomPort: projectCustomPort,
+    projectSetupBusy,
+    projectSetupActionId,
+    projectSetupLogs,
+    projectSetupFeedback,
+    projectRechecking,
+    clearProjectSetupState,
+    clearPendingBrowseTarget,
+    handleChangeProjectCustomPort: handleProjectCustomPortChange,
+    handleSelectTargetRoot,
+    handleSelectScript,
+    handleRefreshProjectInfo,
+    handleAssistProjectSetup,
+    handleStartProjectAndBrowse,
+    handleRestartProjectServer,
+    handleStartAllProjectTargets,
+    handleStopProjectServer,
+    handleStopAllProjectTargets,
+    handleRetryWithFreePort,
+    handleToggleProjectServerLan,
+  } = useProjectServer({
+    t,
+    workspaceRoot,
+    activeFilePath: activeTab.filePath,
+    settings,
+    setSettings,
+    onOpenProjectUrl: (url, target) => openProjectUrlBridgeRef.current(url, target),
+    notify,
+    formatErrorMessage,
+  });
+
+  const dirtyTabCount = useMemo(() => tabs.filter((tb) => tb.dirty).length, [tabs]);
+
+  const handleSaveAllDirtyFiles = useCallback(async () => {
+    const dirtyTabs = tabsRef.current.filter((tb) => tb.dirty && tb.filePath);
+    for (const tb of dirtyTabs) {
+      if (!tb.filePath) continue;
+      try {
+        const textToSave =
+          tb.eol === '\r\n'
+            ? tb.content.replace(/\r?\n/g, '\r\n')
+            : tb.content.replace(/\r\n/g, '\n');
+        await writeFileSilently(tb.filePath, textToSave, tb.encoding);
+        setTabs((prev) =>
+          prev.map((item) =>
+            item.id === tb.id
+              ? {
+                  ...item,
+                  savedContent: item.content,
+                  savedEol: item.eol,
+                  savedEncoding: item.encoding,
+                  dirty: false,
+                }
+              : item
+          )
+        );
+      } catch {
+        // continue saving remaining files
+      }
+    }
+  }, []);
+
+  const handleOpenReleaseNotesTabFromHook = useCallback(
+    (title: string, content: string) => {
+      const nextTab = makeTab(title, content);
+      setTabs((prev) => [...prev, nextTab]);
+      setActiveTabId(nextTab.id);
+      if (layout === 'editor') {
+        setLayout('split');
+      }
+    },
+    [layout]
+  );
+
+  const {
+    showUpdateModal,
+    setShowUpdateModal,
+    updateInfo,
+    checkingUpdates,
+    updateBannerDismissed,
+    setUpdateBannerDismissed,
+    updateProgress,
+    downloadedUpdate,
+    applyOnQuitPath,
+    isDownloadingUpdate,
+    isApplyingUpdate,
+    pendingRestartFilePath,
+    handleCheckUpdates,
+    handleDownloadUpdateInstaller,
+    handleCancelUpdateDownload,
+    handleApplyDownloadedUpdate,
+    handleConfirmSaveAllAndUpdate,
+    handleConfirmRestartWithoutSaving,
+    handleCancelPendingRestart,
+    handleToggleApplyOnQuit,
+    handleAutoUpdateNow,
+    handleOpenReleaseNotesInTab,
+    handleSkipUpdateVersion,
+    handleUnskipUpdateVersion,
+  } = useAppUpdates({
+    t,
+    locale,
+    settings,
+    setSettings,
+    showSettings,
+    showAbout,
+    dirtyTabCount,
+    onSaveAllDirtyFiles: handleSaveAllDirtyFiles,
+    onOpenReleaseNotesTab: handleOpenReleaseNotesTabFromHook,
+    notify,
+    formatErrorMessage,
+  });
 
   const sideTab = useMemo(
     () => (sideTabId ? tabs.find((tab) => tab.id === sideTabId) || null : null),
@@ -1354,8 +1373,8 @@ export function App() {
   // Update native window title
   useEffect(() => {
     const prefix = activeTab.dirty ? '● ' : '';
-    setWindowTitle(`${prefix}${activeTab.title} — Onigiri Editor ${t.versionLabel}`);
-  }, [activeTab.title, activeTab.dirty, t.versionLabel]);
+    setWindowTitle(`${prefix}${activeTab.title} — Onigiri Editor`);
+  }, [activeTab.title, activeTab.dirty]);
 
   const resolvedSyntaxColors = useMemo(
     () => resolveSyntaxColors(settings.syntaxPreset, theme, settings.customSyntaxColors),
@@ -1451,6 +1470,49 @@ export function App() {
       notify(t.toasts.imageInserted);
     },
     [layout, notify, t.toasts.imageInserted, isSideEditorActive, editorRef]
+  );
+
+  const handleCaptureBrowserScreenshotToMarkdown = useCallback(
+    async (base64Png: string, pageUrl: string) => {
+      try {
+        const targetTab =
+          isSideEditorActive() && sideTabIdRef.current
+            ? tabsRef.current.find((tb) => tb.id === sideTabIdRef.current) || activeTab
+            : activeTab;
+        const dataUrl = `data:image/png;base64,${base64Png}`;
+        const savedPath = await savePastedImage(
+          dataUrl,
+          'png',
+          targetTab.filePath,
+          effectiveSettings.imageAssetFolder,
+          workspaceRoot
+        );
+        let alt = 'Browser Screenshot';
+        try {
+          const parsed = new URL(pageUrl);
+          alt = `Screenshot (${parsed.host}${parsed.pathname !== '/' ? parsed.pathname : ''})`;
+        } catch {
+          // keep default alt
+        }
+        insertImageIntoActivePane(savedPath, alt);
+        notify(t.browser.capturedToMarkdownToast);
+        if (workspaceRoot) {
+          void refreshWorkspaceRef.current(workspaceRoot);
+        }
+      } catch (err) {
+        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+      }
+    },
+    [
+      activeTab,
+      effectiveSettings.imageAssetFolder,
+      insertImageIntoActivePane,
+      isSideEditorActive,
+      notify,
+      t.browser.capturedToMarkdownToast,
+      t.toasts.errorPrefix,
+      workspaceRoot,
+    ]
   );
 
   const handleImageFileInput = useCallback(
@@ -2688,9 +2750,7 @@ export function App() {
     setGitDiffTarget(null);
     setProjectConfigBundle({ onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] });
     setGitHeadComparison(null);
-    setProjectSetupLogs([]);
-    setProjectSetupFeedback(null);
-    setProjectSetupActionId(null);
+    clearProjectSetupState();
   }, []);
 
   const activateWorkspaceDir = useCallback(
@@ -2907,7 +2967,7 @@ export function App() {
     const stoppedUrl = projectServer?.url;
     setStoppingServerForSwitch(true);
     try {
-      pendingBrowseTargetRef.current = null;
+      clearPendingBrowseTarget();
       const st = await stopProjectDevServer();
       setProjectServer(st);
       notify(t.toasts.devServerStopped);
@@ -4792,169 +4852,6 @@ export function App() {
     buildExternalPreviewPayload,
   ]);
 
-  const refreshProjectInfo = useCallback(
-    async (overrideTargetRoot?: string | null, overrideScript?: string | null): Promise<ProjectInfo | null> => {
-      if (!isTauri()) {
-        setProjectInfo(null);
-        return null;
-      }
-      let info: ProjectInfo | null = null;
-      if (workspaceRoot) {
-        const chosenTarget =
-          overrideTargetRoot !== undefined
-            ? overrideTargetRoot
-            : projectSelectedTargets[workspaceRoot] ?? null;
-        const scriptKey = chosenTarget || workspaceRoot;
-        const chosenScript =
-          overrideScript !== undefined
-            ? overrideScript
-            : projectSelectedScripts[scriptKey] ?? null;
-        info = await inspectWorkspaceProject(workspaceRoot, chosenTarget, chosenScript);
-      } else if (activeTab.filePath && /[/\\]/.test(activeTab.filePath)) {
-        const chosenScript =
-          overrideScript !== undefined
-            ? overrideScript
-            : projectInfo?.rootPath
-              ? projectSelectedScripts[projectInfo.rootPath] ?? null
-              : null;
-        info = await inspectProjectForPath(activeTab.filePath, chosenScript);
-      }
-      setProjectInfo(info);
-      if (info?.alreadyRunning && info.defaultUrl) {
-        setProjectServer((prev) => {
-          if (prev?.running && prev.rootPath === info.rootPath) return prev;
-          if (prev?.running && !prev.external) return prev;
-          return {
-            running: true,
-            starting: false,
-            external: true,
-            allowLan: false,
-            lanUrls: [],
-            rootPath: info.rootPath,
-            kind: info.kind,
-            url: info.defaultUrl,
-            commandLabel: info.devCommandLabel,
-            requestedPort: null,
-            requestedScript: info.devScript ?? null,
-            logs: [`Connected to already-running server at ${info.defaultUrl}`],
-            error: null,
-          };
-        });
-      }
-      return info;
-    },
-    [
-      workspaceRoot,
-      activeTab.filePath,
-      projectInfo?.rootPath,
-      projectSelectedTargets,
-      projectSelectedScripts,
-    ]
-  );
-
-  // Inspect project structure from workspace folder or active file path
-  useEffect(() => {
-    if (!isTauri()) {
-      setProjectInfo(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      let info: ProjectInfo | null = null;
-      if (workspaceRoot) {
-        const chosenTarget = projectSelectedTargets[workspaceRoot] ?? null;
-        const chosenScript = chosenTarget ? projectSelectedScripts[chosenTarget] ?? null : null;
-        info = await inspectWorkspaceProject(workspaceRoot, chosenTarget, chosenScript);
-      } else if (activeTab.filePath && /[/\\]/.test(activeTab.filePath)) {
-        info = await inspectProjectForPath(activeTab.filePath, null);
-      }
-      if (!cancelled) {
-        setProjectInfo(info);
-        if (info?.alreadyRunning && info.defaultUrl) {
-          setProjectServer((prev) => {
-            if (prev?.running && prev.rootPath === info.rootPath) return prev;
-            if (prev?.running && !prev.external) return prev;
-            return {
-              running: true,
-              starting: false,
-              external: true,
-              allowLan: false,
-              lanUrls: [],
-              rootPath: info.rootPath,
-              kind: info.kind,
-              url: info.defaultUrl,
-              commandLabel: info.devCommandLabel,
-              requestedPort: null,
-              requestedScript: info.devScript ?? null,
-              logs: [`Connected to already-running server at ${info.defaultUrl}`],
-              error: null,
-            };
-          });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceRoot, activeTab.filePath, projectSelectedTargets, projectSelectedScripts]);
-
-  const handleSelectTargetRoot = useCallback(
-    async (nextTargetRoot: string) => {
-      if (workspaceRoot) {
-        setProjectSelectedTargets((prev) => {
-          const next = { ...prev, [workspaceRoot]: nextTargetRoot };
-          try {
-            localStorage.setItem('onigiri-markdown.projectSelectedTargets', JSON.stringify(next));
-          } catch {
-            // ignore storage errors
-          }
-          return next;
-        });
-      }
-      await refreshProjectInfo(nextTargetRoot, projectSelectedScripts[nextTargetRoot] ?? null);
-    },
-    [workspaceRoot, projectSelectedScripts, refreshProjectInfo]
-  );
-
-  const handleSelectScript = useCallback(
-    async (nextScript: string) => {
-      const targetRoot = projectInfo?.rootPath || workspaceRoot;
-      if (targetRoot) {
-        setProjectSelectedScripts((prev) => {
-          const next = { ...prev, [targetRoot]: nextScript };
-          try {
-            localStorage.setItem('onigiri-markdown.projectSelectedScripts', JSON.stringify(next));
-          } catch {
-            // ignore storage errors
-          }
-          return next;
-        });
-      }
-      await refreshProjectInfo(targetRoot ?? null, nextScript);
-    },
-    [projectInfo?.rootPath, workspaceRoot, refreshProjectInfo]
-  );
-
-  // Clear setup logs & feedback when switching projects
-  useEffect(() => {
-    setProjectSetupLogs([]);
-    setProjectSetupFeedback(null);
-    setProjectSetupActionId(null);
-  }, [projectInfo?.rootPath]);
-
-  const handleRefreshProjectInfo = useCallback(async () => {
-    setProjectRechecking(true);
-    try {
-      const info = await refreshProjectInfo();
-      if (!info?.diagnostics || info.diagnostics.length === 0) {
-        setProjectSetupLogs([]);
-        setProjectSetupFeedback(null);
-      }
-    } finally {
-      setProjectRechecking(false);
-    }
-  }, [refreshProjectInfo]);
-
   const handleOpenProjectUrl = useCallback(
     async (url: string, target: 'builtin' | 'external') => {
       let targetUrl = url;
@@ -5005,339 +4902,7 @@ export function App() {
     ]
   );
 
-  const openProjectUrlRef = useRef(handleOpenProjectUrl);
-  openProjectUrlRef.current = handleOpenProjectUrl;
-
-  const maybeNotifyPortMismatch = useCallback(
-    (st: ProjectServerStatus | null | undefined) => {
-      if (!st?.running) {
-        notifiedPortMismatchRef.current = null;
-        return;
-      }
-      if (!st.url || !st.requestedPort) return;
-      const actualPort = extractPortFromUrl(st.url);
-      if (!actualPort || Number(actualPort) === st.requestedPort) return;
-      const key = `${st.url}:${st.requestedPort}`;
-      if (notifiedPortMismatchRef.current === key) return;
-      notifiedPortMismatchRef.current = key;
-      notify(
-        t.project.portMismatchNotice
-          .replace('{requested}', String(st.requestedPort))
-          .replace('{actual}', actualPort)
-      );
-    },
-    [notify, t.project.portMismatchNotice]
-  );
-  const maybeNotifyPortMismatchRef = useRef(maybeNotifyPortMismatch);
-  maybeNotifyPortMismatchRef.current = maybeNotifyPortMismatch;
-
-  // Listen to project dev server status updates
-  useEffect(() => {
-    if (!isTauri()) return;
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      try {
-        const initial = await getProjectDevServerStatus();
-        if (initial) setProjectServer(initial);
-        const { listen } = await import('@tauri-apps/api/event');
-        unlisten = await listen<ProjectServerStatus>('project-server-update', (ev) => {
-          const st = ev.payload;
-          setProjectServer(st);
-          maybeNotifyPortMismatchRef.current(st);
-          if (st?.url && pendingBrowseTargetRef.current) {
-            const target = pendingBrowseTargetRef.current;
-            pendingBrowseTargetRef.current = null;
-            openProjectUrlRef.current(st.url, target);
-            notify(t.toasts.devServerStarted);
-          } else if (st?.error && pendingBrowseTargetRef.current) {
-            pendingBrowseTargetRef.current = null;
-            notify(`${t.toasts.errorPrefix} ${st.error}`);
-          }
-        });
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      unlisten?.();
-    };
-  }, [notify, t.toasts.devServerStarted, t.toasts.errorPrefix]);
-
-  // Listen to project setup streaming logs
-  useEffect(() => {
-    if (!isTauri()) return;
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      try {
-        const { listen } = await import('@tauri-apps/api/event');
-        unlisten = await listen<ProjectSetupProgress>('project-setup-progress', (ev) => {
-          const p = ev.payload;
-          if (!p) return;
-          if (p.line) {
-            setProjectSetupLogs((prev) => [...prev.slice(-150), p.line!]);
-          }
-          if (p.done) {
-            setProjectSetupBusy(false);
-            setProjectSetupActionId(null);
-            if (p.message) {
-              setProjectSetupFeedback({ ok: Boolean(p.ok), text: p.message });
-            }
-          }
-        });
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-
-  const handleAssistProjectSetup = useCallback(
-    async (params: ProjectSetupActionParams) => {
-      if (params.action === 'open-url') {
-        try {
-          await assistProjectSetup(params);
-        } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-        }
-        return;
-      }
-
-      setProjectSetupBusy(true);
-      setProjectSetupActionId(`${params.diagId || params.action}:${params.action}`);
-      setProjectSetupLogs([]);
-      setProjectSetupFeedback(null);
-
-      try {
-        const res = await assistProjectSetup(params);
-        if (res.output && res.output.length > 0) {
-          setProjectSetupLogs((prev) => (prev.length > 0 ? prev : res.output));
-        }
-        setProjectSetupFeedback({ ok: res.ok, text: res.message });
-        if (res.ok) {
-          notify(res.message);
-          if (params.action !== 'run-terminal-command') {
-            const updated = await refreshProjectInfo();
-            if (!updated?.diagnostics || updated.diagnostics.length === 0) {
-              setProjectSetupLogs([]);
-              setProjectSetupFeedback(null);
-            }
-          }
-          if (params.action === 'launch-docker') {
-            window.setTimeout(() => {
-              void refreshProjectInfo();
-            }, 3000);
-          }
-        }
-      } catch (err) {
-        const msg = formatErrorMessage(err);
-        setProjectSetupFeedback({ ok: false, text: msg });
-        notify(`${t.toasts.errorPrefix} ${msg}`);
-      } finally {
-        setProjectSetupBusy(false);
-        setProjectSetupActionId(null);
-      }
-    },
-    [notify, refreshProjectInfo, t.toasts.errorPrefix]
-  );
-
-  const resolveRequestedPort = useCallback(
-    (rootPath: string): { valid: boolean; port: number | null } => {
-      const raw = (projectPortOverrides[rootPath] ?? '').trim();
-      if (!raw) return { valid: true, port: null };
-      const parsed = Number(raw);
-      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-        return { valid: false, port: null };
-      }
-      return { valid: true, port: parsed };
-    },
-    [projectPortOverrides]
-  );
-
-  const handleStartProjectAndBrowse = useCallback(
-    async (target: 'builtin' | 'external') => {
-      const root = projectInfo?.rootPath || workspaceRoot;
-      if (!root) return;
-      if (projectServer?.starting && projectServer.rootPath === root) {
-        pendingBrowseTargetRef.current = target;
-        return;
-      }
-      const existingTarget = projectServer?.runningTargets?.find(
-        (rt) => rt.rootPath === root && !rt.starting && rt.url
-      );
-      if (existingTarget?.url) {
-        await handleOpenProjectUrl(existingTarget.url, target);
-        return;
-      }
-      if (projectServer?.running && projectServer.rootPath === root && projectServer.url) {
-        await handleOpenProjectUrl(projectServer.url, target);
-        return;
-      }
-      const { valid, port: requestedPort } = resolveRequestedPort(root);
-      if (!valid) {
-        notify(`${t.toasts.errorPrefix} ${t.project.invalidPortError}`);
-        return;
-      }
-      try {
-        pendingBrowseTargetRef.current = target;
-        const st = await startProjectDevServer(
-          root,
-          projectInfo?.devScript,
-          settings.projectServerAllowLan,
-          requestedPort
-        );
-        setProjectServer(st);
-        maybeNotifyPortMismatch(st);
-        if (st.url && pendingBrowseTargetRef.current) {
-          const dest = pendingBrowseTargetRef.current;
-          pendingBrowseTargetRef.current = null;
-          await handleOpenProjectUrl(st.url, dest);
-          notify(t.toasts.devServerStarted);
-        }
-      } catch (err) {
-        pendingBrowseTargetRef.current = null;
-        const msg = formatErrorMessage(err);
-        setProjectServer((prev) => ({
-          running: false,
-          starting: false,
-          external: false,
-          allowLan: settings.projectServerAllowLan,
-          lanUrls: [],
-          rootPath: root,
-          kind: projectInfo?.kind ?? prev?.kind ?? null,
-          url: null,
-          commandLabel: projectInfo?.devCommandLabel ?? prev?.commandLabel ?? null,
-          logs: prev?.rootPath === root && prev.logs.length > 0 ? prev.logs : [msg],
-          error: msg,
-        }));
-        notify(`${t.toasts.errorPrefix} ${msg}`);
-      }
-    },
-    [
-      projectInfo,
-      projectServer,
-      workspaceRoot,
-      settings.projectServerAllowLan,
-      resolveRequestedPort,
-      handleOpenProjectUrl,
-      notify,
-      t.project.invalidPortError,
-      t.toasts.devServerStarted,
-      t.toasts.errorPrefix,
-    ]
-  );
-
-  const handleToggleProjectServerLan = useCallback(() => {
-    setSettings((s) => {
-      const nextAllowLan = !s.projectServerAllowLan;
-      return { ...s, projectServerAllowLan: nextAllowLan };
-    });
-  }, []);
-
-  // Rebind/restart project dev server cleanly when LAN access setting changes while running
-  const lastProjectLanRef = useRef(settings.projectServerAllowLan);
-  useEffect(() => {
-    const prev = lastProjectLanRef.current;
-    lastProjectLanRef.current = settings.projectServerAllowLan;
-    if (prev === settings.projectServerAllowLan || !isTauri()) return;
-    if (!projectServer?.running || !projectServer.rootPath) {
-      notify(
-        settings.projectServerAllowLan
-          ? t.toasts.devServerLanEnabled
-          : t.toasts.devServerLanDisabled
-      );
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const scriptArg =
-          projectInfo?.rootPath === projectServer.rootPath ? projectInfo.devScript : undefined;
-        const { valid, port: requestedPort } = resolveRequestedPort(projectServer.rootPath!);
-        const st = await startProjectDevServer(
-          projectServer.rootPath!,
-          scriptArg,
-          settings.projectServerAllowLan,
-          valid ? requestedPort : null
-        );
-        if (!cancelled) {
-          setProjectServer(st);
-          if (settings.projectServerAllowLan) {
-            if (st.lanUrls && st.lanUrls.length > 0) {
-              notify(`${t.toasts.devServerLanEnabled}: ${st.lanUrls[0]}`);
-            } else if (st.external) {
-              notify(t.project.externalLanUnavailableHint);
-            } else {
-              notify(t.toasts.devServerLanEnabled);
-            }
-          } else {
-            notify(t.toasts.devServerLanDisabled);
-          }
-        }
-      } catch (err) {
-        if (!cancelled) {
-          const msg = formatErrorMessage(err);
-          const failedRoot = projectServer.rootPath ?? null;
-          setProjectServer((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  running: false,
-                  starting: false,
-                  external: false,
-                  lanUrls: [],
-                  url: null,
-                  error: msg,
-                  logs: prev.logs.length > 0 ? prev.logs : [msg],
-                }
-              : {
-                  running: false,
-                  starting: false,
-                  external: false,
-                  allowLan: settings.projectServerAllowLan,
-                  lanUrls: [],
-                  rootPath: failedRoot,
-                  kind: projectInfo?.kind ?? null,
-                  url: null,
-                  commandLabel: projectInfo?.devCommandLabel ?? null,
-                  logs: [msg],
-                  error: msg,
-                }
-          );
-          notify(`${t.toasts.errorPrefix} ${msg}`);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    settings.projectServerAllowLan,
-    projectServer?.running,
-    projectServer?.rootPath,
-    projectInfo?.rootPath,
-    projectInfo?.devScript,
-    notify,
-    t.toasts.devServerLanEnabled,
-    t.toasts.devServerLanDisabled,
-    t.toasts.errorPrefix,
-    t.project.externalLanUnavailableHint,
-  ]);
-
-  const handleStopProjectServer = useCallback(
-    async (targetRoot?: string) => {
-      try {
-        pendingBrowseTargetRef.current = null;
-        const st = await stopProjectDevServer(targetRoot);
-        setProjectServer(st);
-        notify(t.toasts.devServerStopped);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [notify, t.toasts.devServerStopped, t.toasts.errorPrefix]
-  );
+  openProjectUrlBridgeRef.current = handleOpenProjectUrl;
 
   useEffect(() => {
     const onAskAiWithPrompt = () => {
@@ -5413,236 +4978,6 @@ export function App() {
       notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
     });
   }, [notify, t.toasts.errorPrefix]);
-
-  useEffect(() => {
-    if (!isTauri()) return;
-    let dispose: (() => void) | null = null;
-    void listenAppUpdateProgress((ev) => {
-      setUpdateProgress(ev);
-    }).then((unlisten) => {
-      dispose = unlisten;
-    });
-    return () => {
-      if (dispose) dispose();
-    };
-  }, []);
-
-  const handleDownloadUpdateInstaller = useCallback(
-    async (
-      targetUrl?: string,
-      fileName?: string,
-      silent = false
-    ): Promise<AppUpdateDownloadResult | null> => {
-      if (!isTauri()) return null;
-      const url =
-        targetUrl ||
-        updateInfo?.downloadUrl ||
-        updateInfo?.autoUpdateUrl ||
-        resolvePrimaryAutoUpdateUrl(updateInfo);
-      if (!url) {
-        if (updateInfo?.releaseUrl) {
-          void openInExternalBrowser(updateInfo.releaseUrl);
-        }
-        return null;
-      }
-      setIsDownloadingUpdate(true);
-      try {
-        const res = await downloadAppUpdate(url, fileName);
-        setDownloadedUpdate(res);
-        if (!silent) {
-          notify(t.updates.downloadedToast.replace('{name}', res.fileName));
-        }
-        return res;
-      } catch (err) {
-        if (!silent) {
-          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-        }
-        return null;
-      } finally {
-        setIsDownloadingUpdate(false);
-      }
-    },
-    [notify, t.toasts.errorPrefix, t.updates.downloadedToast, updateInfo]
-  );
-
-  const handleApplyDownloadedUpdate = useCallback(
-    async (filePath: string, restartApp = true) => {
-      if (!isTauri() || !filePath) return;
-      setIsApplyingUpdate(true);
-      try {
-        notify(t.updates.applyingUpdateToast);
-        await applyDownloadedAppUpdate(filePath, restartApp);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      } finally {
-        setIsApplyingUpdate(false);
-      }
-    },
-    [notify, t.toasts.errorPrefix, t.updates.applyingUpdateToast]
-  );
-
-  const handleAutoUpdateNow = useCallback(async () => {
-    if (!isTauri() || !updateInfo) return;
-    if (downloadedUpdate?.filePath) {
-      await handleApplyDownloadedUpdate(downloadedUpdate.filePath, true);
-      return;
-    }
-    const autoUrl = resolvePrimaryAutoUpdateUrl(updateInfo);
-    if (!autoUrl) {
-      void openInExternalBrowser(updateInfo.releaseUrl);
-      return;
-    }
-    const res = await handleDownloadUpdateInstaller(autoUrl, undefined, false);
-    if (res?.filePath) {
-      await handleApplyDownloadedUpdate(res.filePath, true);
-    }
-  }, [downloadedUpdate, handleApplyDownloadedUpdate, handleDownloadUpdateInstaller, updateInfo]);
-
-  const handleOpenReleaseNotesInTab = useCallback(
-    (info: AppUpdateInfo) => {
-      const doc = buildReleaseNotesDocument(info, locale);
-      const nextTab = makeTab(doc.title, doc.content);
-      setTabs((prev) => [...prev, nextTab]);
-      setActiveTabId(nextTab.id);
-      if (layout === 'editor') {
-        setLayout('split');
-      }
-    },
-    [layout, locale]
-  );
-
-  const handleSkipUpdateVersion = useCallback(
-    (version: string) => {
-      const normalized = normalizeVersionString(version);
-      if (!normalized) return;
-      setSettings((prev) => ({
-        ...prev,
-        skippedUpdateVersion: normalized,
-      }));
-      setUpdateBannerDismissed(true);
-      notify(t.updates.skippedVersionToast.replace('{version}', normalized));
-    },
-    [notify, t.updates.skippedVersionToast]
-  );
-
-  const handleUnskipUpdateVersion = useCallback(() => {
-    setSettings((prev) => ({
-      ...prev,
-      skippedUpdateVersion: '',
-    }));
-    setUpdateBannerDismissed(false);
-  }, []);
-
-  const autoDownloadedVersionRef = useRef<string | null>(null);
-
-  const handleCheckUpdates = useCallback(
-    async (silent = false) => {
-      if (!isTauri()) return;
-      setCheckingUpdates(true);
-      try {
-        const info = await checkAppUpdates();
-        setUpdateInfo(info);
-        if (info.hasUpdate) {
-          const isSkipped = isVersionSkipped(info.latestVersion, settings.skippedUpdateVersion);
-          const behavior = settings.updateAvailableBehavior ?? 'banner';
-
-          if (!silent) {
-            setUpdateBannerDismissed(false);
-            notify(t.toasts.updateAvailable.replace('{version}', info.latestVersion));
-            if (!showSettings && !showAbout) {
-              setShowUpdateModal(true);
-            }
-          } else if (!isSkipped) {
-            if (behavior === 'badge-only') {
-              setUpdateBannerDismissed(true);
-            } else {
-              setUpdateBannerDismissed(false);
-            }
-            if (behavior === 'modal') {
-              setShowUpdateModal(true);
-            }
-            if (
-              (settings.autoUpdateEnabled || behavior === 'auto-install') &&
-              autoDownloadedVersionRef.current !== info.latestVersion
-            ) {
-              const autoUrl = resolvePrimaryAutoUpdateUrl(info);
-              if (autoUrl) {
-                autoDownloadedVersionRef.current = info.latestVersion;
-                void handleDownloadUpdateInstaller(autoUrl, undefined, false);
-              }
-            }
-          }
-        } else if (!silent) {
-          notify(t.toasts.upToDate.replace('{version}', info.currentVersion));
-        }
-      } catch (err) {
-        if (!silent) {
-          const msg = err instanceof Error ? err.message : String(err || '');
-          notify(msg ? `${t.toasts.updateCheckFailed}: ${msg}` : t.toasts.updateCheckFailed);
-        }
-      } finally {
-        setCheckingUpdates(false);
-      }
-    },
-    [
-      handleDownloadUpdateInstaller,
-      notify,
-      settings.autoUpdateEnabled,
-      settings.skippedUpdateVersion,
-      settings.updateAvailableBehavior,
-      showAbout,
-      showSettings,
-      t.toasts.upToDate,
-      t.toasts.updateAvailable,
-      t.toasts.updateCheckFailed,
-    ]
-  );
-
-  const startupUpdateCheckedRef = useRef(false);
-  useEffect(() => {
-    if (!isTauri() || startupUpdateCheckedRef.current) return;
-    if (settings.checkUpdatesOnStartup === false) return;
-    startupUpdateCheckedRef.current = true;
-    const timer = window.setTimeout(() => {
-      void handleCheckUpdates(true);
-    }, 2500);
-    return () => window.clearTimeout(timer);
-  }, [handleCheckUpdates, settings.checkUpdatesOnStartup]);
-
-  // Periodic background update check & window focus check
-  useEffect(() => {
-    if (!isTauri()) return;
-    if (settings.checkUpdatesOnStartup === false) return;
-    const intervalHours = settings.updateCheckIntervalHours ?? 6;
-    if (intervalHours <= 0) return;
-
-    const maybeRunPeriodicCheck = () => {
-      if (
-        shouldTriggerPeriodicUpdateCheck({
-          autoCheckEnabled: settings.checkUpdatesOnStartup !== false,
-          intervalHours,
-          lastCheckedAtMs: updateInfo?.checkedAtMs ?? null,
-          nowMs: Date.now(),
-          isChecking: checkingUpdates,
-        })
-      ) {
-        void handleCheckUpdates(true);
-      }
-    };
-
-    const timer = window.setInterval(maybeRunPeriodicCheck, 60 * 1000);
-    window.addEventListener('focus', maybeRunPeriodicCheck);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('focus', maybeRunPeriodicCheck);
-    };
-  }, [
-    checkingUpdates,
-    handleCheckUpdates,
-    settings.checkUpdatesOnStartup,
-    settings.updateCheckIntervalHours,
-    updateInfo?.checkedAtMs,
-  ]);
 
   const openSettingsModal = useCallback((tab: SettingsTab = 'general') => {
     setSettingsInitialTab(tab);
@@ -7112,19 +6447,30 @@ export function App() {
                             : t.updates.autoUpdateNowBtn}
                         </span>
                       </button>
-                      <button
-                        type="button"
-                        className="secondary-btn compact-btn"
-                        disabled={isDownloadingUpdate || isApplyingUpdate}
-                        onClick={() =>
-                          void handleDownloadUpdateInstaller(
-                            updateInfo.downloadUrl || updateInfo.autoUpdateUrl || undefined
-                          )
-                        }
-                      >
-                        <Download size={12} />
-                        <span>{t.updates.downloadInstallerBtn}</span>
-                      </button>
+                      {isDownloadingUpdate ? (
+                        <button
+                          type="button"
+                          className="secondary-btn compact-btn"
+                          onClick={() => void handleCancelUpdateDownload()}
+                        >
+                          <X size={12} />
+                          <span>{t.updates.cancelDownloadBtn}</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="secondary-btn compact-btn"
+                          disabled={isApplyingUpdate}
+                          onClick={() =>
+                            void handleDownloadUpdateInstaller(
+                              updateInfo.downloadUrl || updateInfo.autoUpdateUrl || undefined
+                            )
+                          }
+                        >
+                          <Download size={12} />
+                          <span>{t.updates.downloadInstallerBtn}</span>
+                        </button>
+                      )}
                     </>
                   )}
                   <button
@@ -7239,7 +6585,11 @@ export function App() {
             setupFeedback={projectSetupFeedback}
             recheckingEnv={projectRechecking}
             onStartProjectAndBrowse={handleStartProjectAndBrowse}
+            onRestartProjectServer={(tr) => void handleRestartProjectServer(tr)}
             onStopProjectServer={handleStopProjectServer}
+            onStartAllProjectTargets={() => void handleStartAllProjectTargets()}
+            onStopAllProjectTargets={() => void handleStopAllProjectTargets()}
+            onRetryWithFreePort={(cp) => void handleRetryWithFreePort(cp)}
             onOpenProjectUrl={handleOpenProjectUrl}
             onToggleProjectServerLan={handleToggleProjectServerLan}
             onCopyLanUrl={handleCopyLanUrl}
@@ -7783,7 +7133,11 @@ export function App() {
                       setupFeedback={projectSetupFeedback}
                       recheckingEnv={projectRechecking}
                       onStartProjectAndBrowse={handleStartProjectAndBrowse}
+                      onRestartProjectServer={(tr) => void handleRestartProjectServer(tr)}
                       onStopProjectServer={handleStopProjectServer}
+                      onStartAllProjectTargets={() => void handleStartAllProjectTargets()}
+                      onStopAllProjectTargets={() => void handleStopAllProjectTargets()}
+                      onRetryWithFreePort={(cp) => void handleRetryWithFreePort(cp)}
                       onOpenProjectUrl={handleOpenProjectUrl}
                       onToggleProjectServerLan={handleToggleProjectServerLan}
                       onCopyLanUrl={handleCopyLanUrl}
@@ -7830,7 +7184,11 @@ export function App() {
                       setupFeedback={projectSetupFeedback}
                       recheckingEnv={projectRechecking}
                       onStartProjectAndBrowse={handleStartProjectAndBrowse}
+                      onRestartProjectServer={(tr) => void handleRestartProjectServer(tr)}
                       onStopProjectServer={handleStopProjectServer}
+                      onStartAllProjectTargets={() => void handleStartAllProjectTargets()}
+                      onStopAllProjectTargets={() => void handleStopAllProjectTargets()}
+                      onRetryWithFreePort={(cp) => void handleRetryWithFreePort(cp)}
                       onOpenProjectUrl={handleOpenProjectUrl}
                       onToggleProjectServerLan={handleToggleProjectServerLan}
                       onCopyLanUrl={handleCopyLanUrl}
@@ -7875,6 +7233,7 @@ export function App() {
                     homeUrl={settings.builtinBrowserDefaultUrl}
                     onUrlChange={setBrowserUrl}
                     onOpenBrowserSettings={() => openSettingsModal('integrations')}
+                    onCaptureScreenshotToMarkdown={handleCaptureBrowserScreenshotToMarkdown}
                     visible={nativeBrowserVisible}
                     projectInfo={projectInfo}
                     projectServer={projectServer}
@@ -7888,8 +7247,12 @@ export function App() {
                     setupLogs={projectSetupLogs}
                     setupFeedback={projectSetupFeedback}
                     recheckingEnv={projectRechecking}
-                    onStartProjectServer={() => handleStartProjectAndBrowse('builtin')}
+                    onStartProjectServer={(tr) => void handleStartProjectAndBrowse('builtin', undefined, tr)}
+                    onRestartProjectServer={(tr) => void handleRestartProjectServer(tr)}
                     onStopProjectServer={handleStopProjectServer}
+                    onStartAllProjectTargets={() => void handleStartAllProjectTargets()}
+                    onStopAllProjectTargets={() => void handleStopAllProjectTargets()}
+                    onRetryWithFreePort={(cp) => void handleRetryWithFreePort(cp)}
                     onToggleProjectServerLan={handleToggleProjectServerLan}
                     onCopyLanUrl={handleCopyLanUrl}
                     onAssistProjectSetup={handleAssistProjectSetup}
@@ -8022,6 +7385,12 @@ export function App() {
           updateAvailableVersion={updateInfo?.hasUpdate ? updateInfo.latestVersion : null}
           updateReadyToInstall={Boolean(downloadedUpdate)}
           onOpenUpdateModal={() => setShowUpdateModal(true)}
+          projectServer={projectServer}
+          onSelectTargetRoot={(tr) => void handleSelectTargetRoot(tr)}
+          onOpenProjectUrl={handleOpenProjectUrl}
+          onRestartProjectServer={(tr) => void handleRestartProjectServer(tr)}
+          onStopProjectServer={handleStopProjectServer}
+          onStopAllProjectTargets={() => void handleStopAllProjectTargets()}
         />
       )}
 
@@ -8035,8 +7404,16 @@ export function App() {
         onCheckUpdates={() => void handleCheckUpdates(false)}
         updateProgress={updateProgress}
         downloadedUpdate={downloadedUpdate}
+        applyOnQuitPath={applyOnQuitPath}
         isDownloadingUpdate={isDownloadingUpdate}
         isApplyingUpdate={isApplyingUpdate}
+        dirtyTabCount={dirtyTabCount}
+        pendingRestartFilePath={pendingRestartFilePath}
+        onCancelDownload={() => void handleCancelUpdateDownload()}
+        onToggleApplyOnQuit={(fp) => void handleToggleApplyOnQuit(fp)}
+        onConfirmSaveAllAndUpdate={() => void handleConfirmSaveAllAndUpdate()}
+        onConfirmRestartWithoutSaving={() => void handleConfirmRestartWithoutSaving()}
+        onCancelPendingRestart={handleCancelPendingRestart}
         onAutoUpdateNow={() => void handleAutoUpdateNow()}
         onDownloadInstaller={(url, fileName) =>
           void handleDownloadUpdateInstaller(url, fileName, false)

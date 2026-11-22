@@ -6,13 +6,18 @@ import {
   Home,
   Settings,
   Bug,
+  Camera,
   ExternalLink,
   Globe,
   Play,
   Square,
   Loader2,
   AlertCircle,
+  AlertTriangle,
+  FolderTree,
   Info,
+  Plus,
+  Terminal,
   Wifi,
   X,
   Star,
@@ -20,11 +25,13 @@ import {
   Monitor,
   Tablet,
   Smartphone,
+  SmartphoneCharging,
   Trash2,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
 import {
+  browserCaptureScreenshot,
   browserNavAction,
   browserNavigate,
   browserOpenDevtools,
@@ -37,18 +44,21 @@ import {
 } from '../utils/platform';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
-import { ProjectPortInput } from './ProjectPortInput';
+import { extractPortFromUrl, ProjectPortInput } from './ProjectPortInput';
 import {
+  getRunningTargetsList,
   isTargetCurrentlyActive,
-  ProjectTargetControls,
+  orderProjectScripts,
 } from './ProjectTargetControls';
 import {
   countErrorLogLines,
+  getTargetErrorCount,
   ProjectServerLogsBox,
   ProjectServerLogsToggle,
 } from './ProjectServerLogs';
 
 export type BrowserViewportMode = 'full' | 'tablet' | 'mobile';
+export type BrowserViewportOrientation = 'portrait' | 'landscape';
 
 export interface BrowserBookmarkItem {
   url: string;
@@ -65,6 +75,7 @@ interface RightBrowserPaneProps {
   homeUrl?: string;
   onUrlChange: (url: string) => void;
   onOpenBrowserSettings?: () => void;
+  onCaptureScreenshotToMarkdown?: (base64Png: string, pageUrl: string) => Promise<void> | void;
   visible: boolean;
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
@@ -78,8 +89,12 @@ interface RightBrowserPaneProps {
   setupLogs?: string[];
   setupFeedback?: { ok: boolean; text: string } | null;
   recheckingEnv?: boolean;
-  onStartProjectServer?: () => void;
+  onStartProjectServer?: (targetRoot?: string) => void;
+  onRestartProjectServer?: (targetRoot?: string) => void;
   onStopProjectServer?: (targetRoot?: string) => void;
+  onStartAllProjectTargets?: () => void;
+  onStopAllProjectTargets?: () => void;
+  onRetryWithFreePort?: (conflictPort: number) => void;
   onToggleProjectServerLan?: () => void;
   onCopyLanUrl?: (url: string) => void;
   onAssistProjectSetup?: (params: ProjectSetupActionParams) => void;
@@ -119,15 +134,33 @@ export function urlsShareOrigin(a?: string | null, b?: string | null): boolean {
 
 export function computeBrowserViewportBounds(
   rect: { left: number; top: number; width: number; height: number },
-  viewport: BrowserViewportMode
+  viewport: BrowserViewportMode,
+  orientation: BrowserViewportOrientation = 'portrait'
 ): { x: number; y: number; width: number; height: number } {
   const availW = Math.max(120, Math.round(rect.width));
   const availH = Math.max(120, Math.round(rect.height));
-  const maxW = viewport === 'mobile' ? 390 : viewport === 'tablet' ? 768 : availW;
+  let maxW = availW;
+  let maxH = availH;
+  if (viewport === 'mobile') {
+    if (orientation === 'landscape') {
+      maxW = 844;
+      maxH = 390;
+    } else {
+      maxW = 390;
+    }
+  } else if (viewport === 'tablet') {
+    if (orientation === 'landscape') {
+      maxW = 1024;
+      maxH = 768;
+    } else {
+      maxW = 768;
+    }
+  }
   const width = Math.max(120, Math.min(availW, maxW));
+  const height = Math.max(120, Math.min(availH, maxH));
   const x = Math.round(rect.left + Math.max(0, (availW - width) / 2));
-  const y = Math.round(rect.top);
-  return { x, y, width, height: availH };
+  const y = Math.round(rect.top + Math.max(0, (availH - height) / 2));
+  return { x, y, width, height };
 }
 
 export function formatBookmarkShortLabel(rawUrl: string): string {
@@ -178,6 +211,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   homeUrl,
   onUrlChange,
   onOpenBrowserSettings,
+  onCaptureScreenshotToMarkdown,
   visible,
   projectInfo,
   projectServer,
@@ -192,7 +226,11 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   setupFeedback,
   recheckingEnv,
   onStartProjectServer,
+  onRestartProjectServer,
   onStopProjectServer,
+  onStartAllProjectTargets,
+  onStopAllProjectTargets,
+  onRetryWithFreePort,
   onToggleProjectServerLan,
   onCopyLanUrl,
   onAssistProjectSetup,
@@ -207,8 +245,12 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [logsExpanded, setLogsExpanded] = useState(false);
+  const [serverSettingsOpen, setServerSettingsOpen] = useState(false);
+  const [addServerDrawerOpen, setAddServerDrawerOpen] = useState(false);
   const [dismissedStoppedBannerUrl, setDismissedStoppedBannerUrl] = useState<string | null>(null);
   const [viewport, setViewport] = useState<BrowserViewportMode>('full');
+  const [orientation, setOrientation] = useState<BrowserViewportOrientation>('portrait');
+  const [capturingShot, setCapturingShot] = useState(false);
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
 
   const [bookmarks, setBookmarks] = useState<BrowserBookmarkItem[]>(() => {
@@ -246,6 +288,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   latestVisibleRef.current = visible;
   const latestViewportRef = useRef<BrowserViewportMode>(viewport);
   latestViewportRef.current = viewport;
+  const latestOrientationRef = useRef<BrowserViewportOrientation>(orientation);
+  latestOrientationRef.current = orientation;
 
   const recordHistoryUrl = useCallback((targetUrl: string) => {
     setHistory((prev) => {
@@ -317,7 +361,26 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     Boolean(projectInfo && projectInfo.kind !== 'none' && projectInfo.devCommandLabel);
 
   const serverLogs = projectServer?.logs || [];
-  const logErrorCount = useMemo(() => countErrorLogLines(serverLogs), [serverLogs]);
+  const runningTargets = useMemo(
+    () => getRunningTargetsList(projectServer),
+    [projectServer]
+  );
+  const logErrorCount = useMemo(() => {
+    if (runningTargets.length > 1) {
+      return runningTargets.reduce((sum, rt) => sum + getTargetErrorCount(rt), 0);
+    }
+    return countErrorLogLines(serverLogs);
+  }, [runningTargets, serverLogs]);
+  const allTargets = projectInfo?.targets || [];
+  const inactiveTargets = useMemo(
+    () => allTargets.filter((tgt) => !isTargetCurrentlyActive(tgt.rootPath, projectServer)),
+    [allTargets, projectServer]
+  );
+  const orderedScripts = useMemo(
+    () => orderProjectScripts(projectInfo?.scripts || [], projectInfo?.devScript),
+    [projectInfo?.scripts, projectInfo?.devScript]
+  );
+  const currentTargetRoot = projectInfo?.rootPath || allTargets[0]?.rootPath || null;
 
   const isSelectedTargetActive = useMemo(() => {
     if (!projectInfo?.rootPath) return Boolean(projectServer?.running);
@@ -359,7 +422,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       const rect = el.getBoundingClientRect();
       const { x, y, width, height } = computeBrowserViewportBounds(
         rect,
-        latestViewportRef.current
+        latestViewportRef.current,
+        latestOrientationRef.current
       );
 
       const effectiveVisible =
@@ -390,7 +454,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             const postRect = postEl.getBoundingClientRect();
             const postBounds = computeBrowserViewportBounds(
               postRect,
-              latestViewportRef.current
+              latestViewportRef.current,
+              latestOrientationRef.current
             );
             await browserSetBounds({
               ...postBounds,
@@ -449,6 +514,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   }, [
     visible,
     viewport,
+    orientation,
     bookmarks.length,
     showHistoryDrawer,
     showProjectBar,
@@ -456,6 +522,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     projectServer?.url,
     projectServer?.runningTargets?.length,
     logsExpanded,
+    serverSettingsOpen,
+    addServerDrawerOpen,
     showStoppedBanner,
     syncBounds,
   ]);
@@ -519,7 +587,11 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                 width: 500,
                 height: 500,
               };
-              const bounds = computeBrowserViewportBounds(rect, latestViewportRef.current);
+              const bounds = computeBrowserViewportBounds(
+                rect,
+                latestViewportRef.current,
+                latestOrientationRef.current
+              );
               const res = await browserOpenOrUpdate({
                 url: target,
                 ...bounds,
@@ -572,6 +644,27 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       // ignore if webview not ready
     }
   }, [draftUrl, url]);
+
+  const handleCaptureScreenshot = useCallback(async () => {
+    if (!isTauri() || !onCaptureScreenshotToMarkdown || capturingShot) return;
+    const el = hostRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const bounds = computeBrowserViewportBounds(
+      rect,
+      latestViewportRef.current,
+      latestOrientationRef.current
+    );
+    setCapturingShot(true);
+    try {
+      const base64Png = await browserCaptureScreenshot(bounds);
+      await onCaptureScreenshotToMarkdown(base64Png, draftUrl || url);
+    } catch (err) {
+      setBrowserError((err as Error)?.message || 'Failed to capture browser screenshot');
+    } finally {
+      setCapturingShot(false);
+    }
+  }, [capturingShot, draftUrl, onCaptureScreenshotToMarkdown, url]);
 
   useEffect(() => {
     const onReloadEvent = () => handleReload();
@@ -727,7 +820,39 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           >
             <Smartphone size={13} />
           </button>
+          {viewport !== 'full' && (
+            <button
+              type="button"
+              className={`icon-btn-sm ${orientation === 'landscape' ? 'is-active' : ''}`}
+              onClick={() =>
+                setOrientation((prev) => (prev === 'portrait' ? 'landscape' : 'portrait'))
+              }
+              title={t.browser.rotateViewportTitle}
+              aria-label={t.browser.rotateViewportTitle}
+            >
+              <SmartphoneCharging
+                size={13}
+                style={{
+                  transform: orientation === 'landscape' ? 'rotate(90deg)' : undefined,
+                  transition: 'transform 0.15s ease',
+                }}
+              />
+            </button>
+          )}
         </div>
+
+        {isTauri() && onCaptureScreenshotToMarkdown && (
+          <button
+            type="button"
+            className="icon-btn-sm"
+            disabled={capturingShot}
+            onClick={() => void handleCaptureScreenshot()}
+            title={t.browser.captureToMarkdownTitle}
+            aria-label={t.browser.captureToMarkdownTitle}
+          >
+            {capturingShot ? <Loader2 size={13} className="spin" /> : <Camera size={14} />}
+          </button>
+        )}
 
         {isTauri() && (
           <button
@@ -831,144 +956,364 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       )}
 
       {showProjectBar && (
-        <div className="browser-project-bar">
-          <div className="browser-project-info">
-            <span
-              className={`project-status-dot ${
-                projectServer?.running
-                  ? projectServer.starting
-                    ? 'is-starting'
-                    : 'is-running'
-                  : ''
-              }`}
-            />
-            <span className="browser-project-name">
-              {projectInfo?.name || projectServer?.kind?.toUpperCase() || 'Project'}
-            </span>
-            {projectServer?.external && (
-              <span className="project-ext-badge">{t.project.externalServerLabel}</span>
-            )}
-            {projectServer?.url && (
-              <button
-                type="button"
-                className="project-url-chip"
-                onClick={() => navigateTo(projectServer.url!)}
-              >
-                {projectServer.url}
-              </button>
-            )}
-            {projectServer?.running &&
-              projectServer.lanUrls &&
-              projectServer.lanUrls.length > 0 && (
-                <LanUrlList
-                  urls={projectServer.lanUrls}
-                  label={t.project.lanUrlsLabel}
-                  showTitle={t.project.lanUrlsToggleShowTitle}
-                  hideTitle={t.project.lanUrlsToggleHideTitle}
-                  copyTitlePrefix={t.project.lanUrlCopyTitle}
-                  qrShowTitle={t.project.qrShowTitle}
-                  qrHideTitle={t.project.qrHideTitle}
-                  qrScanHint={t.project.qrScanHint}
-                  showOtherTemplate={t.project.lanShowOtherBtn}
-                  hideOtherLabel={t.project.lanHideOtherBtn}
-                  onCopyUrl={onCopyLanUrl}
-                  variant="inline"
-                />
+        <div className="browser-project-bar is-compact">
+          <div className="browser-project-compact-row">
+            <div className="browser-project-tabs-area">
+              {runningTargets.length > 0 ? (
+                <>
+                  <div className="project-running-targets-list">
+                    {runningTargets.map((rt) => {
+                      const port = extractPortFromUrl(rt.url);
+                      const isSelected = rt.rootPath === currentTargetRoot;
+                      const errCnt = getTargetErrorCount(rt);
+                      return (
+                        <span
+                          key={rt.rootPath}
+                          className={`project-running-target-pill ${isSelected ? 'is-selected' : ''} ${
+                            errCnt > 0 ? 'has-error' : ''
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            className="project-running-target-btn"
+                            title={rt.url || rt.commandLabel || rt.name}
+                            onClick={() => {
+                              onSelectTargetRoot?.(rt.rootPath);
+                              if (rt.url) void navigateTo(rt.url);
+                            }}
+                          >
+                            <span
+                              className={`project-status-dot ${
+                                rt.starting ? 'is-starting' : 'is-running'
+                              }`}
+                            />
+                            <span>{rt.name}</span>
+                            {port && <span className="project-running-target-port">:{port}</span>}
+                            {errCnt > 0 && (
+                              <span className="project-logs-err-badge">
+                                <AlertTriangle size={8} />
+                                <span>{errCnt}</span>
+                              </span>
+                            )}
+                          </button>
+                          {onStopProjectServer && (
+                            <button
+                              type="button"
+                              className="project-running-target-stop"
+                              title={t.project.stopTargetTitle.replace('{name}', rt.name)}
+                              aria-label={t.project.stopTargetTitle.replace('{name}', rt.name)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onStopProjectServer(rt.rootPath);
+                              }}
+                            >
+                              <X size={10} />
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {projectServer?.external && (
+                    <span className="project-ext-badge">{t.project.externalServerLabel}</span>
+                  )}
+                  {inactiveTargets.length > 0 && (
+                    <button
+                      type="button"
+                      className={`mini-pill-btn project-compact-add-btn ${
+                        addServerDrawerOpen ? 'is-active' : ''
+                      }`}
+                      onClick={() => {
+                        setAddServerDrawerOpen((v) => !v);
+                        setServerSettingsOpen(false);
+                      }}
+                      title={t.project.addServerBtn}
+                      aria-expanded={addServerDrawerOpen}
+                    >
+                      <Plus size={11} />
+                      <span>{t.project.addServerBtn}</span>
+                    </button>
+                  )}
+                </>
+              ) : (
+                <div className="browser-project-info">
+                  <span className="project-status-dot" />
+                  <span className="browser-project-name">
+                    {projectInfo?.name || projectServer?.kind?.toUpperCase() || 'Project'}
+                  </span>
+                  {allTargets.length > 1 && onSelectTargetRoot && (
+                    <label className="project-select-control" title={t.project.targetLabel}>
+                      <FolderTree size={11} className="project-select-icon" />
+                      <select
+                        className="project-select-input"
+                        aria-label={t.project.targetLabel}
+                        value={currentTargetRoot || ''}
+                        onChange={(e) => onSelectTargetRoot(e.target.value)}
+                      >
+                        {allTargets.map((tgt) => (
+                          <option key={tgt.rootPath} value={tgt.rootPath}>
+                            {tgt.relativePath === '.' ? `. (${tgt.kind})` : tgt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {projectInfo?.devCommandLabel && (
+                    <span className="browser-project-cmd">{projectInfo.devCommandLabel}</span>
+                  )}
+                </div>
               )}
-            {serverLogs.length > 0 && (
-              <ProjectServerLogsToggle
-                logCount={serverLogs.length}
-                errorCount={logErrorCount}
-                expanded={logsExpanded}
-                onToggle={() => setLogsExpanded((prev) => !prev)}
-                running={Boolean(projectServer?.running)}
-                hasError={Boolean(projectServer?.error)}
-                label={t.project.liveLogsLabel}
-                showTitle={t.project.liveLogsShowTitle}
-                hideTitle={t.project.liveLogsHideTitle}
-              />
-            )}
-            {!isSelectedTargetActive && projectInfo?.devCommandLabel && (
-              <span className="browser-project-cmd">{projectInfo.devCommandLabel}</span>
-            )}
-          </div>
-          <div className="browser-project-actions">
-            <ProjectTargetControls
-              projectInfo={projectInfo}
-              projectServer={projectServer}
-              onSelectTargetRoot={onSelectTargetRoot}
-              onSelectScript={onSelectScript}
-              onOpenTargetUrl={(u) => void navigateTo(u)}
-              onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
-              targetLabel={t.project.targetLabel}
-              scriptLabel={t.project.scriptLabel}
-              lockedTitle={t.project.targetScriptLockedHint}
-              stopTargetTitleTemplate={t.project.stopTargetTitle}
-            />
-            {onProjectCustomPortChange && (
-              <ProjectPortInput
-                value={projectCustomPort}
-                onChange={onProjectCustomPortChange}
-                onSubmitStart={onStartProjectServer}
-                projectInfo={projectInfo}
-                projectServer={projectServer}
-                label={t.project.portLabel}
-                defaultPlaceholder={t.project.portPlaceholderDefault}
-                title={t.project.portInputTitle}
-                lockedTitle={t.project.portStopToChangeHint}
-              />
-            )}
-            {onToggleProjectServerLan && (
-              <button
-                type="button"
-                className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
-                onClick={onToggleProjectServerLan}
-                title={t.project.lanAccessToggleTitle}
-                aria-pressed={projectServerAllowLan}
-              >
-                <Wifi size={11} />
-                <span>{projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}</span>
-              </button>
-            )}
-            {isSelectedTargetActive ? (
-              <button
-                type="button"
-                className="mini-pill-btn"
-                onClick={() => onStopProjectServer?.(projectInfo?.rootPath)}
-              >
-                <Square size={11} />
-                <span>
-                  {projectServer?.external ? t.project.disconnectServer : t.project.stopServer}
-                </span>
-              </button>
-            ) : (
-              onStartProjectServer && (
+            </div>
+
+            <div className="browser-project-compact-actions">
+              {isSelectedTargetActive && onRestartProjectServer && !projectServer?.external && (
                 <button
                   type="button"
-                  className="mini-pill-btn is-active"
-                  onClick={onStartProjectServer}
-                  disabled={projectServer?.starting && projectServer?.rootPath === projectInfo?.rootPath}
-                >
-                  {projectServer?.starting && projectServer?.rootPath === projectInfo?.rootPath ? (
-                    <Loader2 size={11} className="spin" />
-                  ) : (
-                    <Play size={11} />
+                  className="icon-btn-sm"
+                  onClick={() => onRestartProjectServer(currentTargetRoot || undefined)}
+                  title={t.project.restartTargetTitle.replace(
+                    '{name}',
+                    projectInfo?.name || 'server'
                   )}
-                  <span>{t.project.startServer}</span>
+                  aria-label={t.project.restartServer}
+                >
+                  <RotateCw size={12} />
                 </button>
-              )
-            )}
+              )}
+              {serverLogs.length > 0 && (
+                <ProjectServerLogsToggle
+                  logCount={serverLogs.length}
+                  errorCount={logErrorCount}
+                  expanded={logsExpanded}
+                  onToggle={() => setLogsExpanded((prev) => !prev)}
+                  running={Boolean(projectServer?.running)}
+                  hasError={Boolean(projectServer?.error)}
+                  label={t.project.liveLogsLabel}
+                  showTitle={t.project.liveLogsShowTitle}
+                  hideTitle={t.project.liveLogsHideTitle}
+                />
+              )}
+              <button
+                type="button"
+                className={`mini-pill-btn ${serverSettingsOpen ? 'is-active' : ''}`}
+                onClick={() => {
+                  setServerSettingsOpen((v) => !v);
+                  setAddServerDrawerOpen(false);
+                }}
+                title={t.project.serverSettingsBtn}
+                aria-expanded={serverSettingsOpen}
+              >
+                <Settings size={11} />
+                <span>{t.project.serverSettingsBtn}</span>
+              </button>
+              {runningTargets.length > 1 && onStopAllProjectTargets ? (
+                <button
+                  type="button"
+                  className="mini-pill-btn project-stop-all-btn"
+                  onClick={onStopAllProjectTargets}
+                  title={t.project.stopAllTargetsBtn}
+                >
+                  <Square size={10} />
+                  <span>{t.project.stopAllTargetsBtn}</span>
+                </button>
+              ) : isSelectedTargetActive ? (
+                <button
+                  type="button"
+                  className="mini-pill-btn"
+                  onClick={() => onStopProjectServer?.(projectInfo?.rootPath)}
+                >
+                  <Square size={10} />
+                  <span>
+                    {projectServer?.external ? t.project.disconnectServer : t.project.stopServer}
+                  </span>
+                </button>
+              ) : (
+                <>
+                  {allTargets.length > 1 && onStartAllProjectTargets && (
+                    <button
+                      type="button"
+                      className="mini-pill-btn project-batch-btn"
+                      onClick={onStartAllProjectTargets}
+                      title={t.project.startAllTargetsBtn}
+                    >
+                      <Play size={10} />
+                      <span>{t.project.startAllTargetsBtn}</span>
+                    </button>
+                  )}
+                  {onStartProjectServer && (
+                    <button
+                      type="button"
+                      className="mini-pill-btn is-active"
+                      onClick={() => onStartProjectServer()}
+                      disabled={
+                        projectServer?.starting && projectServer?.rootPath === projectInfo?.rootPath
+                      }
+                    >
+                      {projectServer?.starting &&
+                      projectServer?.rootPath === projectInfo?.rootPath ? (
+                        <Loader2 size={11} className="spin" />
+                      ) : (
+                        <Play size={11} />
+                      )}
+                      <span>{t.project.startServer}</span>
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
+
+          {addServerDrawerOpen && inactiveTargets.length > 0 && (
+            <div className="browser-project-subdrawer">
+              <div className="browser-project-add-list">
+                {inactiveTargets.map((tgt) => (
+                  <button
+                    key={tgt.rootPath}
+                    type="button"
+                    className="mini-pill-btn"
+                    onClick={() => {
+                      setAddServerDrawerOpen(false);
+                      onStartProjectServer?.(tgt.rootPath);
+                    }}
+                  >
+                    <Play size={10} />
+                    <span>{tgt.relativePath === '.' ? `. (${tgt.kind})` : tgt.label}</span>
+                  </button>
+                ))}
+                {inactiveTargets.length > 1 && onStartAllProjectTargets && (
+                  <button
+                    type="button"
+                    className="mini-pill-btn is-active"
+                    onClick={() => {
+                      setAddServerDrawerOpen(false);
+                      onStartAllProjectTargets();
+                    }}
+                  >
+                    <Play size={10} />
+                    <span>{t.project.startAllTargetsBtn}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {serverSettingsOpen && (
+            <div className="browser-project-subdrawer">
+              <div className="browser-project-settings-row">
+                {allTargets.length > 1 && onSelectTargetRoot && (
+                  <label className="project-select-control" title={t.project.targetLabel}>
+                    <FolderTree size={11} className="project-select-icon" />
+                    <select
+                      className="project-select-input"
+                      aria-label={t.project.targetLabel}
+                      value={currentTargetRoot || ''}
+                      onChange={(e) => onSelectTargetRoot(e.target.value)}
+                    >
+                      {allTargets.map((tgt) => {
+                        const active = isTargetCurrentlyActive(tgt.rootPath, projectServer);
+                        const baseLabel =
+                          tgt.relativePath === '.' ? `. (${tgt.kind})` : tgt.label;
+                        return (
+                          <option key={tgt.rootPath} value={tgt.rootPath}>
+                            {active ? `● ${baseLabel}` : baseLabel}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                )}
+                {orderedScripts.length > 1 && onSelectScript && (
+                  <label
+                    className={`project-select-control ${isSelectedTargetActive ? 'is-locked' : ''}`}
+                    title={
+                      isSelectedTargetActive
+                        ? t.project.targetScriptLockedHint
+                        : t.project.scriptLabel
+                    }
+                  >
+                    <Terminal size={11} className="project-select-icon" />
+                    <select
+                      className="project-select-input"
+                      aria-label={t.project.scriptLabel}
+                      value={projectInfo?.devScript || orderedScripts[0]}
+                      disabled={isSelectedTargetActive}
+                      onChange={(e) => onSelectScript(e.target.value)}
+                    >
+                      {orderedScripts.map((sc) => (
+                        <option key={sc} value={sc}>
+                          {sc}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {onProjectCustomPortChange && (
+                  <ProjectPortInput
+                    value={projectCustomPort}
+                    onChange={onProjectCustomPortChange}
+                    onSubmitStart={onStartProjectServer ? () => onStartProjectServer() : undefined}
+                    projectInfo={projectInfo}
+                    projectServer={projectServer}
+                    label={t.project.portLabel}
+                    defaultPlaceholder={t.project.portPlaceholderDefault}
+                    title={t.project.portInputTitle}
+                    lockedTitle={t.project.portStopToChangeHint}
+                  />
+                )}
+                {onToggleProjectServerLan && (
+                  <button
+                    type="button"
+                    className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
+                    onClick={onToggleProjectServerLan}
+                    title={t.project.lanAccessToggleTitle}
+                    aria-pressed={projectServerAllowLan}
+                  >
+                    <Wifi size={11} />
+                    <span>
+                      {projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}
+                    </span>
+                  </button>
+                )}
+                {projectServer?.running &&
+                  projectServer.lanUrls &&
+                  projectServer.lanUrls.length > 0 && (
+                    <LanUrlList
+                      urls={projectServer.lanUrls}
+                      label={t.project.lanUrlsLabel}
+                      showTitle={t.project.lanUrlsToggleShowTitle}
+                      hideTitle={t.project.lanUrlsToggleHideTitle}
+                      copyTitlePrefix={t.project.lanUrlCopyTitle}
+                      qrShowTitle={t.project.qrShowTitle}
+                      qrHideTitle={t.project.qrHideTitle}
+                      qrScanHint={t.project.qrScanHint}
+                      showOtherTemplate={t.project.lanShowOtherBtn}
+                      hideOtherLabel={t.project.lanHideOtherBtn}
+                      onCopyUrl={onCopyLanUrl}
+                      variant="inline"
+                    />
+                  )}
+              </div>
+            </div>
+          )}
+
           {logsExpanded && serverLogs.length > 0 && (
             <div className="project-logs-drawer">
               <ProjectServerLogsBox
                 logs={serverLogs}
                 expanded={logsExpanded}
+                runningTargets={runningTargets}
+                activeTargetRoot={currentTargetRoot}
+                allLogsLabel={t.project.allLogsTab}
+                errorText={projectServer?.error}
+                requestedPort={projectServer?.requestedPort}
                 copyLabel={t.project.liveLogsCopyBtn}
                 copiedLabel={t.project.liveLogsCopiedBtn}
                 clearLabel={t.project.liveLogsClearBtn}
                 askAiLabel={t.project.liveLogsAskAiBtn}
                 askAiTitle={t.project.liveLogsAskAiTitle}
+                portConflictTemplate={t.project.portConflictBanner}
+                portConflictRetryLabel={t.project.portConflictRetryBtn}
+                onRetryWithFreePort={onRetryWithFreePort}
               />
             </div>
           )}
@@ -986,7 +1331,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
               <button
                 type="button"
                 className="mini-pill-btn is-active"
-                onClick={onStartProjectServer}
+                onClick={() => onStartProjectServer()}
               >
                 <Play size={11} />
                 <span>{t.browser.serverStoppedBannerRestart}</span>

@@ -52,7 +52,11 @@ interface WebPagePreviewPaneProps {
   setupFeedback?: { ok: boolean; text: string } | null;
   recheckingEnv?: boolean;
   onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
+  onRestartProjectServer?: (targetRoot?: string) => void;
   onStopProjectServer?: (targetRoot?: string) => void;
+  onStartAllProjectTargets?: () => void;
+  onStopAllProjectTargets?: () => void;
+  onRetryWithFreePort?: (conflictPort: number) => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
   onToggleProjectServerLan?: () => void;
   onCopyLanUrl?: (url: string) => void;
@@ -173,7 +177,11 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
   setupFeedback,
   recheckingEnv,
   onStartProjectAndBrowse,
+  onRestartProjectServer,
   onStopProjectServer,
+  onStartAllProjectTargets,
+  onStopAllProjectTargets,
+  onRetryWithFreePort,
   onOpenProjectUrl,
   onToggleProjectServerLan,
   onCopyLanUrl,
@@ -598,11 +606,17 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                 onOpenTargetUrl={
                   onOpenProjectUrl ? (u) => onOpenProjectUrl(u, 'builtin') : undefined
                 }
+                onRestartTargetRoot={onRestartProjectServer}
                 onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
+                onStartAllTargets={onStartAllProjectTargets}
+                onStopAllTargets={onStopAllProjectTargets}
                 targetLabel={t.project.targetLabel}
                 scriptLabel={t.project.scriptLabel}
                 lockedTitle={t.project.targetScriptLockedHint}
                 stopTargetTitleTemplate={t.project.stopTargetTitle}
+                restartTargetTitleTemplate={t.project.restartTargetTitle}
+                startAllLabel={t.project.startAllTargetsBtn}
+                stopAllLabel={t.project.stopAllTargetsBtn}
               />
               {onProjectCustomPortChange && (
                 <ProjectPortInput
@@ -704,11 +718,19 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                   <ProjectServerLogsBox
                     logs={projectServer.logs}
                     expanded={logsExpanded}
+                    runningTargets={projectServer.runningTargets}
+                    activeTargetRoot={projectInfo?.rootPath}
+                    allLogsLabel={t.project.allLogsTab}
+                    errorText={projectServer.error}
+                    requestedPort={projectServer.requestedPort}
                     copyLabel={t.project.liveLogsCopyBtn}
                     copiedLabel={t.project.liveLogsCopiedBtn}
                     clearLabel={t.project.liveLogsClearBtn}
                     askAiLabel={t.project.liveLogsAskAiBtn}
                     askAiTitle={t.project.liveLogsAskAiTitle}
+                    portConflictTemplate={t.project.portConflictBanner}
+                    portConflictRetryLabel={t.project.portConflictRetryBtn}
+                    onRetryWithFreePort={onRetryWithFreePort}
                   />
                 </div>
               )}
@@ -757,11 +779,17 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                     onOpenTargetUrl={
                       onOpenProjectUrl ? (u) => onOpenProjectUrl(u, 'builtin') : undefined
                     }
+                    onRestartTargetRoot={onRestartProjectServer}
                     onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
+                    onStartAllTargets={onStartAllProjectTargets}
+                    onStopAllTargets={onStopAllProjectTargets}
                     targetLabel={t.project.targetLabel}
                     scriptLabel={t.project.scriptLabel}
                     lockedTitle={t.project.targetScriptLockedHint}
                     stopTargetTitleTemplate={t.project.stopTargetTitle}
+                    restartTargetTitleTemplate={t.project.restartTargetTitle}
+                    startAllLabel={t.project.startAllTargetsBtn}
+                    stopAllLabel={t.project.stopAllTargetsBtn}
                   />
                   {onProjectCustomPortChange && (
                     <ProjectPortInput
@@ -814,8 +842,13 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                   projectServer.logs.length > 0 && (
                     <ProjectServerLogs
                       logs={projectServer.logs}
+                      runningTargets={projectServer.runningTargets}
+                      activeTargetRoot={projectInfo?.rootPath}
+                      allLogsLabel={t.project.allLogsTab}
                       running={Boolean(projectServer?.running)}
                       hasError={Boolean(projectServer.error)}
+                      errorText={projectServer.error}
+                      requestedPort={projectServer.requestedPort}
                       label={t.project.liveLogsLabel}
                       showTitle={t.project.liveLogsShowTitle}
                       hideTitle={t.project.liveLogsHideTitle}
@@ -824,6 +857,9 @@ export const WebPagePreviewPane: React.FC<WebPagePreviewPaneProps> = ({
                       clearLabel={t.project.liveLogsClearBtn}
                       askAiLabel={t.project.liveLogsAskAiBtn}
                       askAiTitle={t.project.liveLogsAskAiTitle}
+                      portConflictTemplate={t.project.portConflictBanner}
+                      portConflictRetryLabel={t.project.portConflictRetryBtn}
+                      onRetryWithFreePort={onRetryWithFreePort}
                     />
                   )}
               </div>

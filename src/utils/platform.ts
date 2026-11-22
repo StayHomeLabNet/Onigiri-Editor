@@ -879,11 +879,15 @@ export async function stopProjectDevServer(
   });
 }
 
-export async function clearProjectDevServerLogs(): Promise<ProjectServerStatus | null> {
+export async function clearProjectDevServerLogs(
+  targetRoot?: string | null
+): Promise<ProjectServerStatus | null> {
   if (!isTauri()) return null;
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    return await invoke<ProjectServerStatus>('clear_project_dev_server_logs');
+    return await invoke<ProjectServerStatus>('clear_project_dev_server_logs', {
+      targetRoot: targetRoot || null,
+    });
   } catch {
     return null;
   }
@@ -897,6 +901,34 @@ export async function getProjectDevServerStatus(): Promise<ProjectServerStatus |
   } catch {
     return null;
   }
+}
+
+export async function findFreeProjectPort(preferredPort: number): Promise<number> {
+  if (!isTauri()) {
+    return Math.min(65535, Math.max(1024, preferredPort + 1));
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<number>('find_free_project_port', {
+    preferredPort: Math.max(1, Math.min(65535, Math.round(preferredPort))),
+  });
+}
+
+export async function browserCaptureScreenshot(bounds: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Promise<string> {
+  if (!isTauri()) {
+    throw new Error('Browser screenshot capture requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('browser_capture_screenshot', {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+  });
 }
 
 export async function assistProjectSetup(params: {
@@ -1282,17 +1314,20 @@ export async function readProjectConfigBundle(
   });
 }
 
-export async function checkAppUpdates(): Promise<AppUpdateInfo> {
+export async function checkAppUpdates(ifNoneMatch?: string | null): Promise<AppUpdateInfo> {
   if (!isTauri()) {
     throw new Error('Update check requires the desktop application');
   }
   const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<AppUpdateInfo>('check_app_updates');
+  return invoke<AppUpdateInfo>('check_app_updates', {
+    ifNoneMatch: ifNoneMatch || null,
+  });
 }
 
 export async function downloadAppUpdate(
   url: string,
-  fileName?: string
+  fileName?: string,
+  expectedSha256?: string | null
 ): Promise<AppUpdateDownloadResult> {
   if (!isTauri()) {
     throw new Error('Update download requires the desktop application');
@@ -1301,7 +1336,36 @@ export async function downloadAppUpdate(
   return invoke<AppUpdateDownloadResult>('download_app_update', {
     url,
     fileName: fileName || null,
+    expectedSha256: expectedSha256 || null,
   });
+}
+
+export async function cancelAppUpdateDownload(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<boolean>('cancel_app_update_download');
+  } catch {
+    return false;
+  }
+}
+
+export async function scheduleAppUpdateOnExit(filePath: string | null): Promise<string | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string | null>('schedule_app_update_on_exit', {
+    filePath: filePath || null,
+  });
+}
+
+export async function checkFileExistsLocal(path: string): Promise<boolean> {
+  if (!isTauri() || !path) return false;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<boolean>('check_file_exists_local', { path });
+  } catch {
+    return false;
+  }
 }
 
 export async function applyDownloadedAppUpdate(

@@ -412,6 +412,8 @@ export interface RunningProjectTarget {
   url: string | null;
   commandLabel: string | null;
   starting: boolean;
+  logs?: string[];
+  errorCount?: number;
 }
 
 export interface ProjectServerStatus {
@@ -560,6 +562,7 @@ export interface AppUpdateAsset {
   size: number;
   platform: 'macos' | 'windows' | 'linux' | 'other' | string;
   kind: 'dmg' | 'app-archive' | 'exe' | 'msi' | 'appimage' | 'deb' | 'other' | string;
+  digest?: string | null;
 }
 
 export interface AppUpdateInfo {
@@ -575,10 +578,12 @@ export interface AppUpdateInfo {
   canInPlaceUpdate?: boolean;
   assets?: AppUpdateAsset[];
   checkedAtMs?: number;
+  etag?: string | null;
+  notModified?: boolean;
 }
 
 export interface AppUpdateProgressEvent {
-  phase: 'downloading' | 'extracting' | 'ready' | 'installing' | 'error' | string;
+  phase: 'downloading' | 'verifying' | 'extracting' | 'ready' | 'installing' | 'cancelled' | 'error' | string;
   downloadedBytes: number;
   totalBytes: number | null;
   percent: number | null;
@@ -591,4 +596,6 @@ export interface AppUpdateDownloadResult {
   fileName: string;
   bytes: number;
   canAutoApply: boolean;
+  sha256?: string;
+  verified?: boolean;
 }

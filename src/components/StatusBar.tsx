@@ -1,10 +1,33 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Check, Download, FilePlus2, Minus, Plus, RefreshCw, Save, Settings } from 'lucide-react';
-import type { AppMode, DocumentStats, Locale, TextEncodingId } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  Check,
+  Download,
+  FilePlus2,
+  Globe,
+  Minus,
+  Plus,
+  RefreshCw,
+  RotateCw,
+  Save,
+  Server,
+  Settings,
+  Square,
+} from 'lucide-react';
+import type {
+  AppMode,
+  DocumentStats,
+  Locale,
+  ProjectServerStatus,
+  TextEncodingId,
+} from '../types';
 import type { Translations } from '../i18n/types';
 import { formatShortcut } from '../utils/platform';
 import { getEncodingShortLabel, TEXT_ENCODINGS } from '../utils/encodings';
 import { LANGUAGE_OPTIONS } from '../utils/language';
+import { extractPortFromUrl } from './ProjectPortInput';
+import { getRunningTargetsList } from './ProjectTargetControls';
+import { getTargetErrorCount } from './ProjectServerLogs';
 
 const ZOOM_PRESETS = [50, 75, 100, 125, 150, 200] as const;
 
@@ -47,6 +70,12 @@ interface StatusBarProps {
   updateAvailableVersion?: string | null;
   updateReadyToInstall?: boolean;
   onOpenUpdateModal?: () => void;
+  projectServer?: ProjectServerStatus | null;
+  onSelectTargetRoot?: (targetRoot: string) => void;
+  onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
+  onRestartProjectServer?: (targetRoot?: string) => void;
+  onStopProjectServer?: (targetRoot?: string) => void;
+  onStopAllProjectTargets?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -84,6 +113,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   updateAvailableVersion,
   updateReadyToInstall,
   onOpenUpdateModal,
+  projectServer,
+  onSelectTargetRoot,
+  onOpenProjectUrl,
+  onRestartProjectServer,
+  onStopProjectServer,
+  onStopAllProjectTargets,
 }) => {
   const goalPct = wordGoal > 0 ? Math.min(100, Math.round((stats.words / wordGoal) * 100)) : 0;
   const [encMenuOpen, setEncMenuOpen] = useState(false);
@@ -99,6 +134,42 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   const [zoomDraft, setZoomDraft] = useState(String(zoomPercent));
   const zoomPopoverRef = useRef<HTMLDivElement | null>(null);
   const zoomInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [serverMenuOpen, setServerMenuOpen] = useState(false);
+  const serverPopoverRef = useRef<HTMLDivElement | null>(null);
+
+  const runningTargets = useMemo(
+    () => getRunningTargetsList(projectServer),
+    [projectServer]
+  );
+  const totalServerErrors = useMemo(
+    () => runningTargets.reduce((sum, rt) => sum + getTargetErrorCount(rt), 0),
+    [runningTargets]
+  );
+
+  useEffect(() => {
+    if (runningTargets.length === 0 && serverMenuOpen) {
+      setServerMenuOpen(false);
+    }
+  }, [runningTargets.length, serverMenuOpen]);
+
+  useEffect(() => {
+    if (!serverMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (serverPopoverRef.current && !serverPopoverRef.current.contains(e.target as Node)) {
+        setServerMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setServerMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [serverMenuOpen]);
 
   useEffect(() => {
     if (!filePath && encMenuAction === 'reopen') {
@@ -231,6 +302,147 @@ export const StatusBar: React.FC<StatusBarProps> = ({
                 : t.updates.statusBadgeAvailable.replace('{version}', updateAvailableVersion)}
             </span>
           </button>
+        )}
+
+        {runningTargets.length > 0 && (
+          <div className="status-servers-wrap" ref={serverPopoverRef}>
+            <button
+              type="button"
+              className={`status-servers-pill ${totalServerErrors > 0 ? 'has-error' : ''} ${
+                serverMenuOpen ? 'is-open' : ''
+              }`}
+              onClick={() => {
+                setEncMenuOpen(false);
+                setLangMenuOpen(false);
+                setZoomMenuOpen(false);
+                setServerMenuOpen((v) => !v);
+              }}
+              title={t.project.statusServersPopoverTitle}
+              aria-expanded={serverMenuOpen}
+            >
+              <span
+                className={`project-status-dot ${
+                  runningTargets.some((rt) => rt.starting) ? 'is-starting' : 'is-running'
+                }`}
+              />
+              <Server size={11} />
+              <span>
+                {runningTargets.length === 1
+                  ? (() => {
+                      const rt = runningTargets[0];
+                      const p = extractPortFromUrl(rt.url);
+                      return p ? `${rt.name} :${p}` : rt.name;
+                    })()
+                  : t.project.statusServersRunning.replace(
+                      '{count}',
+                      String(runningTargets.length)
+                    )}
+              </span>
+              {totalServerErrors > 0 && (
+                <span className="project-logs-err-badge">
+                  <AlertTriangle size={8} />
+                  <span>{totalServerErrors}</span>
+                </span>
+              )}
+            </button>
+
+            {serverMenuOpen && (
+              <div
+                className="status-servers-popover"
+                role="dialog"
+                aria-label={t.project.statusServersPopoverTitle}
+              >
+                <div className="status-servers-popover-head">
+                  <span>
+                    {t.project.statusServersPopoverTitle} ({runningTargets.length})
+                  </span>
+                  {runningTargets.length > 1 && onStopAllProjectTargets && (
+                    <button
+                      type="button"
+                      className="status-servers-stop-all"
+                      onClick={() => {
+                        setServerMenuOpen(false);
+                        onStopAllProjectTargets();
+                      }}
+                    >
+                      <Square size={9} />
+                      <span>{t.project.stopAllTargetsBtn}</span>
+                    </button>
+                  )}
+                </div>
+                <div className="status-servers-popover-list">
+                  {runningTargets.map((rt) => {
+                    const p = extractPortFromUrl(rt.url);
+                    const errCnt = getTargetErrorCount(rt);
+                    return (
+                      <div key={rt.rootPath} className="status-servers-popover-row">
+                        <span
+                          className={`project-status-dot ${
+                            rt.starting ? 'is-starting' : 'is-running'
+                          }`}
+                        />
+                        <div className="status-servers-popover-info">
+                          <div className="status-servers-popover-name">
+                            <span>{rt.name}</span>
+                            {p && <span className="project-running-target-port">:{p}</span>}
+                            {errCnt > 0 && (
+                              <span className="project-logs-err-badge">
+                                <AlertTriangle size={8} />
+                                <span>{errCnt}</span>
+                              </span>
+                            )}
+                          </div>
+                          {rt.url && (
+                            <div className="status-servers-popover-url">{rt.url}</div>
+                          )}
+                        </div>
+                        <div className="status-servers-popover-actions">
+                          {rt.url && onOpenProjectUrl && (
+                            <button
+                              type="button"
+                              className="icon-btn-sm"
+                              title={t.project.openInBuiltin}
+                              onClick={() => {
+                                onSelectTargetRoot?.(rt.rootPath);
+                                onOpenProjectUrl(rt.url!, 'builtin');
+                                setServerMenuOpen(false);
+                              }}
+                            >
+                              <Globe size={11} />
+                            </button>
+                          )}
+                          {onRestartProjectServer && !projectServer?.external && (
+                            <button
+                              type="button"
+                              className="icon-btn-sm"
+                              title={t.project.restartTargetTitle.replace('{name}', rt.name)}
+                              onClick={() => {
+                                onRestartProjectServer(rt.rootPath);
+                              }}
+                            >
+                              <RotateCw size={11} />
+                            </button>
+                          )}
+                          {onStopProjectServer && (
+                            <button
+                              type="button"
+                              className="icon-btn-sm"
+                              title={t.project.stopTargetTitle.replace('{name}', rt.name)}
+                              onClick={() => {
+                                onStopProjectServer(rt.rootPath);
+                              }}
+                            >
+                              <Square size={10} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {topBarHidden && activeTitle && (

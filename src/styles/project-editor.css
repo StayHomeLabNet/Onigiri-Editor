@@ -2996,3 +2996,455 @@
   color: var(--fg-secondary);
 }
 
+
+/* Monorepo Start All / Stop All & Port Conflict Auto-Retry Banner */
+.project-batch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.project-port-conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border-radius: 7px;
+  background: color-mix(in srgb, #f59e0b 14%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--border));
+  font-size: 11.5px;
+  color: var(--fg);
+}
+
+/* Multi-Server UI Enhancements (Compact Browser Bar, Per-Server Log Tabs, Sidebar Launcher, StatusBar Popover) */
+.project-running-target-pill.has-error {
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.project-running-target-restart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.project-running-target-restart:hover {
+  background: rgba(99, 102, 241, 0.16);
+  color: var(--accent);
+}
+
+.browser-project-bar.is-compact {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  padding: 5px 10px;
+}
+
+.browser-project-compact-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.browser-project-tabs-area {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.browser-project-tabs-area::-webkit-scrollbar {
+  display: none;
+}
+
+.browser-project-compact-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.project-compact-add-btn {
+  flex-shrink: 0;
+}
+
+.project-stop-all-btn {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.project-stop-all-btn:hover {
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.browser-project-subdrawer {
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+
+.browser-project-add-list,
+.browser-project-settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Per-server log filter tabs */
+.project-log-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.project-log-filter-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.project-log-filter-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 21px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.project-log-filter-tab:hover {
+  background: var(--bg-hover, rgba(148, 163, 184, 0.12));
+}
+
+.project-log-filter-tab.is-active {
+  background: var(--bg-active, rgba(99, 102, 241, 0.15));
+  border-color: var(--accent);
+  color: var(--fg-primary);
+  font-weight: 600;
+}
+
+.project-log-filter-tab.has-error {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.project-log-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* Sidebar Monorepo Server Launcher List */
+.sidebar-server-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sidebar-server-list-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-primary);
+}
+
+.sidebar-server-list-batch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sidebar-server-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface, var(--bg-primary));
+  color: var(--fg-secondary);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.sidebar-server-mini-btn:hover {
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+
+.sidebar-server-mini-btn.is-danger {
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.sidebar-server-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg-surface, var(--bg-primary));
+}
+
+.sidebar-server-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.sidebar-server-row:last-child {
+  border-bottom: none;
+}
+
+.sidebar-server-row:hover {
+  background: var(--bg-hover, rgba(148, 163, 184, 0.08));
+}
+
+.sidebar-server-row.is-selected {
+  background: rgba(16, 185, 129, 0.09);
+}
+
+.sidebar-server-row.has-error {
+  box-shadow: inset 2px 0 0 #ef4444;
+}
+
+.sidebar-server-row-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sidebar-server-row-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  min-width: 0;
+}
+
+.sidebar-server-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-server-row-meta {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-server-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.sidebar-server-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.sidebar-server-icon-btn:hover {
+  color: var(--fg-primary);
+  border-color: var(--accent);
+}
+
+.sidebar-server-icon-btn.is-play {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.sidebar-server-icon-btn.is-stop:hover {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.45);
+}
+
+.sidebar-server-footer-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sidebar-server-settings-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface, var(--bg-primary));
+}
+
+/* StatusBar Persistent Dev Servers Pill & Popover */
+.status-servers-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-servers-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--fg-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status-servers-pill:hover,
+.status-servers-pill.is-open {
+  background: rgba(16, 185, 129, 0.22);
+  border-color: rgba(16, 185, 129, 0.65);
+}
+
+.status-servers-pill.has-error {
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.status-servers-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  width: 280px;
+  max-width: min(320px, 85vw);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel, var(--bg-elevated));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  z-index: 60;
+  overflow: hidden;
+}
+
+.status-servers-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-primary);
+}
+
+.status-servers-stop-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.status-servers-stop-all:hover {
+  background: rgba(239, 68, 68, 0.22);
+}
+
+.status-servers-popover-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.status-servers-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.status-servers-popover-row:last-child {
+  border-bottom: none;
+}
+
+.status-servers-popover-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.status-servers-popover-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+}
+
+.status-servers-popover-url {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-servers-popover-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}

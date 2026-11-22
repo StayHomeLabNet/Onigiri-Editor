@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v133">What's New in v1.3.3</a> ・
+    <a href="#whats-new-in-v134">What's New in v1.3.4</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.3.3-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.3.4-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.3.3`
+Current version: `v1.3.4`
 
 ## Key Features
 
@@ -99,13 +99,26 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.3.3
+## What's New in v1.3.4
+
+- **Redesigned Multi-Server UI (Compact Single-Row Bar, Per-Server Log Tabs, Sidebar Launcher, Status Bar Popover & 1-Click Restart)**:
+  - **Built-in Browser Compact Bar**: Consolidates running server tabs (`● web :5173 [×]`, `● api :3000 ⚠2 [×]`) into a single row with **`+ Add`** and **`⚙ Settings`** inline drawers (`Port` / `Script` / `LAN`), **Start All / Stop All**, and **`EADDRINUSE` Port Conflict Auto-Retry on Free Port**.
+  - **Per-Server Log Isolation & Error Badges**: Separates stdout/stderr logs and error counts per running server with `[All / web / api]` filter tabs for targeted copy, clear, and 1-click **Ask AI** diagnosis.
+  - **Sidebar Monorepo Launcher List & Status Bar Indicator**: Displays multi-target projects as a clean per-row launcher list (1-click Start, Open in Browser, Restart `↻`, Stop) and adds a persistent **Status Bar** server indicator popover so background servers are always visible and manageable from any tab.
+- **Built-in Web Browser Viewport Rotation & Screenshot-to-Markdown Capture**: Added **Portrait / Landscape** rotation for Tablet (`768px` ⇔ `1024×768`) and Mobile (`390px` ⇔ `844×390`) previews, plus a **Capture Screenshot to Markdown** camera button (macOS `screencapture`, Windows Per-Monitor HiDPI-aware capture, and Linux Wayland `grim` / X11 `import` / `maim` / `scrot`).
+- **Hardened Cross-Platform Auto-Update Experience**: Added an **Unsaved Changes Guard** before restart (**Save All & Update**, **Restart Without Saving**, **Cancel**), streaming **SHA-256 verification** restricted to official GitHub Releases domains, **Cancel Download**, rich Markdown release notes rendering, **ETag (`If-None-Match`)** caching & persisted download state, **Apply on Next Quit**, atomic rollback-safe swaps for **macOS `.app`** and **Linux `.AppImage`**, and hidden delayed **Windows** installer launches that avoid file-lock / single-instance races.
+- **Cross-Platform Polish & Architecture Cleanup**: Fixed Windows external URL opening for `&` query strings, Windows monorepo path case/`\\?\` comparison, OS-aware download directory lookup, removed version suffix from window title bar, and modularized `useAppUpdates` / `useProjectServer` hooks and the Rust `src-tauri/src/project/` backend.
+
+<details>
+<summary>Previous release: v1.3.3</summary>
 
 - **Simultaneous Multi-Server Management in Monorepos**: Launch multiple monorepo targets concurrently (e.g., `gui` Vite frontend + `engine` FastAPI/Python backend) without stopping existing sibling servers. Active targets appear as green running pills (`● gui :5173 [×]`, `● engine :8000 [×]`) with one-click URL switching, per-target stop buttons, and combined `[target]` live logs.
 - **Live Server Logs: Copy, Clear, Auto Error Highlighting & 1-Click "Ask AI"**: Added **Copy**, **Clear**, and **Ask AI** actions to the **`> Logs (N)`** drawer, automatic red/yellow highlighting for error and warning lines with an error-count badge, and 1-click AI Chat error diagnosis.
 - **Smart LAN URL Virtual-NIC Filtering**: Prioritizes physical Wi-Fi / Ethernet LAN URLs and automatically collapses virtual/secondary adapters (`VirtualBox 192.168.56.x`, `WSL / Docker 172.16–31.x.x`, `Tailscale 100.64.0.0/10`) behind a **`+N virtual/other`** toggle.
 - **Built-in Web Browser Responsive Viewports (`Full` / `768px` / `390px`) & Bookmarks / History**: Added **Full Width / Tablet (`768px`) / Mobile (`390px`)** viewport toggles and a **★ Bookmark** button + **Bookmarks & Recent URLs** bar in the Built-in Web Browser.
 - **In-App Auto-Update, Background Check Intervals & Rich Update Actions**: Added 1-click **Auto-Update Now** (in-app streaming download with live progress bar and automatic `.app` replacement / installer launch), an **Update & Release Notes Modal** (**Open Release Notes in Editor Tab**, **Open in Built-in Browser**, **All-OS Binaries & Copy URL**, **Remind Later**, **Skip Version**), TopBar & Status Bar update badges, and settings for **Automatic Update Checking** (`Startup Only` / `1h` / `6h` / `12h` / `24h`), **Enable Auto-Update** (background auto-download), and **Update Available Behavior**.
+
+</details>
 
 <details>
 <summary>Previous release: v1.3.2</summary>

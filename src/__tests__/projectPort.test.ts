@@ -10,6 +10,9 @@ import {
   buildAiPromptFromServerLogs,
   classifyServerLogLine,
   countErrorLogLines,
+  detectPortConflict,
+  getTargetErrorCount,
+  resolveFilteredServerLogs,
 } from '../components/ProjectServerLogs';
 import { partitionLanUrls } from '../components/LanUrlList';
 import type { ProjectInfo, ProjectServerStatus } from '../types';
@@ -90,6 +93,12 @@ describe('ProjectPortInput helpers', () => {
     ];
     expect(countErrorLogLines(logs)).toBe(1);
     expect(buildAiPromptFromServerLogs(logs)).toContain('SyntaxError: Unexpected token');
+    expect(
+      detectPortConflict(['Error: listen EADDRINUSE: address already in use 127.0.0.1:5173'])
+    ).toBe(5173);
+    expect(detectPortConflict(['Port 8000 is already in use'])).toBe(8000);
+    expect(detectPortConflict(['[Errno 48] Address already in use'], null, 8080)).toBe(8080);
+    expect(detectPortConflict(['VITE v6.3.5 ready in 210 ms'])).toBeNull();
   });
 
   it('tracks multi-server running targets in monorepos', () => {
@@ -125,5 +134,40 @@ describe('ProjectPortInput helpers', () => {
     expect(isTargetCurrentlyActive('/repo/engine', status)).toBe(true);
     expect(isTargetCurrentlyActive('/repo/other', status)).toBe(false);
     expect(getRunningTargetsList(status)).toHaveLength(2);
+  });
+
+  it('filters per-server logs and computes per-target error counts', () => {
+    const targets = [
+      {
+        rootPath: '/repo/web',
+        name: 'web',
+        kind: 'vite',
+        url: 'http://localhost:5173',
+        commandLabel: 'npm run dev',
+        starting: false,
+        logs: ['$ npm run dev', 'VITE v6.3.5 ready in 180 ms'],
+        errorCount: 0,
+      },
+      {
+        rootPath: '/repo/api',
+        name: 'api',
+        kind: 'node',
+        url: 'http://localhost:3000',
+        commandLabel: 'npm run dev',
+        starting: false,
+        logs: ['Server listening on :3000', 'TypeError: Cannot read properties of undefined'],
+        errorCount: 1,
+      },
+    ];
+    const allLogs = [
+      '[web] $ npm run dev',
+      '[api] Server listening on :3000',
+      '[api] TypeError: Cannot read properties of undefined',
+    ];
+    expect(resolveFilteredServerLogs(allLogs, targets, 'all')).toEqual(allLogs);
+    expect(resolveFilteredServerLogs(allLogs, targets, '/repo/web')).toEqual(targets[0].logs);
+    expect(resolveFilteredServerLogs(allLogs, targets, '/repo/api')).toEqual(targets[1].logs);
+    expect(getTargetErrorCount(targets[0])).toBe(0);
+    expect(getTargetErrorCount(targets[1])).toBe(1);
   });
 });

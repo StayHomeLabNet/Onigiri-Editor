@@ -45,6 +45,9 @@ import {
   FileQuestion,
   Check,
   Wifi,
+  RotateCw,
+  Settings,
+  Terminal,
 } from 'lucide-react';
 import type {
   GitPanelState,
@@ -72,12 +75,14 @@ import {
 } from '../utils/knowledge';
 import { ProjectSetupCard, type ProjectSetupActionParams } from './ProjectSetupCard';
 import { LanUrlList } from './LanUrlList';
-import { ProjectPortInput } from './ProjectPortInput';
+import { extractPortFromUrl, ProjectPortInput } from './ProjectPortInput';
 import {
+  getRunningTargetsList,
   isTargetCurrentlyActive,
+  orderProjectScripts,
   ProjectTargetControls,
 } from './ProjectTargetControls';
-import { ProjectServerLogs } from './ProjectServerLogs';
+import { getTargetErrorCount, ProjectServerLogs } from './ProjectServerLogs';
 
 const RASTER_IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|bmp|ico|avif)$/i;
 const JSON_EXT_RE = /\.(json|jsonc)$/i;
@@ -290,8 +295,16 @@ interface SidebarProps {
   setupLogs?: string[];
   setupFeedback?: { ok: boolean; text: string } | null;
   recheckingEnv?: boolean;
-  onStartProjectAndBrowse?: (target: 'builtin' | 'external') => void;
+  onStartProjectAndBrowse?: (
+    target: 'builtin' | 'external',
+    explicitPort?: number | null,
+    explicitTargetRoot?: string | null
+  ) => void;
+  onRestartProjectServer?: (targetRoot?: string) => void;
   onStopProjectServer?: (targetRoot?: string) => void;
+  onStartAllProjectTargets?: () => void;
+  onStopAllProjectTargets?: () => void;
+  onRetryWithFreePort?: (conflictPort: number) => void;
   onOpenProjectUrl?: (url: string, target: 'builtin' | 'external') => void;
   onToggleProjectServerLan?: () => void;
   onCopyLanUrl?: (url: string) => void;
@@ -372,7 +385,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setupFeedback,
   recheckingEnv,
   onStartProjectAndBrowse,
+  onRestartProjectServer,
   onStopProjectServer,
+  onStartAllProjectTargets,
+  onStopAllProjectTargets,
+  onRetryWithFreePort,
   onOpenProjectUrl,
   onToggleProjectServerLan,
   onCopyLanUrl,
@@ -415,6 +432,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [replaceCaseSensitive, setReplaceCaseSensitive] = useState(false);
   const [replaceRegex, setReplaceRegex] = useState(false);
   const [replaceBusy, setReplaceBusy] = useState(false);
+  const [sidebarServerSettingsOpen, setSidebarServerSettingsOpen] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState<Record<string, boolean>>({});
   const [localCustomSnippets, setLocalCustomSnippets] = useState<CustomSnippetRecord[]>(() =>
     loadCustomSnippets()
@@ -1055,134 +1073,425 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
 
-                {projectInfo && projectInfo.kind !== 'none' && (
+                {projectInfo && projectInfo.kind !== 'none' && (() => {
+                  const targets = projectInfo.targets || [];
+                  const isMonorepoList = targets.length > 1;
+                  const runningList = getRunningTargetsList(projectServer);
+                  const activeCount = targets.filter((tgt) =>
+                    isTargetCurrentlyActive(tgt.rootPath, projectServer)
+                  ).length;
+                  const hasInactive = targets.some(
+                    (tgt) => !isTargetCurrentlyActive(tgt.rootPath, projectServer)
+                  );
+                  const orderedScripts = orderProjectScripts(
+                    projectInfo.scripts || [],
+                    projectInfo.devScript
+                  );
+                  const isSelectedActive = isTargetCurrentlyActive(
+                    projectInfo.rootPath,
+                    projectServer
+                  );
+
+                  return (
                   <div className="sidebar-project-card">
-                    <div className="sidebar-project-head">
-                      <span className="project-kind-badge">{projectInfo.kind.toUpperCase()}</span>
-                      <span className="sidebar-project-name" title={projectInfo.name}>
-                        {projectInfo.name}
-                      </span>
-                      {projectServer?.running &&
-                      (!projectServer.rootPath ||
-                        projectServer.rootPath === projectInfo.rootPath) ? (
-                        <span className="project-status-dot is-running" />
-                      ) : hasDiagErrors ? (
-                        <AlertCircle size={13} className="diag-icon-err" />
-                      ) : null}
-                    </div>
-                    {projectInfo.devCommandLabel && (
+                    {isMonorepoList ? (
                       <>
-                        <ProjectTargetControls
-                          projectInfo={projectInfo}
-                          projectServer={projectServer}
-                          onSelectTargetRoot={onSelectTargetRoot}
-                          onSelectScript={onSelectScript}
-                          onOpenTargetUrl={
-                            onOpenProjectUrl ? (u) => onOpenProjectUrl(u, 'builtin') : undefined
-                          }
-                          onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
-                          targetLabel={t.project.targetLabel}
-                          scriptLabel={t.project.scriptLabel}
-                          lockedTitle={t.project.targetScriptLockedHint}
-                          stopTargetTitleTemplate={t.project.stopTargetTitle}
-                        />
-                        <div className="sidebar-project-actions">
-                        {isTargetCurrentlyActive(projectInfo.rootPath, projectServer) ? (
-                          <>
-                            {onOpenProjectUrl &&
-                              (projectServer?.runningTargets?.find(
-                                (rt) => rt.rootPath === projectInfo.rootPath
-                              )?.url ||
-                                projectServer?.url) && (
-                                <button
-                                  type="button"
-                                  className="mini-pill-btn is-active"
-                                  onClick={() =>
-                                    onOpenProjectUrl(
-                                      projectServer?.runningTargets?.find(
-                                        (rt) => rt.rootPath === projectInfo.rootPath
-                                      )?.url || projectServer!.url!,
-                                      'builtin'
-                                    )
-                                  }
-                                >
-                                  <Globe size={11} />
-                                  <span>{t.project.openInBuiltin}</span>
-                                </button>
-                              )}
-                            {onStopProjectServer && (
+                        <div className="sidebar-server-list-head">
+                          <span className="sidebar-server-list-title">
+                            {t.project.serversHeading} ({activeCount}/{targets.length})
+                          </span>
+                          <div className="sidebar-server-list-batch">
+                            {hasInactive && onStartAllProjectTargets && (
                               <button
                                 type="button"
-                                className="mini-pill-btn"
-                                onClick={() => onStopProjectServer(projectInfo.rootPath)}
+                                className="sidebar-server-mini-btn"
+                                onClick={onStartAllProjectTargets}
+                                title={t.project.startAllTargetsBtn}
                               >
-                                <Square size={10} />
+                                <Play size={9} />
+                                <span>{t.project.startAllTargetsBtn}</span>
+                              </button>
+                            )}
+                            {runningList.length > 0 && onStopAllProjectTargets && (
+                              <button
+                                type="button"
+                                className="sidebar-server-mini-btn is-danger"
+                                onClick={onStopAllProjectTargets}
+                                title={t.project.stopAllTargetsBtn}
+                              >
+                                <Square size={9} />
+                                <span>{t.project.stopAllTargetsBtn}</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="sidebar-server-list">
+                          {targets.map((tgt) => {
+                            const runningEntry = runningList.find(
+                              (rt) => rt.rootPath === tgt.rootPath
+                            );
+                            const isActive = Boolean(runningEntry);
+                            const isStarting = Boolean(runningEntry?.starting);
+                            const isSelected = projectInfo.rootPath === tgt.rootPath;
+                            const port = extractPortFromUrl(runningEntry?.url);
+                            const errCnt = runningEntry ? getTargetErrorCount(runningEntry) : 0;
+                            const displayName =
+                              tgt.relativePath === '.'
+                                ? projectInfo.name || tgt.kind
+                                : tgt.relativePath.split('/').filter(Boolean).pop() ||
+                                  tgt.relativePath;
+
+                            return (
+                              <div
+                                key={tgt.rootPath}
+                                className={`sidebar-server-row ${isSelected ? 'is-selected' : ''} ${
+                                  errCnt > 0 ? 'has-error' : ''
+                                }`}
+                                onClick={() => onSelectTargetRoot?.(tgt.rootPath)}
+                              >
+                                <span
+                                  className={`project-status-dot ${
+                                    isActive
+                                      ? isStarting
+                                        ? 'is-starting'
+                                        : 'is-running'
+                                      : ''
+                                  }`}
+                                />
+                                <div className="sidebar-server-row-info">
+                                  <div className="sidebar-server-row-name">
+                                    <span className="sidebar-server-row-title" title={tgt.label}>
+                                      {displayName}
+                                    </span>
+                                    {port && (
+                                      <span className="project-running-target-port">:{port}</span>
+                                    )}
+                                    {errCnt > 0 && (
+                                      <span className="project-logs-err-badge">
+                                        <AlertTriangle size={8} />
+                                        <span>{errCnt}</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="sidebar-server-row-meta">
+                                    {tgt.relativePath} • {tgt.kind}
+                                    {tgt.devScript ? ` • ${tgt.devScript}` : ''}
+                                  </div>
+                                </div>
+                                <div
+                                  className="sidebar-server-row-actions"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {isActive ? (
+                                    <>
+                                      {runningEntry?.url && onOpenProjectUrl && (
+                                        <button
+                                          type="button"
+                                          className="sidebar-server-icon-btn"
+                                          title={t.project.openInBuiltin}
+                                          onClick={() => {
+                                            onSelectTargetRoot?.(tgt.rootPath);
+                                            onOpenProjectUrl(runningEntry.url!, 'builtin');
+                                          }}
+                                        >
+                                          <Globe size={11} />
+                                        </button>
+                                      )}
+                                      {onRestartProjectServer && !projectServer?.external && (
+                                        <button
+                                          type="button"
+                                          className="sidebar-server-icon-btn"
+                                          title={t.project.restartTargetTitle.replace(
+                                            '{name}',
+                                            displayName
+                                          )}
+                                          onClick={() => onRestartProjectServer(tgt.rootPath)}
+                                        >
+                                          <RotateCw size={11} />
+                                        </button>
+                                      )}
+                                      {onStopProjectServer && (
+                                        <button
+                                          type="button"
+                                          className="sidebar-server-icon-btn is-stop"
+                                          title={t.project.stopTargetTitle.replace(
+                                            '{name}',
+                                            displayName
+                                          )}
+                                          onClick={() => onStopProjectServer(tgt.rootPath)}
+                                        >
+                                          <Square size={10} />
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    onStartProjectAndBrowse && (
+                                      <button
+                                        type="button"
+                                        className="sidebar-server-icon-btn is-play"
+                                        title={t.project.startServer}
+                                        onClick={() =>
+                                          onStartProjectAndBrowse(
+                                            'builtin',
+                                            undefined,
+                                            tgt.rootPath
+                                          )
+                                        }
+                                      >
+                                        <Play size={10} />
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="sidebar-server-footer-row">
+                          <button
+                            type="button"
+                            className={`mini-pill-btn ${sidebarServerSettingsOpen ? 'is-active' : ''}`}
+                            onClick={() => setSidebarServerSettingsOpen((v) => !v)}
+                            aria-expanded={sidebarServerSettingsOpen}
+                          >
+                            <Settings size={10} />
+                            <span>
+                              {t.project.serverSettingsBtn} ({projectInfo.name})
+                            </span>
+                          </button>
+                        </div>
+
+                        {sidebarServerSettingsOpen && (
+                          <div className="sidebar-server-settings-box">
+                            {orderedScripts.length > 1 && onSelectScript && (
+                              <label
+                                className={`project-select-control ${
+                                  isSelectedActive ? 'is-locked' : ''
+                                }`}
+                                title={
+                                  isSelectedActive
+                                    ? t.project.targetScriptLockedHint
+                                    : t.project.scriptLabel
+                                }
+                              >
+                                <Terminal size={11} className="project-select-icon" />
+                                <select
+                                  className="project-select-input"
+                                  aria-label={t.project.scriptLabel}
+                                  value={projectInfo.devScript || orderedScripts[0]}
+                                  disabled={isSelectedActive}
+                                  onChange={(e) => onSelectScript(e.target.value)}
+                                >
+                                  {orderedScripts.map((sc) => (
+                                    <option key={sc} value={sc}>
+                                      {sc}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            )}
+                            {onProjectCustomPortChange && (
+                              <ProjectPortInput
+                                value={projectCustomPort}
+                                onChange={onProjectCustomPortChange}
+                                onSubmitStart={
+                                  onStartProjectAndBrowse
+                                    ? () => onStartProjectAndBrowse('builtin')
+                                    : undefined
+                                }
+                                projectInfo={projectInfo}
+                                projectServer={projectServer}
+                                label={t.project.portLabel}
+                                defaultPlaceholder={t.project.portPlaceholderDefault}
+                                title={t.project.portInputTitle}
+                                lockedTitle={t.project.portStopToChangeHint}
+                              />
+                            )}
+                            {onToggleProjectServerLan && (
+                              <button
+                                type="button"
+                                className={`mini-pill-btn ${
+                                  projectServerAllowLan ? 'is-lan-on' : ''
+                                }`}
+                                onClick={onToggleProjectServerLan}
+                                title={t.project.lanAccessToggleTitle}
+                                aria-pressed={projectServerAllowLan}
+                              >
+                                <Wifi size={10} />
                                 <span>
-                                  {projectServer?.external
-                                    ? t.project.disconnectServer
-                                    : t.project.stopServer}
+                                  {projectServerAllowLan
+                                    ? t.project.lanAccessOn
+                                    : t.project.lanAccessOff}
                                 </span>
                               </button>
                             )}
-                          </>
-                        ) : (
-                          onStartProjectAndBrowse && (
-                            <button
-                              type="button"
-                              className="mini-pill-btn is-active"
-                              onClick={() => onStartProjectAndBrowse('builtin')}
-                              disabled={
-                                projectServer?.starting &&
-                                projectServer.rootPath === projectInfo.rootPath
-                              }
-                            >
-                              {projectServer?.starting &&
-                              projectServer.rootPath === projectInfo.rootPath ? (
-                                <Loader2 size={11} className="spin" />
-                              ) : (
-                                <Play size={11} />
-                              )}
-                              <span>
-                                {projectServer?.starting &&
-                                projectServer.rootPath === projectInfo.rootPath
-                                  ? t.project.startingServer
-                                  : t.project.startAndBrowse}
-                              </span>
-                            </button>
-                          )
+                          </div>
                         )}
-                        {onProjectCustomPortChange && (
-                          <ProjectPortInput
-                            value={projectCustomPort}
-                            onChange={onProjectCustomPortChange}
-                            onSubmitStart={
-                              onStartProjectAndBrowse
-                                ? () => onStartProjectAndBrowse('builtin')
-                                : undefined
-                            }
-                            projectInfo={projectInfo}
-                            projectServer={projectServer}
-                            label={t.project.portLabel}
-                            defaultPlaceholder={t.project.portPlaceholderDefault}
-                            title={t.project.portInputTitle}
-                            lockedTitle={t.project.portStopToChangeHint}
-                          />
-                        )}
-                        {onToggleProjectServerLan && (
-                          <button
-                            type="button"
-                            className={`mini-pill-btn ${projectServerAllowLan ? 'is-lan-on' : ''}`}
-                            onClick={onToggleProjectServerLan}
-                            title={t.project.lanAccessToggleTitle}
-                            aria-pressed={projectServerAllowLan}
-                          >
-                            <Wifi size={10} />
-                            <span>
-                              {projectServerAllowLan ? t.project.lanAccessOn : t.project.lanAccessOff}
-                            </span>
-                          </button>
-                        )}
+                      </>
+                    ) : (
+                      <>
+                        <div className="sidebar-project-head">
+                          <span className="project-kind-badge">
+                            {projectInfo.kind.toUpperCase()}
+                          </span>
+                          <span className="sidebar-project-name" title={projectInfo.name}>
+                            {projectInfo.name}
+                          </span>
+                          {projectServer?.running &&
+                          (!projectServer.rootPath ||
+                            projectServer.rootPath === projectInfo.rootPath) ? (
+                            <span className="project-status-dot is-running" />
+                          ) : hasDiagErrors ? (
+                            <AlertCircle size={13} className="diag-icon-err" />
+                          ) : null}
                         </div>
+                        {projectInfo.devCommandLabel && (
+                          <>
+                            <ProjectTargetControls
+                              projectInfo={projectInfo}
+                              projectServer={projectServer}
+                              onSelectTargetRoot={onSelectTargetRoot}
+                              onSelectScript={onSelectScript}
+                              onOpenTargetUrl={
+                                onOpenProjectUrl
+                                  ? (u) => onOpenProjectUrl(u, 'builtin')
+                                  : undefined
+                              }
+                              onRestartTargetRoot={onRestartProjectServer}
+                              onStopTargetRoot={(tr) => onStopProjectServer?.(tr)}
+                              onStartAllTargets={onStartAllProjectTargets}
+                              onStopAllTargets={onStopAllProjectTargets}
+                              targetLabel={t.project.targetLabel}
+                              scriptLabel={t.project.scriptLabel}
+                              lockedTitle={t.project.targetScriptLockedHint}
+                              stopTargetTitleTemplate={t.project.stopTargetTitle}
+                              restartTargetTitleTemplate={t.project.restartTargetTitle}
+                              startAllLabel={t.project.startAllTargetsBtn}
+                              stopAllLabel={t.project.stopAllTargetsBtn}
+                            />
+                            <div className="sidebar-project-actions">
+                              {isSelectedActive ? (
+                                <>
+                                  {onOpenProjectUrl &&
+                                    (projectServer?.runningTargets?.find(
+                                      (rt) => rt.rootPath === projectInfo.rootPath
+                                    )?.url ||
+                                      projectServer?.url) && (
+                                      <button
+                                        type="button"
+                                        className="mini-pill-btn is-active"
+                                        onClick={() =>
+                                          onOpenProjectUrl(
+                                            projectServer?.runningTargets?.find(
+                                              (rt) => rt.rootPath === projectInfo.rootPath
+                                            )?.url || projectServer!.url!,
+                                            'builtin'
+                                          )
+                                        }
+                                      >
+                                        <Globe size={11} />
+                                        <span>{t.project.openInBuiltin}</span>
+                                      </button>
+                                    )}
+                                  {onRestartProjectServer && !projectServer?.external && (
+                                    <button
+                                      type="button"
+                                      className="mini-pill-btn"
+                                      onClick={() =>
+                                        onRestartProjectServer(projectInfo.rootPath)
+                                      }
+                                      title={t.project.restartTargetTitle.replace(
+                                        '{name}',
+                                        projectInfo.name
+                                      )}
+                                    >
+                                      <RotateCw size={10} />
+                                      <span>{t.project.restartServer}</span>
+                                    </button>
+                                  )}
+                                  {onStopProjectServer && (
+                                    <button
+                                      type="button"
+                                      className="mini-pill-btn"
+                                      onClick={() =>
+                                        onStopProjectServer(projectInfo.rootPath)
+                                      }
+                                    >
+                                      <Square size={10} />
+                                      <span>
+                                        {projectServer?.external
+                                          ? t.project.disconnectServer
+                                          : t.project.stopServer}
+                                      </span>
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                onStartProjectAndBrowse && (
+                                  <button
+                                    type="button"
+                                    className="mini-pill-btn is-active"
+                                    onClick={() => onStartProjectAndBrowse('builtin')}
+                                    disabled={
+                                      projectServer?.starting &&
+                                      projectServer.rootPath === projectInfo.rootPath
+                                    }
+                                  >
+                                    {projectServer?.starting &&
+                                    projectServer.rootPath === projectInfo.rootPath ? (
+                                      <Loader2 size={11} className="spin" />
+                                    ) : (
+                                      <Play size={11} />
+                                    )}
+                                    <span>
+                                      {projectServer?.starting &&
+                                      projectServer.rootPath === projectInfo.rootPath
+                                        ? t.project.startingServer
+                                        : t.project.startAndBrowse}
+                                    </span>
+                                  </button>
+                                )
+                              )}
+                              {onProjectCustomPortChange && (
+                                <ProjectPortInput
+                                  value={projectCustomPort}
+                                  onChange={onProjectCustomPortChange}
+                                  onSubmitStart={
+                                    onStartProjectAndBrowse
+                                      ? () => onStartProjectAndBrowse('builtin')
+                                      : undefined
+                                  }
+                                  projectInfo={projectInfo}
+                                  projectServer={projectServer}
+                                  label={t.project.portLabel}
+                                  defaultPlaceholder={t.project.portPlaceholderDefault}
+                                  title={t.project.portInputTitle}
+                                  lockedTitle={t.project.portStopToChangeHint}
+                                />
+                              )}
+                              {onToggleProjectServerLan && (
+                                <button
+                                  type="button"
+                                  className={`mini-pill-btn ${
+                                    projectServerAllowLan ? 'is-lan-on' : ''
+                                  }`}
+                                  onClick={onToggleProjectServerLan}
+                                  title={t.project.lanAccessToggleTitle}
+                                  aria-pressed={projectServerAllowLan}
+                                >
+                                  <Wifi size={10} />
+                                  <span>
+                                    {projectServerAllowLan
+                                      ? t.project.lanAccessOn
+                                      : t.project.lanAccessOff}
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+                          </>
+                        )}
                       </>
                     )}
                     {projectServer?.running &&
@@ -1203,22 +1512,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           variant="block"
                         />
                       )}
-                    {projectServer?.logs &&
-                      projectServer.logs.length > 0 && (
-                        <ProjectServerLogs
-                          logs={projectServer.logs}
-                          running={Boolean(projectServer.running)}
-                          hasError={Boolean(projectServer.error)}
-                          label={t.project.liveLogsLabel}
-                          showTitle={t.project.liveLogsShowTitle}
-                          hideTitle={t.project.liveLogsHideTitle}
-                          copyLabel={t.project.liveLogsCopyBtn}
-                          copiedLabel={t.project.liveLogsCopiedBtn}
-                          clearLabel={t.project.liveLogsClearBtn}
-                          askAiLabel={t.project.liveLogsAskAiBtn}
-                          askAiTitle={t.project.liveLogsAskAiTitle}
-                        />
-                      )}
+                    {projectServer?.logs && projectServer.logs.length > 0 && (
+                      <ProjectServerLogs
+                        logs={projectServer.logs}
+                        runningTargets={runningList}
+                        activeTargetRoot={projectInfo.rootPath}
+                        allLogsLabel={t.project.allLogsTab}
+                        running={Boolean(projectServer.running)}
+                        hasError={Boolean(projectServer.error)}
+                        errorText={projectServer.error}
+                        requestedPort={projectServer.requestedPort}
+                        label={t.project.liveLogsLabel}
+                        showTitle={t.project.liveLogsShowTitle}
+                        hideTitle={t.project.liveLogsHideTitle}
+                        copyLabel={t.project.liveLogsCopyBtn}
+                        copiedLabel={t.project.liveLogsCopiedBtn}
+                        clearLabel={t.project.liveLogsClearBtn}
+                        askAiLabel={t.project.liveLogsAskAiBtn}
+                        askAiTitle={t.project.liveLogsAskAiTitle}
+                        portConflictTemplate={t.project.portConflictBanner}
+                        portConflictRetryLabel={t.project.portConflictRetryBtn}
+                        onRetryWithFreePort={onRetryWithFreePort}
+                      />
+                    )}
                     {projectServer?.running &&
                       (!projectServer.rootPath ||
                         projectServer.rootPath === projectInfo.rootPath) &&
@@ -1242,7 +1558,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       onRecheck={onRecheckProjectEnv}
                     />
                   </div>
-                )}
+                  );
+                })()}
 
                 <div className="sidebar-input-wrap">
                   <Search size={13} />

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle2,
   Clock,
   Copy,
@@ -8,8 +9,10 @@ import {
   FileText,
   FolderOpen,
   Globe,
+  Power,
   RefreshCw,
   Rocket,
+  ShieldCheck,
   SkipForward,
   Sliders,
   Sparkles,
@@ -24,6 +27,7 @@ import type {
   UpdateAvailableBehavior,
 } from '../types';
 import type { Translations } from '../i18n/types';
+import { renderMarkdownToHtml } from '../utils/markdown';
 
 export function normalizeVersionString(raw: string | undefined | null): string {
   return (raw || '').trim().replace(/^[vV]+/, '');
@@ -100,6 +104,15 @@ export function resolvePrimaryAutoUpdateUrl(info: AppUpdateInfo | null | undefin
   return info.autoUpdateUrl || info.downloadUrl || null;
 }
 
+export function findExpectedSha256ForUrl(
+  info: AppUpdateInfo | null | undefined,
+  url: string | null | undefined
+): string | null {
+  if (!info?.assets || !url) return null;
+  const match = info.assets.find((a) => a.downloadUrl === url);
+  return match?.digest || null;
+}
+
 export function buildReleaseNotesDocument(info: AppUpdateInfo, locale: Locale): {
   title: string;
   content: string;
@@ -129,8 +142,16 @@ export interface UpdateModalProps {
   onCheckUpdates: () => void;
   updateProgress: AppUpdateProgressEvent | null;
   downloadedUpdate: AppUpdateDownloadResult | null;
+  applyOnQuitPath?: string | null;
   isDownloadingUpdate: boolean;
   isApplyingUpdate: boolean;
+  dirtyTabCount?: number;
+  pendingRestartFilePath?: string | null;
+  onCancelDownload?: () => void;
+  onToggleApplyOnQuit?: (filePath?: string | null) => void;
+  onConfirmSaveAllAndUpdate?: () => void;
+  onConfirmRestartWithoutSaving?: () => void;
+  onCancelPendingRestart?: () => void;
   onAutoUpdateNow: () => void;
   onDownloadInstaller: (url?: string, fileName?: string) => void;
   onApplyDownloadedUpdate: (filePath: string, restartApp: boolean) => void;
@@ -156,8 +177,16 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
   onCheckUpdates,
   updateProgress,
   downloadedUpdate,
+  applyOnQuitPath,
   isDownloadingUpdate,
   isApplyingUpdate,
+  dirtyTabCount = 0,
+  pendingRestartFilePath,
+  onCancelDownload,
+  onToggleApplyOnQuit,
+  onConfirmSaveAllAndUpdate,
+  onConfirmRestartWithoutSaving,
+  onCancelPendingRestart,
   onAutoUpdateNow,
   onDownloadInstaller,
   onApplyDownloadedUpdate,
@@ -173,6 +202,26 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
   onSettingsChange,
 }) => {
   const [showAllAssets, setShowAllAssets] = useState(false);
+  const [renderedNotesHtml, setRenderedNotesHtml] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const raw = updateInfo?.notes?.trim();
+    if (!raw) {
+      setRenderedNotesHtml('');
+      return;
+    }
+    void renderMarkdownToHtml(raw)
+      .then((html) => {
+        if (!cancelled) setRenderedNotesHtml(html);
+      })
+      .catch(() => {
+        if (!cancelled) setRenderedNotesHtml('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [updateInfo?.notes]);
 
   if (!open) return null;
 
@@ -187,6 +236,20 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     : null;
   const assets = updateInfo?.assets || [];
   const percent = updateProgress?.percent ?? 0;
+  const isApplyOnQuitScheduled = Boolean(
+    applyOnQuitPath && downloadedUpdate?.filePath && applyOnQuitPath === downloadedUpdate.filePath
+  );
+
+  const handleNotesClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement | null)?.closest('a');
+    if (anchor) {
+      const href = anchor.getAttribute('href');
+      if (href && /^https?:\/\//i.test(href)) {
+        e.preventDefault();
+        onOpenExternalUrl(href);
+      }
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -218,6 +281,47 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
         </div>
 
         <div className="update-modal-body">
+          {/* Unsaved Changes Guard before restart */}
+          {pendingRestartFilePath && dirtyTabCount > 0 && (
+            <div className="update-unsaved-guard-card" role="alert">
+              <div className="update-unsaved-guard-head">
+                <AlertTriangle size={16} className="update-unsaved-guard-icon" />
+                <div>
+                  <div className="update-unsaved-guard-title">
+                    {t.updates.unsavedGuardTitle.replace('{count}', String(dirtyTabCount))}
+                  </div>
+                  <div className="update-unsaved-guard-desc">{t.updates.unsavedGuardDesc}</div>
+                </div>
+              </div>
+              <div className="update-unsaved-guard-actions">
+                <button
+                  type="button"
+                  className="primary-btn compact-btn"
+                  disabled={isApplyingUpdate}
+                  onClick={onConfirmSaveAllAndUpdate}
+                >
+                  <Rocket size={13} />
+                  <span>{t.updates.saveAllAndUpdateBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  disabled={isApplyingUpdate}
+                  onClick={onConfirmRestartWithoutSaving}
+                >
+                  <span>{t.updates.restartWithoutSavingBtn}</span>
+                </button>
+                <button
+                  type="button"
+                  className="secondary-btn compact-btn"
+                  onClick={onCancelPendingRestart}
+                >
+                  <span>{t.updates.cancelRestartBtn}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Version summary card */}
           <div className="update-summary-card">
             <div className="update-version-grid">
@@ -259,17 +363,19 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             </div>
           </div>
 
-          {/* Progress bar when downloading or applying */}
+          {/* Progress bar when downloading, verifying, or applying */}
           {(isDownloadingUpdate || isApplyingUpdate) && (
             <div className="update-progress-card">
               <div className="update-progress-header">
                 <RefreshCw size={13} className="spin" />
                 <span>
-                  {updateProgress?.phase === 'extracting'
-                    ? t.updates.extractingLabel
-                    : updateProgress?.phase === 'installing' || isApplyingUpdate
-                      ? t.updates.installingLabel
-                      : t.updates.downloadingProgressLabel.replace('{percent}', String(percent))}
+                  {updateProgress?.phase === 'verifying'
+                    ? t.updates.verifyingLabel
+                    : updateProgress?.phase === 'extracting'
+                      ? t.updates.extractingLabel
+                      : updateProgress?.phase === 'installing' || isApplyingUpdate
+                        ? t.updates.installingLabel
+                        : t.updates.downloadingProgressLabel.replace('{percent}', String(percent))}
                 </span>
                 {updateProgress?.downloadedBytes ? (
                   <span className="update-progress-bytes">
@@ -279,6 +385,16 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                       : ''}
                   </span>
                 ) : null}
+                {isDownloadingUpdate && onCancelDownload && (
+                  <button
+                    type="button"
+                    className="mini-pill-btn"
+                    onClick={onCancelDownload}
+                  >
+                    <X size={11} />
+                    <span>{t.updates.cancelDownloadBtn}</span>
+                  </button>
+                )}
               </div>
               <div className="update-progress-track">
                 <div
@@ -297,6 +413,18 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 <div>
                   <div className="update-ready-title">
                     {t.updates.readyToInstallLabel.replace('{version}', latestVersion)}
+                    {downloadedUpdate.verified && (
+                      <span className="update-verified-pill">
+                        <ShieldCheck size={11} />
+                        <span>{t.updates.sha256VerifiedBadge}</span>
+                      </span>
+                    )}
+                    {isApplyOnQuitScheduled && (
+                      <span className="update-quit-scheduled-pill">
+                        <Power size={10} />
+                        <span>{t.updates.applyOnQuitScheduledBadge}</span>
+                      </span>
+                    )}
                   </div>
                   <div className="update-ready-file">
                     {downloadedUpdate.fileName} ({formatAssetSize(downloadedUpdate.bytes)})
@@ -313,6 +441,21 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   <Rocket size={13} />
                   <span>{t.updates.applyAndRestartBtn}</span>
                 </button>
+                {onToggleApplyOnQuit && (
+                  <button
+                    type="button"
+                    className={`secondary-btn compact-btn ${isApplyOnQuitScheduled ? 'is-active' : ''}`}
+                    disabled={isApplyingUpdate}
+                    onClick={() => onToggleApplyOnQuit(downloadedUpdate.filePath)}
+                  >
+                    <Power size={13} />
+                    <span>
+                      {isApplyOnQuitScheduled
+                        ? t.updates.cancelApplyOnQuitBtn
+                        : t.updates.applyOnQuitBtn}
+                    </span>
+                  </button>
+                )}
                 <button
                   type="button"
                   className="secondary-btn compact-btn"
@@ -446,7 +589,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
             </div>
           )}
 
-          {/* In-App Release Notes Viewer */}
+          {/* In-App Rich Markdown Release Notes Viewer */}
           {updateInfo && (
             <div className="update-notes-section">
               <div className="update-notes-header">
@@ -473,9 +616,17 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                   </button>
                 </div>
               </div>
-              <pre className="update-notes-content">
-                {updateInfo.notes?.trim() ? updateInfo.notes : t.updates.noReleaseNotes}
-              </pre>
+              {renderedNotesHtml ? (
+                <div
+                  className="update-notes-rendered"
+                  onClick={handleNotesClick}
+                  dangerouslySetInnerHTML={{ __html: renderedNotesHtml }}
+                />
+              ) : (
+                <pre className="update-notes-content">
+                  {updateInfo.notes?.trim() ? updateInfo.notes : t.updates.noReleaseNotes}
+                </pre>
+              )}
             </div>
           )}
 

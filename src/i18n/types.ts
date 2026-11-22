@@ -516,6 +516,9 @@ export interface Translations {
     recentUrlsLabel: string;
     clearHistoryBtn: string;
     noBookmarksYet: string;
+    rotateViewportTitle: string;
+    captureToMarkdownTitle: string;
+    capturedToMarkdownToast: string;
     codePreviewLabel: string;
     phpServerHint: string;
     openBuiltinBrowserBtn: string;
@@ -601,6 +604,18 @@ export interface Translations {
     lanShowOtherBtn: string;
     lanHideOtherBtn: string;
     stopTargetTitle: string;
+    startAllTargetsBtn: string;
+    stopAllTargetsBtn: string;
+    portConflictBanner: string;
+    portConflictRetryBtn: string;
+    restartServer: string;
+    restartTargetTitle: string;
+    addServerBtn: string;
+    serverSettingsBtn: string;
+    serversHeading: string;
+    allLogsTab: string;
+    statusServersPopoverTitle: string;
+    statusServersRunning: string;
   };
   imageModal: {
     title: string;
@@ -1227,6 +1242,20 @@ export interface Translations {
     statusBadgeAvailable: string;
     statusBadgeReady: string;
     quickSettingsHeading: string;
+    cancelDownloadBtn: string;
+    downloadCancelledToast: string;
+    verifyingLabel: string;
+    sha256VerifiedBadge: string;
+    applyOnQuitBtn: string;
+    cancelApplyOnQuitBtn: string;
+    applyOnQuitScheduledBadge: string;
+    applyOnQuitScheduledToast: string;
+    applyOnQuitCancelledToast: string;
+    unsavedGuardTitle: string;
+    unsavedGuardDesc: string;
+    saveAllAndUpdateBtn: string;
+    restartWithoutSavingBtn: string;
+    cancelRestartBtn: string;
   };
   sampleDocument: string;
 }
