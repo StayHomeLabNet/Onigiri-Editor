@@ -23,10 +23,25 @@ import {
   Rocket,
   Clock,
   FileText,
+  Wand2,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  ChevronDown,
 } from 'lucide-react';
 import { QrCodeCard } from './LanUrlList';
 import { formatUpdateCheckTime, isVersionSkipped } from './UpdateModal';
+import { AiCustomIcon } from './AiCustomIcon';
+import {
+  AI_CUSTOM_ICON_OPTIONS,
+  MAX_AI_CUSTOM_BUTTONS,
+  cloneDefaultAiCustomButtons,
+  createNewAiCustomButton,
+  normalizeAiCustomButtons,
+} from '../utils/aiCustomButtons';
 import type {
+  AiCustomButton,
+  AiCustomButtonIconId,
   AiFolderMode,
   AppUpdateInfo,
   ClearAppCacheResult,
@@ -65,7 +80,14 @@ import {
   type OnigiriSettingsBackup,
 } from '../utils/settingsBackup';
 
-export type SettingsTab = 'general' | 'editor' | 'syntax' | 'keybindings' | 'integrations' | 'data';
+export type SettingsTab =
+  | 'general'
+  | 'editor'
+  | 'syntax'
+  | 'keybindings'
+  | 'aiCustom'
+  | 'integrations'
+  | 'data';
 
 const DEFAULT_RESET_SELECTION: SettingsResetSelection = {
   editorSettings: true,
@@ -226,6 +248,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [kbFilter, setKbFilter] = useState('');
   const [recordingCmdId, setRecordingCmdId] = useState<string | null>(null);
   const [activeLanQrUrl, setActiveLanQrUrl] = useState<string | null>(null);
+  const [openIconPickerId, setOpenIconPickerId] = useState<string | null>(null);
+
+  const aiCustomButtons = useMemo(
+    () => normalizeAiCustomButtons(settings.aiCustomButtons),
+    [settings.aiCustomButtons]
+  );
+
+  const updateAiCustomButtons = (next: AiCustomButton[]) => {
+    onSettingsChange({
+      ...settings,
+      aiCustomButtons: next.slice(0, MAX_AI_CUSTOM_BUTTONS),
+    });
+  };
+
+  const handleAddAiCustomButton = () => {
+    if (aiCustomButtons.length >= MAX_AI_CUSTOM_BUTTONS) return;
+    const created = createNewAiCustomButton(aiCustomButtons.length, locale);
+    updateAiCustomButtons([...aiCustomButtons, created]);
+  };
+
+  const handlePatchAiCustomButton = (
+    id: string,
+    patch: Partial<AiCustomButton>
+  ) => {
+    updateAiCustomButtons(
+      aiCustomButtons.map((btn) => (btn.id === id ? { ...btn, ...patch } : btn))
+    );
+  };
+
+  const handleMoveAiCustomButton = (index: number, delta: -1 | 1) => {
+    const nextIdx = index + delta;
+    if (nextIdx < 0 || nextIdx >= aiCustomButtons.length) return;
+    const next = [...aiCustomButtons];
+    const [moved] = next.splice(index, 1);
+    next.splice(nextIdx, 0, moved);
+    updateAiCustomButtons(next);
+  };
+
+  const handleDeleteAiCustomButton = (id: string) => {
+    if (openIconPickerId === id) setOpenIconPickerId(null);
+    updateAiCustomButtons(aiCustomButtons.filter((btn) => btn.id !== id));
+  };
+
+  const handleResetAiCustomButtons = () => {
+    setOpenIconPickerId(null);
+    updateAiCustomButtons(cloneDefaultAiCustomButtons());
+  };
 
   const effectiveKeybindings = useMemo(
     () => resolveEffectiveKeybindings(customKeybindings),
@@ -243,6 +312,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setDataActionFeedback(null);
       setBackupError(null);
       setRecordingCmdId(null);
+      setOpenIconPickerId(null);
     }
   }, [open, initialTab]);
 
@@ -371,6 +441,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <Keyboard size={14} />
               <span>{t.settingsModal.tabKeybindings}</span>
+            </button>
+            <button
+              type="button"
+              className={`settings-nav-btn ${activeTab === 'aiCustom' ? 'is-active' : ''}`}
+              onClick={() => setActiveTab('aiCustom')}
+            >
+              <Wand2 size={14} />
+              <span>{t.settingsModal.tabAiCustom}</span>
             </button>
             <button
               type="button"
@@ -1459,6 +1537,219 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     })}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'aiCustom' && (
+              <div className="settings-section">
+                <div className="settings-card">
+                  <div className="ai-custom-top-header">
+                    <div>
+                      <div className="settings-data-card-title">
+                        <Wand2 size={14} />
+                        <span>{t.settingsModal.aiCustom.title}</span>
+                        <span className="ai-custom-count-badge">
+                          {aiCustomButtons.length} / {MAX_AI_CUSTOM_BUTTONS}
+                        </span>
+                      </div>
+                      <p className="ai-hint-text" style={{ margin: '4px 0 0' }}>
+                        {t.settingsModal.aiCustom.desc}
+                      </p>
+                    </div>
+                    <div className="ai-custom-top-actions">
+                      <button
+                        type="button"
+                        className="secondary-btn compact-btn"
+                        onClick={handleResetAiCustomButtons}
+                      >
+                        <RotateCcw size={12} />
+                        <span>{t.settingsModal.aiCustom.resetDefaultsBtn}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="primary-btn compact-btn"
+                        disabled={aiCustomButtons.length >= MAX_AI_CUSTOM_BUTTONS}
+                        onClick={handleAddAiCustomButton}
+                        title={
+                          aiCustomButtons.length >= MAX_AI_CUSTOM_BUTTONS
+                            ? t.settingsModal.aiCustom.maxReachedHint
+                            : undefined
+                        }
+                      >
+                        <Plus size={13} />
+                        <span>{t.settingsModal.aiCustom.addBtn}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="platform-hint-note">
+                    <Info size={12} />
+                    <span>{t.settingsModal.aiCustom.providerHint}</span>
+                  </div>
+                </div>
+
+                {aiCustomButtons.length === 0 ? (
+                  <div className="settings-card ai-custom-empty">
+                    <p className="ai-hint-text" style={{ margin: 0 }}>
+                      {t.settingsModal.aiCustom.emptyState}
+                    </p>
+                  </div>
+                ) : (
+                  aiCustomButtons.map((btn, idx) => {
+                    const iconPickerOpen = openIconPickerId === btn.id;
+                    const noOutputSelected = !btn.copyToClipboard && !btn.replaceContent;
+                    return (
+                      <div key={btn.id} className="settings-card ai-custom-card">
+                        <div className="ai-custom-card-header">
+                          <div className="ai-custom-card-title">
+                            <span className="ai-custom-slot-badge">
+                              {t.settingsModal.aiCustom.slotLabel.replace('{n}', String(idx + 1))}
+                            </span>
+                            <span className="ai-custom-preview-chip" title={btn.name || undefined}>
+                              <AiCustomIcon icon={btn.icon} size={14} />
+                              <span>
+                                {btn.name.trim() || t.settingsModal.aiCustom.defaultButtonName}
+                              </span>
+                            </span>
+                          </div>
+                          <div className="ai-custom-card-actions">
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              disabled={idx === 0}
+                              onClick={() => handleMoveAiCustomButton(idx, -1)}
+                              title={t.settingsModal.aiCustom.moveUpTitle}
+                            >
+                              <ArrowUp size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn"
+                              disabled={idx === aiCustomButtons.length - 1}
+                              onClick={() => handleMoveAiCustomButton(idx, 1)}
+                              title={t.settingsModal.aiCustom.moveDownTitle}
+                            >
+                              <ArrowDown size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn is-danger"
+                              onClick={() => handleDeleteAiCustomButton(btn.id)}
+                              title={t.settingsModal.aiCustom.deleteTitle}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="ai-custom-row-main">
+                          <div className="field-row ai-custom-icon-field">
+                            <label>{t.settingsModal.aiCustom.iconLabel}</label>
+                            <button
+                              type="button"
+                              className={`ai-custom-icon-trigger ${iconPickerOpen ? 'is-open' : ''}`}
+                              onClick={() =>
+                                setOpenIconPickerId((cur) => (cur === btn.id ? null : btn.id))
+                              }
+                              title={t.settingsModal.aiCustom.chooseIconTitle}
+                            >
+                              <AiCustomIcon icon={btn.icon} size={15} />
+                              <ChevronDown size={12} />
+                            </button>
+                          </div>
+
+                          <div className="field-row ai-custom-name-field">
+                            <label>{t.settingsModal.aiCustom.nameLabel}</label>
+                            <input
+                              type="text"
+                              className="text-input"
+                              value={btn.name}
+                              placeholder={t.settingsModal.aiCustom.namePlaceholder}
+                              onChange={(e) =>
+                                handlePatchAiCustomButton(btn.id, { name: e.target.value })
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        {iconPickerOpen && (
+                          <div className="ai-custom-icon-grid" role="listbox">
+                            {AI_CUSTOM_ICON_OPTIONS.map((opt) => {
+                              const selected = btn.icon === opt.id;
+                              const optLabel = locale === 'ja' ? opt.labelJa : opt.labelEn;
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  className={`ai-custom-icon-option ${selected ? 'is-selected' : ''}`}
+                                  title={optLabel}
+                                  aria-label={optLabel}
+                                  aria-selected={selected}
+                                  onClick={() => {
+                                    handlePatchAiCustomButton(btn.id, {
+                                      icon: opt.id as AiCustomButtonIconId,
+                                    });
+                                    setOpenIconPickerId(null);
+                                  }}
+                                >
+                                  <AiCustomIcon icon={opt.id} size={15} />
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        <div className="field-row">
+                          <label>{t.settingsModal.aiCustom.promptLabel}</label>
+                          <textarea
+                            className="text-input ai-custom-prompt-textarea"
+                            rows={4}
+                            value={btn.prompt}
+                            placeholder={t.settingsModal.aiCustom.promptPlaceholder}
+                            onChange={(e) =>
+                              handlePatchAiCustomButton(btn.id, { prompt: e.target.value })
+                            }
+                          />
+                        </div>
+
+                        <div className="field-row">
+                          <label>{t.settingsModal.aiCustom.outputHandlingLabel}</label>
+                          <div className="ai-custom-output-checks">
+                            <label className="check-row">
+                              <input
+                                type="checkbox"
+                                checked={btn.copyToClipboard}
+                                onChange={(e) =>
+                                  handlePatchAiCustomButton(btn.id, {
+                                    copyToClipboard: e.target.checked,
+                                  })
+                                }
+                              />
+                              <span>{t.settingsModal.aiCustom.copyToClipboardLabel}</span>
+                            </label>
+                            <label className="check-row">
+                              <input
+                                type="checkbox"
+                                checked={btn.replaceContent}
+                                onChange={(e) =>
+                                  handlePatchAiCustomButton(btn.id, {
+                                    replaceContent: e.target.checked,
+                                  })
+                                }
+                              />
+                              <span>{t.settingsModal.aiCustom.replaceContentLabel}</span>
+                            </label>
+                          </div>
+                          {noOutputSelected && (
+                            <div className="ai-custom-warn">
+                              <AlertTriangle size={12} />
+                              <span>{t.settingsModal.aiCustom.noOutputWarning}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
 

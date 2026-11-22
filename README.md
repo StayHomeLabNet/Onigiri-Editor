@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v134">What's New in v1.3.4</a> ・
+    <a href="#whats-new-in-v135">What's New in v1.3.5</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.3.4-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.3.5-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.3.4`
+Current version: `v1.3.5`
 
 ## Key Features
 
@@ -49,8 +49,8 @@ Current version: `v1.3.4`
   - **Advanced Mode**: Multi-tab editing (with pinning, drag-reordering, side-by-side dual editor & 2-tab diff compare), collapsible workspace folder explorer (Git status badges, tree D&D relative links, context menu, image gallery & **Unused Image Cleaner**), **Knowledge tab** (`[[WikiLinks]]`, Backlinks, `#tag` browser & **Interactive Knowledge Graph / Broken Link Diagnostics**), dedicated **Git Source Control tab** (Stage/Unstage/Discard, inline diff, Commit with **AI Commit Message**, Pull/Push), cross-folder Regex Grep & Replace (`⌘⇧G`), dev-server integration, snapshots, and AI workspace tools.
 - **Bidirectional Visual Editing, Citations, Slide Mode & Writing Workflow**: Edit Markdown in CodeMirror 6 (left) or TipTap visual WYSIWYG (right) with real-time line/block highlights, **Slash Commands (`/`)**, **Custom Snippets**, **Auto TOC**, **Clipboard Image Paste Auto-Save (with auto-migration on first save)**, **Citations, Footnotes, BibTeX / DOI Lookup, Link Cards & URL Auto-Title Paste**, **Daily Notes & Templates**, **URL Web Clipper**, and **Markdown Slide Presentation Mode**.
 - **100+ Language Syntax Highlighting, Structured Data & Visual Previews**: Built-in support for Markdown, PHP, TypeScript/JavaScript, Python, Rust, SQL, HTML, CSS, YAML, JSON, CSV/TSV, SVG, and more—clickable Status Bar language override, **CSV/TSV interactive table preview**, **JSON/YAML/ENV formatting & conversion**, enhanced **SVG (zoom/background/PNG copy)** & **HTML Visual/Source preview**, **Mermaid & KaTeX SVG/PNG export**, code folding, persisted **Line Bookmarks (`F2`)**, **Focus Mode**, `⌘D` multi-occurrence selection, 7 syntax presets, and 10 per-token color pickers.
-- **Built-in AI Chat (Per-Tab Threads), Document Review & Diff Preview**:
-  - Supports **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** with model selection, **per-tab or shared chat threads**, **Export Chat as `.md` Note**, live streaming progress & Stop/Cancel, folder permission pill, **Inline AI Selection Edit (`⌘⇧E`)**, and **Proofread & Document Review**.
+- **Built-in AI Chat (Per-Tab Threads), Toolbar AI Custom Buttons, Document Review & Diff Preview**:
+  - Supports **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** with model selection, **per-tab or shared chat threads**, **Export Chat as `.md` Note**, live streaming progress & Stop/Cancel, folder permission pill, **Inline AI Selection Edit (`⌘⇧E`)**, **Toolbar AI Custom Buttons** (register up to 5 one-click AI prompt buttons with custom icons, hover tooltips, and independent copy-to-clipboard / immediate replace options—preloaded with an **AI Translate** preset), and **Proofread & Document Review**.
   - Shows a **line-by-line Diff Preview Modal** before applying AI document/selection replacements (with optional pre-apply snapshot) or workspace file writes.
 - **Project-Scoped Session Restore, `.editorconfig` / `.onigiri.json`, Keybindings & Backup**: Saves and restores open tabs, unsaved drafts, cursor & scroll positions, folding state, bookmarks, language overrides, recent history, and window geometry per workspace folder across restarts; auto-applies hierarchical **`.editorconfig`** & **`.onigiri.json`** project rules; lets you customize shortcuts across 27 commands (**Settings → Keybindings**); and supports selective **JSON Settings / AI / Snippets / Templates / Keybindings Backup Export & Import** plus granular **Factory Reset & Cache Cleaner**.
 - **External File Change Detection & Conflict Banner**: Watches open files on disk (including changes from external editors or AI CLIs)—auto-reloading clean tabs or displaying a conflict banner with **Reload**, **Compare Diff**, and **Keep Mine** actions when unsaved edits exist.
@@ -99,7 +99,16 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.3.4
+## What's New in v1.3.5
+
+- **Toolbar AI Custom Buttons (Up to 5 Configurable One-Click AI Actions)**:
+  - Register up to **5 custom AI buttons** directly in the Format Toolbar (displayed to the right of the formatting buttons across **Simple**, **Basic**, and **Advanced** modes whenever the toolbar is visible).
+  - **Built-in Default Preset (`AI翻訳` / AI Translate)**: Ships ready to use with 1 default button that automatically translates English → Japanese or Japanese → English and replaces the target text with only the translation result.
+  - **Dedicated `Settings → AI Custom` Tab**: Add, reorder, edit, delete, or reset buttons with a **24-icon visual Lucide picker**, **custom hover tooltip name**, **AI prompt editor**, and independent **Copy to clipboard** / **Replace document (or selection)** checkboxes (usable separately or together).
+  - **Smart Selection/Document Targeting, Instant Undoable Replace & Cancel**: Sends the **selected text** when text is highlighted, or the **entire document** when nothing is selected, using your active AI provider/model. Immediate replacements push onto CodeMirror's undo stack (`⌘Z` / `Ctrl+Z` reverts in one step), and clicking a running button's spinner cancels the request.
+
+<details>
+<summary>Previous release: v1.3.4</summary>
 
 - **Redesigned Multi-Server UI (Compact Single-Row Bar, Per-Server Log Tabs, Sidebar Launcher, Status Bar Popover & 1-Click Restart)**:
   - **Built-in Browser Compact Bar**: Consolidates running server tabs (`● web :5173 [×]`, `● api :3000 ⚠2 [×]`) into a single row with **`+ Add`** and **`⚙ Settings`** inline drawers (`Port` / `Script` / `LAN`), **Start All / Stop All**, and **`EADDRINUSE` Port Conflict Auto-Retry on Free Port**.
@@ -107,7 +116,9 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Sidebar Monorepo Launcher List & Status Bar Indicator**: Displays multi-target projects as a clean per-row launcher list (1-click Start, Open in Browser, Restart `↻`, Stop) and adds a persistent **Status Bar** server indicator popover so background servers are always visible and manageable from any tab.
 - **Built-in Web Browser Viewport Rotation & Screenshot-to-Markdown Capture**: Added **Portrait / Landscape** rotation for Tablet (`768px` ⇔ `1024×768`) and Mobile (`390px` ⇔ `844×390`) previews, plus a **Capture Screenshot to Markdown** camera button (macOS `screencapture`, Windows Per-Monitor HiDPI-aware capture, and Linux Wayland `grim` / X11 `import` / `maim` / `scrot`).
 - **Hardened Cross-Platform Auto-Update Experience**: Added an **Unsaved Changes Guard** before restart (**Save All & Update**, **Restart Without Saving**, **Cancel**), streaming **SHA-256 verification** restricted to official GitHub Releases domains, **Cancel Download**, rich Markdown release notes rendering, **ETag (`If-None-Match`)** caching & persisted download state, **Apply on Next Quit**, atomic rollback-safe swaps for **macOS `.app`** and **Linux `.AppImage`**, and hidden delayed **Windows** installer launches that avoid file-lock / single-instance races.
-- **Cross-Platform Polish & Architecture Cleanup**: Fixed Windows external URL opening for `&` query strings, Windows monorepo path case/`\\?\` comparison, OS-aware download directory lookup, removed version suffix from window title bar, and modularized `useAppUpdates` / `useProjectServer` hooks and the Rust `src-tauri/src/project/` backend.
+- **Cross-Platform Polish & Architecture Cleanup**: Fixed macOS embedded browser DevTools docking/bounds restoration, Windows external URL opening for `&` query strings, Windows monorepo path case/`\\?\` comparison, OS-aware download directory lookup, removed version suffix from window title bar, and modularized `useAppUpdates` / `useProjectServer` hooks and the Rust `src-tauri/src/project/` backend.
+
+</details>
 
 <details>
 <summary>Previous release: v1.3.3</summary>

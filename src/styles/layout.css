@@ -314,6 +314,11 @@
   animation: macro-rec-pulse 1.5s ease-in-out infinite;
 }
 
+.tb-btn.is-ai-running {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
 .macro-record-icon {
   color: #ef4444;
   fill: #ef4444;

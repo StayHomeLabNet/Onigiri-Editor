@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import type {
   AiCleanOptions,
+  AiCustomButton,
   AiProviderConfig,
   AppMode,
   ClearAppCacheResult,
@@ -109,9 +110,16 @@ import {
   saveCustomKeybindings,
 } from './utils/keybindings';
 import {
+  cleanAiCustomResponse,
+  cloneDefaultAiCustomButtons,
+  normalizeAiCustomButtons,
+  resolveAiProviderCallOptions,
+} from './utils/aiCustomButtons';
+import {
   browserClose,
   browserNavAction,
   browserSetBounds,
+  cancelAiChat,
   checkFilesSync,
   clearAppCaches,
   createFileInDir,
@@ -347,6 +355,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   hideTopBarInSimpleMode: false,
   showFormatToolbar: true,
   showFormatToolbarInSimpleMode: false,
+  aiCustomButtons: cloneDefaultAiCustomButtons(),
 };
 
 const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
@@ -399,6 +408,13 @@ export function App() {
         if (!parsed.wrapMode && parsed.wordWrap === false) {
           loaded.wrapMode = 'none';
         }
+        if (parsed.aiCustomButtons !== undefined) {
+          loaded.aiCustomButtons = normalizeAiCustomButtons(parsed.aiCustomButtons);
+        } else {
+          loaded.aiCustomButtons = cloneDefaultAiCustomButtons();
+        }
+      } else {
+        loaded.aiCustomButtons = cloneDefaultAiCustomButtons();
       }
     } catch {
       // ignore
@@ -3900,6 +3916,10 @@ export function App() {
             ...DEFAULT_SETTINGS,
             ...prev,
             ...backup.editorSettings,
+            aiCustomButtons:
+              backup.editorSettings?.aiCustomButtons !== undefined
+                ? normalizeAiCustomButtons(backup.editorSettings.aiCustomButtons)
+                : prev.aiCustomButtons,
           }));
         }
       }
@@ -4552,6 +4572,182 @@ export function App() {
       void executeToolbarAction(action, false);
     },
     [executeToolbarAction]
+  );
+
+  // Toolbar AI Custom Buttons
+  const aiCustomButtons = useMemo(
+    () => normalizeAiCustomButtons(settings.aiCustomButtons),
+    [settings.aiCustomButtons]
+  );
+  const [runningAiCustomId, setRunningAiCustomId] = useState<string | null>(null);
+  const aiCustomRequestRef = useRef<{
+    requestId: string;
+    buttonId: string;
+    buttonName: string;
+    cancelled: boolean;
+  } | null>(null);
+
+  const handleCancelAiCustom = useCallback(() => {
+    const active = aiCustomRequestRef.current;
+    if (!active) return;
+    active.cancelled = true;
+    aiCustomRequestRef.current = null;
+    setRunningAiCustomId(null);
+    void cancelAiChat(active.requestId).catch(() => {});
+    notify(t.toasts.aiCustomCancelled.replace('{name}', active.buttonName));
+  }, [notify, t.toasts.aiCustomCancelled]);
+
+  const handleRunAiCustomButton = useCallback(
+    async (button: AiCustomButton) => {
+      if (aiCustomRequestRef.current) return;
+      const buttonName = button.name.trim() || t.settingsModal.aiCustom.defaultButtonName;
+      const promptText = button.prompt.trim();
+      if (!promptText) {
+        notify(t.toasts.aiCustomEmptyPrompt.replace('{name}', buttonName));
+        return;
+      }
+      if (!button.copyToClipboard && !button.replaceContent) {
+        notify(t.toasts.aiCustomNoOutputTarget.replace('{name}', buttonName));
+        return;
+      }
+
+      const sideActive =
+        isSideEditorActive() && Boolean(sideEditorRef.current) && Boolean(sideTabIdRef.current);
+      const targetTabId =
+        sideActive && sideTabIdRef.current ? sideTabIdRef.current : activeTabIdRef.current;
+      const targetTab =
+        tabsRef.current.find((tb) => tb.id === targetTabId) ?? activeTab;
+      const targetEditor = sideActive ? sideEditorRef.current : editorRef.current;
+
+      const range = targetEditor?.getSelectionRange() ?? null;
+      const selectedText = targetEditor?.getSelectedText() ?? '';
+      const hasSelection = Boolean(range && range.from < range.to && selectedText.length > 0);
+      const inputText = hasSelection ? selectedText : targetTab.content;
+      const captureFrom = hasSelection && range ? range.from : 0;
+      const captureTo = hasSelection && range ? range.to : targetTab.content.length;
+
+      const requestId = `ai-custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const reqState = {
+        requestId,
+        buttonId: button.id,
+        buttonName,
+        cancelled: false,
+      };
+      aiCustomRequestRef.current = reqState;
+      setRunningAiCustomId(button.id);
+      notify(t.toasts.aiCustomRunning.replace('{name}', buttonName));
+
+      const callOpts = resolveAiProviderCallOptions(aiConfig);
+      const systemPrompt = [
+        'You are an AI assistant invoked from a custom toolbar button inside a Markdown editor.',
+        'Follow the user instruction faithfully and return ONLY the resulting text.',
+        'Do not add explanations, greetings, or surrounding Markdown code fences unless explicitly asked.',
+      ].join('\n');
+      const userPrompt = inputText.length > 0 ? `${promptText}\n\n${inputText}` : promptText;
+
+      try {
+        const res = await sendAiChat({
+          requestId,
+          provider: aiConfig.provider,
+          model: callOpts.model,
+          apiKey: callOpts.apiKey,
+          baseUrl: callOpts.baseUrl,
+          customCliCmd: callOpts.customCliCmd,
+          systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          workspaceDir: workspaceRootRef.current,
+          allowWorkspaceWrite: false,
+        });
+
+        if (reqState.cancelled) return;
+        const resultText = cleanAiCustomResponse(res.content, inputText, promptText);
+
+        if (button.copyToClipboard) {
+          await writeClipboardText(resultText);
+        }
+
+        if (button.replaceContent) {
+          const stillOnSide =
+            sideActive &&
+            Boolean(sideEditorRef.current) &&
+            sideTabIdRef.current === targetTabId;
+          const stillOnMain =
+            !sideActive &&
+            Boolean(editorRef.current) &&
+            activeTabIdRef.current === targetTabId;
+          const liveEditor = stillOnSide
+            ? sideEditorRef.current
+            : stillOnMain
+              ? editorRef.current
+              : null;
+
+          if (liveEditor) {
+            if (hasSelection) {
+              liveEditor.replaceRange(captureFrom, captureTo, resultText, {
+                selectResult: true,
+              });
+            } else {
+              const latestDocLen =
+                tabsRef.current.find((tb) => tb.id === targetTabId)?.content.length ?? captureTo;
+              liveEditor.replaceRange(0, latestDocLen, resultText, {
+                selectResult: false,
+              });
+            }
+          } else {
+            const latestTab = tabsRef.current.find((tb) => tb.id === targetTabId);
+            if (latestTab) {
+              const nextContent = hasSelection
+                ? latestTab.content.slice(0, captureFrom) +
+                  resultText +
+                  latestTab.content.slice(captureTo)
+                : resultText;
+              updateTabContentById(targetTabId, nextContent);
+            }
+          }
+        }
+
+        if (button.replaceContent && button.copyToClipboard) {
+          notify(t.toasts.aiCustomReplacedAndCopied.replace('{name}', buttonName));
+        } else if (button.replaceContent) {
+          notify(t.toasts.aiCustomReplaced.replace('{name}', buttonName));
+        } else if (button.copyToClipboard) {
+          notify(t.toasts.aiCustomCopied.replace('{name}', buttonName));
+        }
+      } catch (err) {
+        if (reqState.cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === 'CLI_CANCELLED') return;
+        if (
+          !aiConfig.apiKeys[aiConfig.provider] &&
+          ['openai-api', 'anthropic-api', 'gemini-api'].includes(aiConfig.provider)
+        ) {
+          notify(t.gitPanel.noAiProviderToast);
+        } else {
+          notify(`${t.toasts.errorPrefix} ${msg}`);
+        }
+      } finally {
+        if (aiCustomRequestRef.current?.requestId === requestId) {
+          aiCustomRequestRef.current = null;
+          setRunningAiCustomId(null);
+        }
+      }
+    },
+    [
+      activeTab,
+      aiConfig,
+      isSideEditorActive,
+      notify,
+      t.gitPanel.noAiProviderToast,
+      t.settingsModal.aiCustom.defaultButtonName,
+      t.toasts.aiCustomCopied,
+      t.toasts.aiCustomEmptyPrompt,
+      t.toasts.aiCustomNoOutputTarget,
+      t.toasts.aiCustomReplaced,
+      t.toasts.aiCustomReplacedAndCopied,
+      t.toasts.aiCustomRunning,
+      t.toasts.errorPrefix,
+      updateTabContentById,
+    ]
   );
 
   // Snapshots
@@ -6374,6 +6570,10 @@ export function App() {
               isPlayingMacro={isPlayingMacro}
               hasMacro={macroSteps.length > 0}
               macroStepCount={macroSteps.length}
+              aiCustomButtons={aiCustomButtons}
+              runningAiCustomId={runningAiCustomId}
+              onRunAiCustomButton={(btn) => void handleRunAiCustomButton(btn)}
+              onCancelAiCustom={handleCancelAiCustom}
             />
           )}
           {shouldShowAutoUpdateNotification(

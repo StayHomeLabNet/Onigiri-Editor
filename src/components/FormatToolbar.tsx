@@ -37,10 +37,12 @@ import {
   Play,
   Rows2,
   BookMarked,
+  Loader2,
 } from 'lucide-react';
-import type { AppMode } from '../types';
+import type { AiCustomButton, AppMode } from '../types';
 import type { Translations } from '../i18n/types';
 import { formatShortcut } from '../utils/platform';
+import { AiCustomIcon } from './AiCustomIcon';
 
 interface FormatToolbarProps {
   t: Translations;
@@ -52,6 +54,10 @@ interface FormatToolbarProps {
   isPlayingMacro?: boolean;
   hasMacro?: boolean;
   macroStepCount?: number;
+  aiCustomButtons?: AiCustomButton[];
+  runningAiCustomId?: string | null;
+  onRunAiCustomButton?: (button: AiCustomButton) => void;
+  onCancelAiCustom?: () => void;
 }
 
 export const FormatToolbar: React.FC<FormatToolbarProps> = ({
@@ -64,6 +70,10 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
   isPlayingMacro,
   hasMacro,
   macroStepCount,
+  aiCustomButtons = [],
+  runningAiCustomId = null,
+  onRunAiCustomButton,
+  onCancelAiCustom,
 }) => {
   const keepFocusMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -231,6 +241,41 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
             <button type="button" className="tb-btn" onClick={() => onAction('citation')} title={t.actions.insertCitation}>
               <BookMarked size={15} />
             </button>
+          </div>
+        </>
+      )}
+
+      {aiCustomButtons.length > 0 && (
+        <>
+          <span className="tb-sep" />
+          <div className="tb-group">
+            {aiCustomButtons.map((btn) => {
+              const isRunning = runningAiCustomId === btn.id;
+              const label = btn.name.trim() || t.settingsModal.aiCustom.defaultButtonName;
+              const tooltip = isRunning
+                ? `${label}${t.settingsModal.aiCustom.runningTooltipSuffix}`
+                : label;
+              return (
+                <button
+                  key={btn.id}
+                  type="button"
+                  className={`tb-btn ${isRunning ? 'is-ai-running' : ''}`}
+                  disabled={Boolean(runningAiCustomId) && !isRunning}
+                  onMouseDown={keepFocusMouseDown}
+                  onClick={() =>
+                    isRunning ? onCancelAiCustom?.() : onRunAiCustomButton?.(btn)
+                  }
+                  title={tooltip}
+                  aria-label={label}
+                >
+                  {isRunning ? (
+                    <Loader2 size={15} className="spin" />
+                  ) : (
+                    <AiCustomIcon icon={btn.icon} size={15} />
+                  )}
+                </button>
+              );
+            })}
           </div>
         </>
       )}

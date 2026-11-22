@@ -293,6 +293,42 @@ export interface EditorSettings {
   autoUpdateEnabled?: boolean;
   updateAvailableBehavior?: UpdateAvailableBehavior;
   skippedUpdateVersion?: string;
+  aiCustomButtons?: AiCustomButton[];
+}
+
+export type AiCustomButtonIconId =
+  | 'languages'
+  | 'sparkles'
+  | 'wand'
+  | 'spellcheck'
+  | 'file-text'
+  | 'align-left'
+  | 'bot'
+  | 'zap'
+  | 'lightbulb'
+  | 'pen-line'
+  | 'check-check'
+  | 'list-checks'
+  | 'code'
+  | 'message-square'
+  | 'book-open'
+  | 'refresh-cw'
+  | 'scissors'
+  | 'tags'
+  | 'mail'
+  | 'brain'
+  | 'globe'
+  | 'file-search'
+  | 'smile'
+  | 'terminal';
+
+export interface AiCustomButton {
+  id: string;
+  name: string;
+  icon: AiCustomButtonIconId;
+  prompt: string;
+  copyToClipboard: boolean;
+  replaceContent: boolean;
 }
 
 export type UpdateAvailableBehavior = 'banner' | 'modal' | 'badge-only' | 'auto-install';

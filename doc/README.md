@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.4)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.5)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -86,7 +86,7 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 
 ### Format Toolbar, Clipboard Image Auto-Save & Extended Blocks
 
-- **Edit & Display Zoom**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
+- **Edit, AI Custom Buttons & Display Zoom**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus up to **5 customizable Toolbar AI Custom Buttons** (displayed to the right of the formatting group across all modes, preloaded with an **AI Translate** preset) and a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
 - **Images & Clipboard Auto-Save**:
   - Paste screenshots (`⌘V` / `Ctrl+V`) or drag & drop image files directly onto the editor or visual preview to auto-save PNG/image assets to your configured **Image Asset Folder** (default `assets`, falls back to workspace root for unsaved tabs) and insert `![image](assets/...)`.
   - When pasting images into an unsaved tab without an open workspace folder, images are staged safely in a temporary cache (`onigiri-markdown-images`) and **automatically moved into `./assets/`** (with Markdown links rewritten) the first time you save or Save As the document.
@@ -228,8 +228,9 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 | **Local AI** | **Ollama**, **LM Studio** | Offline private models with Ollama launcher/model-pull helpers |
 | **Custom CLI** | Any custom command | Integrate custom CLI tools via `{prompt}` placeholder or stdin |
 
-### Per-Tab Chat Threads, Note Export & Inline Selection Edit (`⌘⇧E`)
+### Per-Tab Chat Threads, Toolbar AI Custom Buttons, Note Export & Inline Selection Edit (`⌘⇧E`)
 
+- **Toolbar AI Custom Buttons (Up to 5 Buttons)**: Configure up to **5 one-click AI prompt buttons** in **Settings → AI Custom** (each with a **24-icon Lucide picker**, **hover tooltip name**, **custom AI prompt**, and independent **Copy to clipboard** / **Replace document (or selection)** checkboxes). Displayed to the right of the formatting buttons in all modes (ships with an **AI Translate** preset for automatic English ↔ Japanese translation). Sends the active selection when highlighted or the entire document otherwise, replaces immediately with single-step Undo (`⌘Z` / `Ctrl+Z`), and lets you click the spinner while running to cancel.
 - **Per-Tab vs. Shared Threads**: Switch between keeping an isolated AI conversation per active tab or using a shared workspace thread.
 - **Save Chat as `.md` Note**: Export the current AI conversation directly into a new Markdown tab for archiving or further editing.
 - **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets, with **Diff Preview** confirmation before applying.
@@ -252,6 +253,7 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
   - **Editor & Line Copy**: Line Numbers, Word Wrap & Column Width, Column Ruler, Visible Symbols, Matching Brackets, Auto-Close Brackets, Default Encoding/EOL, Active Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, **Auto-fetch webpage title on URL paste (`autoTitleOnUrlPaste`)**, Smart Line Copy, and **Project Config (`.editorconfig` / `.onigiri.json`)** status & quick creation.
   - **Syntax Colors**: 7 presets + 10 per-token color pickers.
   - **Keybindings**: Interactive shortcut editor for 27 commands with search filter, conflict detection, clear, individual reset, and Reset All (dynamically reflected in Command Palette badges).
+  - **AI Custom**: Register up to 5 one-click AI buttons on the Format Toolbar (24-icon selector, hover name, custom AI prompt, independent **Copy to clipboard** and **Replace document/selection** checkboxes, reordering, deletion, and reset to default **AI Translate** preset).
   - **AI & Browser**: AI Folder Access, Built-in Browser toggle & **Home URL (Initial Page)**, External Live Preview toggle, port & LAN sharing (with QR code display), and **Allow LAN access to Project Dev Server** (`projectServerAllowLan`).
   - **Reset & Data**: **Export / Import JSON Backup** (selectively save/restore App & Editor settings, AI config & presets with optional API key exclusion, Custom Snippets, Templates, and Keybindings with merge/replace), **Reset Settings to Defaults**, and **Clear User Data & Caches** (also clears the LRU in-memory image cache).
 
