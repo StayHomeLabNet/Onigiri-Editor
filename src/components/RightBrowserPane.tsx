@@ -640,10 +640,13 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         await navigateTo(draftUrl || url);
       }
       await browserOpenDevtools();
+      void syncBounds(latestVisibleRef.current);
+      window.setTimeout(() => void syncBounds(latestVisibleRef.current), 150);
+      window.setTimeout(() => void syncBounds(latestVisibleRef.current), 380);
     } catch {
       // ignore if webview not ready
     }
-  }, [draftUrl, url]);
+  }, [draftUrl, syncBounds, url]);
 
   const handleCaptureScreenshot = useCallback(async () => {
     if (!isTauri() || !onCaptureScreenshotToMarkdown || capturingShot) return;

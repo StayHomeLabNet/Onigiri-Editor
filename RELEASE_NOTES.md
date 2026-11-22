@@ -15,6 +15,7 @@ Onigiri Editor `v1.3.4` delivers a **Redesigned Multi-Server UI** (compact singl
   - **Rich Release Notes, ETag Caching & Apply on Next Quit**: Renders Markdown release notes cleanly in the Update Modal, caches checks with HTTP `If-None-Match` (`ETag`) and persists downloaded update state across restarts, and adds **Apply on Next Quit** mode.
   - **Safe Atomic Updates on macOS, Windows & Linux**: Implements rollback-safe atomic swaps for **macOS `.app`** and **Linux `.AppImage`** (preventing `ETXTBSY` and `single-instance` races), hidden delayed **Windows** installer launches (avoiding file-lock conflicts and handling spaces/special characters/non-ASCII paths), and OS-aware download folder resolution.
 - **Windows / Linux Fixes & Codebase Modularization**:
+  - Fixed macOS embedded browser DevTools (`open_devtools` / `close_devtools`) docking issue by forcing detached inspector windows and safely restoring child `WKWebView` bounds/hierarchy on close.
   - Fixed Windows external browser URL truncation when URLs contain `&` query parameters, normalized Windows drive-letter casing and `\\?\` prefixes for monorepo matching, removed version suffix from window title bar, and extracted `useAppUpdates` / `useProjectServer` hooks plus modularized `src-tauri/src/project/` into 7 focused files.
 
 ### Downloads
@@ -40,7 +41,8 @@ Onigiri Editor `v1.3.4` では、**複数開発サーバー（モノレポ）UI 
   - **SHA-256 ダイジェスト検証・公式ドメイン制限・ダウンロード中断**: 公式 GitHub Releases の HTTPS ドメインのみ許可し、ダウンロード中に SHA-256 を検証（成功時は **SHA-256 検証済み** バッジ表示）。ダウンロード中のキャンセルと `.part` 一時ファイルの自動削除にも対応しました。
   - **リリースノートの Markdown リッチ表示・ETag キャッシュ・次回終了時に適用**: 更新モーダル内でリリースノートをサニタイズ済み Markdown として見やすく描画し、HTTP `If-None-Match`（`ETag`）キャッシュとダウンロード済み状態の永続化、および **「次回終了時に適用」** モードを追加しました。
   - **macOS / Windows / Linux それぞれの安全な適用処理**: **macOS `.app`** と **Linux `.AppImage`** でロールバック対応のアトミック置換（Linux の `ETXTBSY` および `single-instance` 競合回避）を実装し、**Windows** でもコンソール非表示の遅延 PowerShell 起動でファイルロック競合・日本語/特殊文字パス問題を解消しました。
-- **Windows / Linux 互換性改善 & コードベース整理**:
+- **Windows / Linux / macOS 互換性改善 & コードベース整理**:
+  - macOS の内蔵ブラウザで開発者ツール（DevTools）を開閉した際に子 `WKWebView` が画面全幅へ広がり操作不能になる不具合を修正（常に独立ウィンドウで開き、閉鎖時の座標・ビュー階層を自動検証・復旧）。
   - Windows で `&` を含む外部 URL が途中で切れる不具合の修正、モノレポ判定でのドライブ大小文字・`\\?\` パス正規化、OS 準拠のダウンロードフォルダ解決、ウィンドウタイトルバーのバージョン表記整理、および `useAppUpdates` / `useProjectServer` フック抽出と Rust `src-tauri/src/project/` の 7 ファイル分割を行いました。
 
 ### ダウンロード（バイナリ一覧）

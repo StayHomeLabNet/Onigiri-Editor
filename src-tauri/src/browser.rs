@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::{Mutex, OnceLock};
 use tauri::{
     webview::{PageLoadEvent, WebviewBuilder},
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, WebviewUrl,
@@ -6,6 +7,197 @@ use tauri::{
 use url::Url;
 
 const BROWSER_WEBVIEW_LABEL: &str = "builtin-browser";
+
+#[derive(Clone, Copy, Debug)]
+struct SavedBrowserBounds {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    visible: bool,
+}
+
+static LAST_BROWSER_BOUNDS: OnceLock<Mutex<Option<SavedBrowserBounds>>> = OnceLock::new();
+
+fn save_browser_bounds(bounds: SavedBrowserBounds) {
+    let lock = LAST_BROWSER_BOUNDS.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = lock.lock() {
+        *guard = Some(bounds);
+    }
+}
+
+#[allow(dead_code)]
+fn load_browser_bounds() -> Option<SavedBrowserBounds> {
+    let lock = LAST_BROWSER_BOUNDS.get_or_init(|| Mutex::new(None));
+    lock.lock().ok().and_then(|g| *g)
+}
+
+#[cfg(target_os = "macos")]
+fn configure_detached_inspector_defaults() {
+    use objc2_foundation::{NSString, NSUserDefaults};
+    let defaults = NSUserDefaults::standardUserDefaults();
+    for key in [
+        "__WebInspectorPageGroupLevel1__.WebKit2InspectorStartsAttached",
+        "WebKit2InspectorStartsAttached",
+        "WebInspectorStartsAttached",
+    ] {
+        let ns_key = NSString::from_str(key);
+        defaults.setBool_forKey(false, &ns_key);
+    }
+}
+
+fn create_embedded_browser_webview(
+    app: &AppHandle,
+    parsed: Url,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    visible: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    configure_detached_inspector_defaults();
+
+    let window = app
+        .get_window("main")
+        .ok_or_else(|| "Main window not found".to_string())?;
+
+    let app_for_nav = app.clone();
+    let app_for_load = app.clone();
+
+    let builder = WebviewBuilder::new(BROWSER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
+        .on_navigation(move |nav_url| {
+            let _ = app_for_nav.emit("browser-url-changed", nav_url.to_string());
+            true
+        })
+        .on_page_load(move |_webview, payload| {
+            let url_str = payload.url().to_string();
+            let is_finished = matches!(payload.event(), PageLoadEvent::Finished);
+            let state = if is_finished { "finished" } else { "loading" };
+            let _ = app_for_load.emit(
+                "browser-load-state",
+                BrowserLoadEvent {
+                    state,
+                    url: url_str.clone(),
+                },
+            );
+            if is_finished && !url_str.is_empty() {
+                let _ = app_for_load.emit("browser-url-changed", url_str);
+            }
+        });
+
+    let child = window
+        .add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w, h))
+        .map_err(|e| format!("Failed to create embedded browser webview: {}", e))?;
+
+    if !visible {
+        let _ = child.hide();
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn apply_saved_browser_bounds(app: &AppHandle) {
+    let Some(bounds) = load_browser_bounds() else {
+        return;
+    };
+    let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let _ = wv.with_webview(|pwv| unsafe {
+            let wk_webview = pwv.inner() as *mut AnyObject;
+            if !wk_webview.is_null() {
+                let () = msg_send![wk_webview, setAutoresizingMask: 0usize];
+            }
+        });
+    }
+    let w = bounds.width.max(80.0);
+    let h = bounds.height.max(80.0);
+    let _ = wv.set_bounds(Rect {
+        position: LogicalPosition::new(bounds.x, bounds.y).into(),
+        size: LogicalSize::new(w, h).into(),
+    });
+    if bounds.visible {
+        let _ = wv.show();
+    } else {
+        let _ = wv.hide();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn detach_macos_inspector_if_attached(app: &AppHandle) {
+    use objc2::runtime::AnyObject;
+    use objc2::{msg_send, sel};
+    let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) else {
+        return;
+    };
+    let _ = wv.with_webview(|pwv| unsafe {
+        configure_detached_inspector_defaults();
+        let wk_webview = pwv.inner() as *mut AnyObject;
+        if !wk_webview.is_null() {
+            let inspector: *mut AnyObject = msg_send![wk_webview, _inspector];
+            if !inspector.is_null() {
+                let is_visible: bool = msg_send![inspector, isVisible];
+                let can_detach: bool = msg_send![inspector, respondsToSelector: sel!(detach)];
+                if is_visible && can_detach {
+                    let () = msg_send![inspector, detach];
+                }
+            }
+            let () = msg_send![wk_webview, setAutoresizingMask: 0usize];
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn check_macos_child_webview_corrupted(app: &AppHandle) -> bool {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) else {
+        return false;
+    };
+    let expected = load_browser_bounds();
+    let (tx, rx) = mpsc::channel::<bool>();
+    let _ = wv.with_webview(move |pwv| {
+        let mut corrupted = false;
+        unsafe {
+            let wk_webview = pwv.inner() as *mut AnyObject;
+            let ns_window = pwv.ns_window() as *mut AnyObject;
+            if !wk_webview.is_null() && !ns_window.is_null() {
+                let superview: *mut AnyObject = msg_send![wk_webview, superview];
+                let content_view: *mut AnyObject = msg_send![ns_window, contentView];
+                if superview.is_null() || content_view.is_null() || superview != content_view {
+                    corrupted = true;
+                }
+            }
+        }
+        let _ = tx.send(corrupted);
+    });
+    let superview_bad = rx.recv_timeout(Duration::from_millis(600)).unwrap_or(false);
+    if superview_bad {
+        return true;
+    }
+    if let (Ok(actual), Some(exp)) = (wv.bounds(), expected) {
+        let scale = app
+            .get_window("main")
+            .and_then(|win| win.scale_factor().ok())
+            .unwrap_or(1.0);
+        let actual_pos = actual.position.to_logical::<f64>(scale);
+        let actual_size = actual.size.to_logical::<f64>(scale);
+        if (actual_pos.x - exp.x).abs() > 24.0
+            || (actual_size.width - exp.width).abs() > 24.0
+        {
+            return true;
+        }
+    }
+    false
+}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +247,13 @@ pub async fn browser_open_or_update(
     let parsed_str = parsed.to_string();
     let w = width.max(120.0);
     let h = height.max(120.0);
+    save_browser_bounds(SavedBrowserBounds {
+        x,
+        y,
+        width: w,
+        height: h,
+        visible,
+    });
 
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
@@ -74,42 +273,7 @@ pub async fn browser_open_or_update(
             return Ok(parsed_str);
         }
 
-        let window = app
-            .get_window("main")
-            .ok_or_else(|| "Main window not found".to_string())?;
-
-        let app_for_nav = app.clone();
-        let app_for_load = app.clone();
-
-        let builder = WebviewBuilder::new(BROWSER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
-            .on_navigation(move |nav_url| {
-                let _ = app_for_nav.emit("browser-url-changed", nav_url.to_string());
-                true
-            })
-            .on_page_load(move |_webview, payload| {
-                let url_str = payload.url().to_string();
-                let is_finished = matches!(payload.event(), PageLoadEvent::Finished);
-                let state = if is_finished { "finished" } else { "loading" };
-                let _ = app_for_load.emit(
-                    "browser-load-state",
-                    BrowserLoadEvent {
-                        state,
-                        url: url_str.clone(),
-                    },
-                );
-                if is_finished && !url_str.is_empty() {
-                    let _ = app_for_load.emit("browser-url-changed", url_str);
-                }
-            });
-
-        let child = window
-            .add_child(builder, LogicalPosition::new(x, y), LogicalSize::new(w, h))
-            .map_err(|e| format!("Failed to create embedded browser webview: {}", e))?;
-
-        if !visible {
-            let _ = child.hide();
-        }
-
+        create_embedded_browser_webview(&app, parsed, x, y, w, h, visible)?;
         Ok(parsed_str)
     })
     .await
@@ -125,11 +289,18 @@ pub async fn browser_set_bounds(
     height: f64,
     visible: bool,
 ) -> Result<(), String> {
+    let w = width.max(80.0);
+    let h = height.max(80.0);
+    save_browser_bounds(SavedBrowserBounds {
+        x,
+        y,
+        width: w,
+        height: h,
+        visible,
+    });
     let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) else {
         return Ok(());
     };
-    let w = width.max(80.0);
-    let h = height.max(80.0);
     let _ = wv.set_bounds(Rect {
         position: LogicalPosition::new(x, y).into(),
         size: LogicalSize::new(w, h).into(),
@@ -176,13 +347,114 @@ pub async fn browser_open_devtools(app: AppHandle) -> Result<bool, String> {
         wv.open_devtools();
         Ok(true)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::runtime::AnyObject;
+        use objc2::{msg_send, sel};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let current_url = wv.url().ok();
+        let was_open = wv.is_devtools_open();
+        let (tx, rx) = mpsc::channel::<()>();
+
+        let _ = wv.with_webview(move |pwv| {
+            unsafe {
+                configure_detached_inspector_defaults();
+                let wk_webview = pwv.inner() as *mut AnyObject;
+                if !wk_webview.is_null() {
+                    let inspector: *mut AnyObject = msg_send![wk_webview, _inspector];
+                    if !inspector.is_null() {
+                        let can_detach: bool =
+                            msg_send![inspector, respondsToSelector: sel!(detach)];
+                        if was_open {
+                            if can_detach {
+                                let () = msg_send![inspector, detach];
+                            }
+                            let () = msg_send![inspector, close];
+                        } else {
+                            let () = msg_send![inspector, show];
+                            if can_detach {
+                                let () = msg_send![inspector, detach];
+                            }
+                        }
+                    }
+                    let () = msg_send![wk_webview, setAutoresizingMask: 0usize];
+                }
+            }
+            let _ = tx.send(());
+        });
+
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            let _ = rx.recv_timeout(Duration::from_millis(800));
+        })
+        .await;
+
+        if was_open {
+            // Allow WebKit to finish its async close/detach cycle, then verify the child
+            // WKWebView's superview and frame; if WebKit corrupted them, recreate cleanly.
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            apply_saved_browser_bounds(&app);
+            let app_check = app.clone();
+            let corrupted = tauri::async_runtime::spawn_blocking(move || {
+                check_macos_child_webview_corrupted(&app_check)
+            })
+            .await
+            .unwrap_or(false);
+
+            if corrupted {
+                if let (Some(url), Some(bounds)) = (current_url, load_browser_bounds()) {
+                    let app_recreate = app.clone();
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        if let Some(old) = app_recreate.get_webview(BROWSER_WEBVIEW_LABEL) {
+                            let _ = old.hide();
+                            let _ = old.close();
+                        }
+                        std::thread::sleep(Duration::from_millis(80));
+                        let _ = create_embedded_browser_webview(
+                            &app_recreate,
+                            url,
+                            bounds.x,
+                            bounds.y,
+                            bounds.width.max(120.0),
+                            bounds.height.max(120.0),
+                            bounds.visible,
+                        );
+                    })
+                    .await;
+                }
+            } else {
+                let app_delayed = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(220)).await;
+                    apply_saved_browser_bounds(&app_delayed);
+                });
+            }
+        } else {
+            // WebKit opens Web Inspector asynchronously; detach and re-enforce child bounds
+            // after IPC settles so the child WKWebView never expands across the main window.
+            apply_saved_browser_bounds(&app);
+            let app_delayed = app.clone();
+            tauri::async_runtime::spawn(async move {
+                for delay_ms in [120u64, 300u64, 600u64] {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                    detach_macos_inspector_if_attached(&app_delayed);
+                    apply_saved_browser_bounds(&app_delayed);
+                }
+            });
+        }
+
+        Ok(!was_open)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         if wv.is_devtools_open() {
             wv.close_devtools();
+            apply_saved_browser_bounds(&app);
             Ok(false)
         } else {
             wv.open_devtools();
+            apply_saved_browser_bounds(&app);
             Ok(true)
         }
     }
