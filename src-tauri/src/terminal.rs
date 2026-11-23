@@ -51,6 +51,32 @@ pub struct TerminalRunResult {
     pub immediate_exit_code: Option<i32>,
 }
 
+fn decode_terminal_output_bytes_with_fallback(bytes: &[u8], shift_jis_fallback: bool) -> String {
+    let trimmed = bytes.strip_suffix(b"\n").unwrap_or(bytes);
+    let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
+    if let Ok(utf8) = std::str::from_utf8(trimmed) {
+        return utf8.to_string();
+    }
+    if shift_jis_fallback {
+        let (cow, _, _) = encoding_rs::SHIFT_JIS.decode(trimmed);
+        return cow.into_owned();
+    }
+    String::from_utf8_lossy(trimmed).into_owned()
+}
+
+fn decode_terminal_output_bytes(bytes: &[u8]) -> String {
+    decode_terminal_output_bytes_with_fallback(bytes, cfg!(target_os = "windows"))
+}
+
+async fn read_next_line_lossy<R: AsyncBufReadExt + Unpin>(reader: &mut R) -> Option<String> {
+    let mut buf = Vec::new();
+    match reader.read_until(b'\n', &mut buf).await {
+        Ok(0) => None,
+        Ok(_) => Some(decode_terminal_output_bytes(&buf)),
+        Err(_) => None,
+    }
+}
+
 fn resolve_cd_target(raw_target: &str, base_cwd: &Path) -> Result<PathBuf, String> {
     let trimmed = raw_target.trim().trim_matches('"').trim_matches('\'');
     let candidate = if trimmed.is_empty() || trimmed == "~" {
@@ -58,7 +84,10 @@ fn resolve_cd_target(raw_target: &str, base_cwd: &Path) -> Result<PathBuf, Strin
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from)
             .ok_or_else(|| "Home directory not found".to_string())?
-    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+    } else if let Some(rest) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix(r"~\"))
+    {
         let home = std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .map(PathBuf::from)
@@ -123,7 +152,11 @@ pub async fn terminal_run_command(
         c.creation_flags(CREATE_NO_WINDOW);
         c
     } else {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let shell = std::env::var("SHELL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "/bin/sh".to_string());
         let mut c = Command::new(shell);
         c.args(["-lc", trimmed]);
         c
@@ -158,8 +191,8 @@ pub async fn terminal_run_command(
         let run_out = run_id_task.clone();
         let stdout_handle = tokio::spawn(async move {
             if let Some(out) = stdout {
-                let mut reader = BufReader::new(out).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
+                let mut reader = BufReader::new(out);
+                while let Some(line) = read_next_line_lossy(&mut reader).await {
                     let _ = app_out.emit(
                         "terminal-output",
                         TerminalOutputEvent {
@@ -176,8 +209,8 @@ pub async fn terminal_run_command(
         let run_err = run_id_task.clone();
         let stderr_handle = tokio::spawn(async move {
             if let Some(err) = stderr {
-                let mut reader = BufReader::new(err).lines();
-                while let Ok(Some(line)) = reader.next_line().await {
+                let mut reader = BufReader::new(err);
+                while let Some(line) = read_next_line_lossy(&mut reader).await {
                     let _ = app_err.emit(
                         "terminal-output",
                         TerminalOutputEvent {
@@ -196,6 +229,15 @@ pub async fn terminal_run_command(
                 (code, false)
             }
             _ = &mut cancel_rx => {
+                #[cfg(target_os = "windows")]
+                if let Some(pid) = child.id() {
+                    let mut tk = Command::new("taskkill");
+                    tk.args(["/PID", &pid.to_string(), "/T", "/F"])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null());
+                    let _ = tk.status().await;
+                }
                 let _ = child.kill().await;
                 let _ = child.wait().await;
                 (130, true)
@@ -251,5 +293,18 @@ mod tests {
         let tmp = std::env::temp_dir();
         let resolved = resolve_cd_target(".", &tmp).unwrap();
         assert!(resolved.is_dir());
+    }
+
+    #[test]
+    fn decodes_utf8_and_shift_jis_terminal_output() {
+        assert_eq!(
+            decode_terminal_output_bytes_with_fallback(b"hello world\r\n", true),
+            "hello world"
+        );
+        let (encoded, _, _) = encoding_rs::SHIFT_JIS.encode("ファイルが見つかりません\r\n");
+        assert_eq!(
+            decode_terminal_output_bytes_with_fallback(encoded.as_ref(), true),
+            "ファイルが見つかりません"
+        );
     }
 }

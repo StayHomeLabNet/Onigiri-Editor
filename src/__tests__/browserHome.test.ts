@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeBrowserViewportBounds,
+  constrainBrowserHostRect,
   formatBookmarkShortLabel,
   normalizeDisplayUrl,
   pushBrowserHistory,
@@ -64,6 +65,15 @@ describe('RightBrowserPane home URL resolution', () => {
       width: 1000,
       height: 700,
     });
+  });
+
+  it('never lets the native browser WebView cover its navigation toolbar', () => {
+    expect(
+      constrainBrowserHostRect({ left: 300, top: 80, width: 900, height: 700 }, 118)
+    ).toEqual({ left: 300, top: 118, width: 900, height: 662 });
+    expect(
+      constrainBrowserHostRect({ left: 300, top: 118, width: 900, height: 662 }, 118)
+    ).toEqual({ left: 300, top: 118, width: 900, height: 662 });
   });
 
   it('toggles bookmarks and maintains deduplicated recent URL history', () => {

@@ -106,11 +106,14 @@ export interface ChatMessage {
   error?: boolean;
 }
 
+export type SnapshotKind = 'manual' | 'auto' | 'ai-before' | 'save-backup';
+
 export interface Snapshot {
   id: string;
   label: string;
   content: string;
   timestamp: number;
+  kind?: SnapshotKind;
 }
 
 export interface DocumentTab {
@@ -309,7 +312,20 @@ export interface EditorSettings {
   integratedTerminalEnabled?: boolean;
   customTooltipsEnabled?: boolean;
   previewSingleLineBreak?: boolean;
+  autoSnapshotEnabled?: boolean;
+  autoSnapshotIntervalSec?: number;
+  markdownCompatCheckEnabled?: boolean;
+  markdownCompatTarget?: MarkdownCompatTarget;
+  imageOptimizeOnPasteEnabled?: boolean;
+  imageMaxWidth?: number;
+  imageQuality?: number;
+  imageAutoOrganizeNames?: boolean;
+  imageKeepOriginal?: boolean;
+  aiSendPreviewEnabled?: boolean;
+  aiAutoRedactSecrets?: boolean;
 }
+
+export type MarkdownCompatTarget = 'github' | 'commonmark' | 'onigiri';
 
 export type ExportPaperSize = 'A4' | 'Letter' | 'B5';
 export type ExportOrientation = 'portrait' | 'landscape';

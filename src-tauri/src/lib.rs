@@ -1113,17 +1113,57 @@ async fn index_workspace_notes(root_path: String) -> Result<Vec<WorkspaceNoteInd
         .map_err(|e| format!("Workspace note indexing task failed: {}", e))?
 }
 
+fn validate_fetch_url(parsed: &url::Url) -> Result<(), String> {
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("Only http:// and https:// URLs are supported".to_string());
+    }
+    let Some(host) = parsed.host() else {
+        return Err("URL must include a valid host".to_string());
+    };
+    match host {
+        url::Host::Domain(domain) => {
+            let lower = domain.to_ascii_lowercase();
+            if lower == "metadata.google.internal"
+                || lower == "metadata.azure.internal"
+                || lower.ends_with(".metadata.google.internal")
+            {
+                return Err("Access to cloud metadata endpoints is blocked".to_string());
+            }
+        }
+        url::Host::Ipv4(ip) => {
+            if ip.is_link_local() || ip.is_unspecified() || ip.is_multicast() || ip.is_broadcast() {
+                return Err("Access to link-local or unspecified IP addresses is blocked".to_string());
+            }
+        }
+        url::Host::Ipv6(ip) => {
+            let seg0 = ip.segments()[0];
+            let is_link_local = (seg0 & 0xffc0) == 0xfe80;
+            if is_link_local || ip.is_unspecified() || ip.is_multicast() {
+                return Err("Access to link-local or unspecified IPv6 addresses is blocked".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn fetch_url_content(url: String) -> Result<FetchedUrlContent, String> {
     let trimmed = url.trim();
     let parsed = url::Url::parse(trimmed).map_err(|e| format!("Invalid URL: {}", e))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("Only http:// and https:// URLs are supported".to_string());
-    }
+    validate_fetch_url(&parsed)?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .user_agent("Mozilla/5.0 (compatible; OnigiriEditor/1.0)")
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                return attempt.error("Too many redirects");
+            }
+            if let Err(msg) = validate_fetch_url(attempt.url()) {
+                return attempt.error(msg);
+            }
+            attempt.follow()
+        }))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 

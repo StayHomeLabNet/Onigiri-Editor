@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.4.0)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.4.1)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -89,6 +89,13 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 
 - **Edit, AI Custom Buttons, Display Zoom & Responsive Layout**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus up to **5 customizable Toolbar AI Custom Buttons** (displayed to the right of the formatting group across all modes, preloaded with an **AI Translate** preset) and a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
   - **Responsive Progressive Collapsing & App-Wide Instant Custom Tooltips**: Buttons strictly prevent text wrapping. Labels ("Copy Rich Text" and "AI Clean") progressively collapse into compact icon buttons based on real container metrics. Hovering anywhere across the app (Header, Toolbar, Sidebar, Tab Bar, Status Bar, Inspector, Modals) displays **instant theme-aware custom tooltips (0.15s)** with automatic `<kbd>` shortcut badges (toggleable in **Settings → General**). When space is constrained, edge gradient fade masks, scroll buttons, and mouse wheel horizontal scrolling become active, and redundant New / Open / Save file buttons are hidden when the top header bar is active.
+- **Auto Snapshot Timeline, Markdown Compatibility Check, Image Optimization, AI Privacy Redaction & Feature Finder (`v1.4.1`)**:
+  - **Auto Snapshot Timeline & Partial Chunk Restore**: Automatically records snapshots on save and at configurable intervals (**Settings → General**), allowing full or **chunk-by-chunk partial restore** in **Inspector → Snapshots**.
+  - **Markdown Compatibility Check**: Inspect dialect differences for **GitHub / Zenn / Qiita / Notion / Obsidian** in **Inspector → Compat** and jump directly to flagged lines.
+  - **Image Auto-Optimization & Size Inventory**: Automatically resize/compress pasted images (WebP on Windows; JPEG/PNG fallback on macOS/Linux), keep optional `originals/` backups, and inspect all workspace image sizes inside the Unused Images modal.
+  - **AI Send Content Preview & Secret Redaction**: Preview outgoing AI requests and mask detected API keys, Bearer tokens, private keys, and secrets with 1 click (**Settings → AI**).
+  - **Feature Finder Guide (`?`)**: Click `?` in the TopBar (or run **Feature Finder** from the Command Palette) to search and launch any feature in English or Japanese.
+  - **Built-in Browser & Security Hardening**: Custom viewport `px` width, 1-click **Clip Page to Markdown**, native-WebView-safe inline `⋮` action strip, **Resync Browser Bounds**, strict Mermaid SVG sanitization, updater path/redirect verification, SSRF & URL scheme protection, and tightened Tauri CSP.
 - **Single Line Break Preview, Selection Bubble Menu, AI Ghost Text Autocomplete & Markdown Table GUI Toolbar (`v1.4.0`, toggleable in Settings → Editor)**:
   - **Single Line Break (`<br>`) Preview**: Renders single Enter line breaks directly as `<br>` in Live Preview, HTML Export, and External Live Preview while preserving code blocks (on by default; disable for strict CommonMark behavior).
   - **Selection Floating Bubble Menu**: Selecting text displays a floating mini bar right above the selection for Bold, Italic, Inline Code, Link, Inline AI Edit (`⌘⇧E`), and up to 3 quick AI Custom buttons.

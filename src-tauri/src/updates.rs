@@ -532,20 +532,66 @@ pub fn cancel_app_update_download(state: tauri::State<'_, UpdateManagerState>) -
     Ok(true)
 }
 
+fn is_allowed_update_extension(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    [
+        ".app.tar.gz",
+        ".dmg",
+        ".exe",
+        ".msi",
+        ".appimage",
+        ".deb",
+        ".rpm",
+        ".tar.gz",
+        ".zip",
+    ]
+    .iter()
+    .any(|ext| lower.ends_with(ext))
+}
+
+fn validate_update_file_path_in_dir(file_path: &str, downloads_dir: &Path) -> Result<PathBuf, String> {
+    let target = PathBuf::from(file_path)
+        .canonicalize()
+        .map_err(|_| format!("Downloaded update file not found: {}", file_path))?;
+    if !target.is_file() {
+        return Err("Update path must be a regular file".to_string());
+    }
+    let allowed_root = downloads_dir
+        .canonicalize()
+        .unwrap_or_else(|_| downloads_dir.to_path_buf());
+    if !target.starts_with(&allowed_root) {
+        return Err(
+            "Update blocked: file path must reside inside the official Downloads directory."
+                .to_string(),
+        );
+    }
+    let name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if !is_allowed_update_extension(name) {
+        return Err(format!("Update blocked: unsupported installer file type ({})", name));
+    }
+    Ok(target)
+}
+
 #[tauri::command]
 pub fn schedule_app_update_on_exit(
+    app: tauri::AppHandle,
     state: tauri::State<'_, UpdateManagerState>,
     file_path: Option<String>,
 ) -> Result<Option<String>, String> {
-    if let Some(ref p) = file_path {
-        if !PathBuf::from(p).exists() {
-            return Err(format!("Update file not found: {}", p));
-        }
-    }
+    let validated = if let Some(ref p) = file_path {
+        let downloads_dir = resolve_downloads_dir(&app);
+        let canon = validate_update_file_path_in_dir(p, &downloads_dir)?;
+        Some(canon.to_string_lossy().to_string())
+    } else {
+        None
+    };
     if let Ok(mut guard) = state.pending_update_on_exit.lock() {
-        *guard = file_path.clone();
+        *guard = validated.clone();
     }
-    Ok(file_path)
+    Ok(validated)
 }
 
 #[tauri::command]
@@ -590,6 +636,15 @@ pub async fn download_app_update(
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(600))
         .user_agent(format!("Onigiri-Editor/{}", current_version))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                return attempt.error("Too many redirects");
+            }
+            if !is_allowed_update_download_url(attempt.url().as_str()) {
+                return attempt.error("Redirect blocked: URL outside official GitHub Releases allowlist");
+            }
+            attempt.follow()
+        }))
         .build()
         .map_err(|e| format!("Failed to initialize download client: {}", e))?;
 
@@ -794,10 +849,21 @@ fn apply_update_internal(
     restart_app: bool,
     exit_after_spawn: bool,
 ) -> Result<String, String> {
-    let path = PathBuf::from(file_path);
-    if !path.exists() {
-        return Err(format!("Downloaded update file not found: {}", file_path));
-    }
+    let path = if let Some(handle) = app {
+        let downloads_dir = resolve_downloads_dir(handle);
+        validate_update_file_path_in_dir(file_path, &downloads_dir)?
+    } else {
+        let p = PathBuf::from(file_path)
+            .canonicalize()
+            .map_err(|_| format!("Downloaded update file not found: {}", file_path))?;
+        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !p.is_file() || !is_allowed_update_extension(name) {
+            return Err("Update blocked: invalid installer file".to_string());
+        }
+        p
+    };
+    let file_path_owned = path.to_string_lossy().to_string();
+    let file_path = file_path_owned.as_str();
 
     let lower = file_path.to_ascii_lowercase();
 
@@ -1201,5 +1267,27 @@ mod tests {
         assert!(!can_auto_apply_for_os("Onigiri_1.3.3_universal.dmg", "windows"));
         assert!(can_auto_apply_for_os("Onigiri_1.3.3_amd64.AppImage", "linux"));
         assert!(!can_auto_apply_for_os("Onigiri_1.3.3_x64-setup.exe", "linux"));
+    }
+
+    #[test]
+    fn validates_update_file_path_inside_downloads_dir_and_extension() {
+        let base = std::env::temp_dir().join(format!("onigiri-upd-sec-{}", now_epoch_ms()));
+        let dl_dir = base.join("downloads");
+        let outside_dir = base.join("outside");
+        fs::create_dir_all(&dl_dir).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+
+        let valid_dmg = dl_dir.join("Onigiri_1.4.0.dmg");
+        let bad_ext = dl_dir.join("evil.sh");
+        let outside_dmg = outside_dir.join("Onigiri_1.4.0.dmg");
+        fs::write(&valid_dmg, b"ok").unwrap();
+        fs::write(&bad_ext, b"#!/bin/sh").unwrap();
+        fs::write(&outside_dmg, b"outside").unwrap();
+
+        assert!(validate_update_file_path_in_dir(&valid_dmg.to_string_lossy(), &dl_dir).is_ok());
+        assert!(validate_update_file_path_in_dir(&bad_ext.to_string_lossy(), &dl_dir).is_err());
+        assert!(validate_update_file_path_in_dir(&outside_dmg.to_string_lossy(), &dl_dir).is_err());
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

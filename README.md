@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v140">What's New in v1.4.0</a> ・
+    <a href="#whats-new-in-v141">What's New in v1.4.1</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.4.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.4.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.4.0`
+Current version: `v1.4.1`
 
 ## Key Features
 
@@ -100,7 +100,18 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.4.0
+## What's New in v1.4.1
+
+- **Auto Snapshot Timeline & Partial Chunk Restore**: Automatically saves snapshots on file save and at configurable intervals (**Settings → General**), with a visual timeline in **Inspector → Snapshots** supporting both full restore and **partial chunk-by-chunk restore**.
+- **Markdown Compatibility Check (GitHub / Zenn / Qiita / Notion / Obsidian)**: Inspects dialect-specific syntax (Callouts, WikiLinks, KaTeX, Footnotes, Mermaid, HTML tags) in **Inspector → Compat** with 1-click jump to line.
+- **Image Auto-Optimization & Workspace Image Size Inventory**: Automatically resizes and compresses pasted images (WebP on Windows WebView2; JPEG/PNG fallback on macOS WKWebView & Linux WebKitGTK), supports organized filenames and optional `originals/` backups, and adds an **All Images Size Inventory** tab to the Unused Images modal.
+- **AI Send Content Preview & Secret Redaction**: Preview exact text before sending to external AI providers with automatic detection and 1-click masking of API keys, Bearer tokens, private keys, and secrets (**Settings → AI**).
+- **Feature Finder Guide (`?`)**: Search any Onigiri Editor feature in Japanese or English from the TopBar `?` button or Command Palette and launch it immediately.
+- **Built-in Browser UX & Cross-Platform Fixes**: Adds custom viewport width (`px`), 1-click **Clip Page to Markdown**, an inline `⋮` action strip & upward tooltips immune to native child WebView occlusion on macOS/Windows/Linux, **Resync Browser Bounds**, Windows Shift_JIS/CP932 terminal decoding + `cd ~\` + process-tree cancel (`taskkill /T /F`), and Global Hotkey error notifications.
+- **Comprehensive Security Hardening**: Enforces Mermaid `securityLevel: 'strict'` + SVG sanitization, restricts updater execution to canonical files inside Downloads with redirect allowlist validation, enforces URL scheme allowlists on built-in/external browsers, blocks cloud metadata / link-local SSRF in Web Clipper, hardens Live Preview (`</style>` breakout protection, `nosniff`, `no-referrer`), and tightens Tauri CSP.
+
+<details>
+<summary>Previous release: v1.4.0</summary>
 
 - **Single Line Break (`<br>`) Preview Option**: Renders single Enter line breaks directly as `<br>` across Live Preview, HTML Export, and External Live Preview without affecting code blocks (toggleable in **Settings → Editor**, on by default).
 - **Selection Floating Bubble Menu**: Selecting text in the editor reveals a mini toolbar right above the selection for **Bold**, **Italic**, **Inline Code**, **Link**, **Inline AI Edit (`⌘⇧E`)**, and up to **3 quick AI Custom buttons** (toggleable in **Settings → Editor**).
@@ -111,6 +122,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **Quick Scratchpad & Global Summon Hotkey**: Auto-persisted save-free **Quick Scratchpad** (Copy, Clear, **Open in Tab**) in the Status Bar & Command Palette, plus an optional system-wide **Global Hotkey** (default `CommandOrControl+Shift+Space`) to summon Onigiri Editor from any app (toggleable in **Settings → General**).
 - **Lightweight Integrated Terminal Drawer (Advanced Mode)**: Bottom drawer terminal with streaming output, persistent `cd` directory, `↑`/`↓` command history, Stop control, and 1-click **Ask AI** diagnosis on errors (toggleable in **Settings → General**).
 - **App-Wide Instant Custom Tooltips**: Upgrades native `title` tooltips across the entire app (Header, Toolbar, Sidebar, Tab Bar, Status Bar, Inspector, Modals) into fast **0.15s** theme-aware Portal tooltips with automatic `<kbd>` shortcut badges (toggleable in **Settings → General**).
+
+</details>
 
 <details>
 <summary>Previous release: v1.3.6</summary>

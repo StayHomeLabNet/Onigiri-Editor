@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ImageOff, Loader2, RefreshCw, Trash2, X } from 'lucide-react';
 import type { Translations } from '../i18n/types';
-import type { UnusedAssetEntry } from '../types';
+import type { Locale, UnusedAssetEntry, WorkspaceEntry } from '../types';
 import {
   deleteWorkspaceFiles,
   findUnusedWorkspaceAssets,
@@ -10,8 +10,10 @@ import {
 
 interface UnusedAssetsModalProps {
   t: Translations;
+  locale: Locale;
   open: boolean;
   workspaceRoot: string | null;
+  workspaceEntries?: WorkspaceEntry[];
   extraContents: string[];
   onClose: () => void;
   onDeleted: (count: number) => void;
@@ -52,12 +54,15 @@ const AssetThumbnail: React.FC<{
 
 export const UnusedAssetsModal: React.FC<UnusedAssetsModalProps> = ({
   t,
+  locale,
   open,
   workspaceRoot,
+  workspaceEntries = [],
   extraContents,
   onClose,
   onDeleted,
 }) => {
+  const [viewMode, setViewMode] = useState<'unused' | 'inventory'>('unused');
   const [assets, setAssets] = useState<UnusedAssetEntry[]>([]);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [scanning, setScanning] = useState(false);
@@ -104,6 +109,19 @@ export const UnusedAssetsModal: React.FC<UnusedAssetsModalProps> = ({
     () => assets.reduce((acc, a) => acc + (a.size || 0), 0),
     [assets]
   );
+
+  const allWorkspaceImages = useMemo(() => {
+    return workspaceEntries
+      .filter((e) => !e.isDir && /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(e.name))
+      .sort((a, b) => (b.size || 0) - (a.size || 0));
+  }, [workspaceEntries]);
+
+  const allImagesTotalBytes = useMemo(
+    () => allWorkspaceImages.reduce((acc, e) => acc + (e.size || 0), 0),
+    [allWorkspaceImages]
+  );
+
+  const unusedPathSet = useMemo(() => new Set(assets.map((a) => a.path)), [assets]);
 
   if (!open) return null;
 
@@ -161,8 +179,64 @@ export const UnusedAssetsModal: React.FC<UnusedAssetsModalProps> = ({
         <div className="unused-assets-body">
           <p className="unused-assets-desc">{t.unusedAssetsModal.desc}</p>
 
+          {workspaceRoot && allWorkspaceImages.length > 0 && (
+            <div className="unused-assets-view-tabs">
+              <button
+                type="button"
+                className={`mini-pill-btn ${viewMode === 'unused' ? 'is-active' : ''}`}
+                onClick={() => setViewMode('unused')}
+              >
+                {locale === 'ja' ? `未使用画像 (${assets.length})` : `Unused Images (${assets.length})`}
+              </button>
+              <button
+                type="button"
+                className={`mini-pill-btn ${viewMode === 'inventory' ? 'is-active' : ''}`}
+                onClick={() => setViewMode('inventory')}
+              >
+                {locale === 'ja'
+                  ? `全画像サイズ一覧 (${allWorkspaceImages.length} · ${formatBytes(allImagesTotalBytes)})`
+                  : `All Images (${allWorkspaceImages.length} · ${formatBytes(allImagesTotalBytes)})`}
+              </button>
+            </div>
+          )}
+
           {!workspaceRoot ? (
             <div className="unused-assets-empty">{t.unusedAssetsModal.noFolderHint}</div>
+          ) : viewMode === 'inventory' ? (
+            <div className="unused-assets-list">
+              {allWorkspaceImages.map((img) => {
+                const isUnused = unusedPathSet.has(img.path);
+                return (
+                  <div key={img.path} className="unused-asset-item">
+                    <AssetThumbnail
+                      assetPath={img.path}
+                      workspaceRoot={workspaceRoot}
+                      name={img.name}
+                    />
+                    <div className="unused-asset-info">
+                      <div className="unused-asset-rel" title={img.path}>
+                        {img.relativePath}
+                      </div>
+                      <div className="unused-asset-meta">
+                        <span>{formatBytes(img.size)}</span>
+                        <span>
+                          {isUnused
+                            ? locale === 'ja'
+                              ? '未使用'
+                              : 'Unused'
+                            : locale === 'ja'
+                              ? '使用中'
+                              : 'In use'}
+                        </span>
+                        {img.modifiedMs > 0 && (
+                          <span>{new Date(img.modifiedMs).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <>
               <div className="unused-assets-toolbar">

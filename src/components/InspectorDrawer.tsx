@@ -30,9 +30,11 @@ import type {
   EditorSettings,
   InspectorTab,
   Locale,
+  MarkdownCompatTarget,
   PreviewTheme,
   ReviewFinding,
   Snapshot,
+  SnapshotKind,
   SyntaxPresetId,
   TextEncodingId,
   WrapMode,
@@ -42,6 +44,10 @@ import { extractFrontmatter, updateFrontmatter } from '../utils/markdown';
 import { TEXT_ENCODINGS } from '../utils/encodings';
 import { formatShortcut, sendAiChat } from '../utils/platform';
 import { parseAiReviewFindings, runLocalDocumentReview } from '../utils/documentReview';
+import {
+  checkMarkdownCompatibility,
+  convertSingleBreaksForStandardMarkdown,
+} from '../utils/markdownCompat';
 import { AiChatPanel } from './AiChatPanel';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
@@ -210,6 +216,58 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
     }
     return { parts, additions, deletions };
   }, [activeTab, compareSource, markdown]);
+
+  const handleRestoreDiffChunk = (partIndex: number) => {
+    const parts = diffResult.parts;
+    if (partIndex < 0 || partIndex >= parts.length) return;
+    // Reconstruct markdown with this specific chunk reverted to its `compareSource` state:
+    // - If part is `added` (present in current markdown only): omit it
+    // - If part is `removed` (present in compareSource only): keep/restore it
+    // - Otherwise keep parts that are already in current markdown (not `removed`)
+    const nextText = parts
+      .map((p, idx) => {
+        if (idx === partIndex) {
+          if (p.added) return '';
+          if (p.removed) return p.value;
+          return p.value;
+        }
+        return p.removed ? '' : p.value;
+      })
+      .join('');
+    onUpdateMarkdown(nextText);
+  };
+
+  const compatTarget: MarkdownCompatTarget = settings.markdownCompatTarget ?? 'github';
+  const compatIssues = useMemo(() => {
+    if (activeTab !== 'review' || settings.markdownCompatCheckEnabled === false) return [];
+    return checkMarkdownCompatibility(
+      markdown,
+      compatTarget,
+      locale,
+      settings.previewSingleLineBreak ?? true
+    );
+  }, [
+    activeTab,
+    markdown,
+    compatTarget,
+    locale,
+    settings.markdownCompatCheckEnabled,
+    settings.previewSingleLineBreak,
+  ]);
+
+  const getSnapshotKindBadge = (kind?: SnapshotKind): string => {
+    const ja = locale === 'ja';
+    switch (kind) {
+      case 'auto':
+        return ja ? '自動' : 'Auto';
+      case 'ai-before':
+        return ja ? 'AI前' : 'Pre-AI';
+      case 'save-backup':
+        return ja ? '保存前' : 'Pre-Save';
+      default:
+        return ja ? '手動' : 'Manual';
+    }
+  };
 
   const goalMetric = stats.words;
   const goalPct =
@@ -452,16 +510,27 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             {snapshots.length === 0 ? (
               <p className="muted-msg">{t.inspector.diffLabels.noSnapshots}</p>
             ) : (
-              <div className="snapshot-list">
+              <div className="snapshot-list snapshot-timeline">
                 {snapshots.map((s) => (
                   <div key={s.id} className="snapshot-item">
                     <div className="snap-meta">
+                      <span className={`snap-kind-badge is-${s.kind ?? 'manual'}`}>
+                        {getSnapshotKindBadge(s.kind)}
+                      </span>
                       <span className="snap-label">{s.label}</span>
                       <span className="snap-time">
-                        {new Date(s.timestamp).toLocaleTimeString()}
+                        {new Date(s.timestamp).toLocaleTimeString()} · {s.content.length}c
                       </span>
                     </div>
                     <div className="snap-actions">
+                      <button
+                        type="button"
+                        className="icon-btn-sm"
+                        onClick={() => setCompareId(s.id)}
+                        title={locale === 'ja' ? 'この履歴と差分を比較' : 'Compare diff with this snapshot'}
+                      >
+                        <GitCompare size={13} />
+                      </button>
                       <button
                         type="button"
                         className="icon-btn-sm"
@@ -517,10 +586,38 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
               <div className="diff-viewer">
                 {diffResult.parts.map((part, idx) => {
                   const cls = part.added ? 'is-added' : part.removed ? 'is-removed' : 'is-same';
+                  const canPartialRestore = Boolean(part.added || part.removed);
                   return (
-                    <pre key={idx} className={`diff-chunk ${cls}`}>
-                      {part.value}
-                    </pre>
+                    <div key={idx} className={`diff-chunk-wrap ${cls}`}>
+                      {canPartialRestore && (
+                        <button
+                          type="button"
+                          className="diff-chunk-restore-btn"
+                          onClick={() => handleRestoreDiffChunk(idx)}
+                          title={
+                            part.added
+                              ? locale === 'ja'
+                                ? 'この追加部分を取り消す'
+                                : 'Revert this added chunk'
+                              : locale === 'ja'
+                                ? 'この削除された部分を復元する'
+                                : 'Restore this removed chunk'
+                          }
+                        >
+                          <RotateCcw size={10} />
+                          <span>
+                            {part.added
+                              ? locale === 'ja'
+                                ? '追加を取消'
+                                : 'Undo'
+                              : locale === 'ja'
+                                ? '部分復元'
+                                : 'Restore'}
+                          </span>
+                        </button>
+                      )}
+                      <pre className={`diff-chunk ${cls}`}>{part.value}</pre>
+                    </div>
                   );
                 })}
               </div>
@@ -641,6 +738,72 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             </div>
 
             {aiReviewError && <div className="error-box">{aiReviewError}</div>}
+
+            {(settings.markdownCompatCheckEnabled ?? true) && (
+              <div className="compat-check-box">
+                <div className="compat-check-header">
+                  <span className="sub-label">
+                    {locale === 'ja' ? 'Markdown 互換性チェック' : 'Markdown Compatibility'}
+                  </span>
+                  <select
+                    className="compat-target-select"
+                    value={compatTarget}
+                    onChange={(e) =>
+                      onSettingsChange({
+                        ...settings,
+                        markdownCompatTarget: e.target.value as MarkdownCompatTarget,
+                      })
+                    }
+                  >
+                    <option value="github">GitHub (GFM)</option>
+                    <option value="commonmark">CommonMark (標準)</option>
+                    <option value="onigiri">Onigiri (拡張)</option>
+                  </select>
+                </div>
+
+                {compatIssues.some((iss) => iss.code === 'single-line-break') && (
+                  <button
+                    type="button"
+                    className="mini-pill-btn compat-fix-btn"
+                    onClick={() => onUpdateMarkdown(convertSingleBreaksForStandardMarkdown(markdown))}
+                  >
+                    <Sparkles size={11} />
+                    <span>
+                      {locale === 'ja'
+                        ? '単一改行を標準Markdown互換（行末2スペース）に変換'
+                        : 'Convert single breaks to 2 trailing spaces'}
+                    </span>
+                  </button>
+                )}
+
+                {compatIssues.length === 0 ? (
+                  <div className="compat-ok-msg">
+                    <CheckCircle2 size={13} />
+                    <span>
+                      {locale === 'ja'
+                        ? `${compatTarget === 'github' ? 'GitHub' : compatTarget === 'commonmark' ? 'CommonMark' : 'Onigiri'} との非互換記法はありません`
+                        : `Compatible with ${compatTarget}`}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="compat-issues-list">
+                    {compatIssues.slice(0, 20).map((iss) => (
+                      <div
+                        key={iss.id}
+                        className={`compat-issue-row is-${iss.severity}`}
+                        onClick={() => onJumpToLine?.(iss.line)}
+                      >
+                        <span className="compat-issue-line">L{iss.line}</span>
+                        <div className="compat-issue-body">
+                          <div className="compat-issue-title">{iss.title}</div>
+                          <div className="compat-issue-detail">{iss.detail}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="review-summary-row">
               <span className="sub-label">

@@ -62,6 +62,45 @@ export interface PreviewHandle {
   insertImage: (src: string, alt?: string) => void;
 }
 
+/**
+ * Defense-in-depth sanitizer for Mermaid-generated SVG before dangerouslySetInnerHTML.
+ * Strips <script>, inline on* event handlers, and javascript:/vbscript: hrefs.
+ */
+function sanitizeRenderedSvg(rawSvg: string): string {
+  if (!rawSvg) return '';
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(rawSvg, 'image/svg+xml');
+    if (doc.querySelector('parsererror')) {
+      return rawSvg
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    }
+    doc.querySelectorAll('script, iframe, object, embed').forEach((el) => el.remove());
+    doc.querySelectorAll('*').forEach((el) => {
+      for (const attr of Array.from(el.attributes)) {
+        const name = attr.name.toLowerCase();
+        const val = attr.value.trim().toLowerCase();
+        if (name.startsWith('on')) {
+          el.removeAttribute(attr.name);
+        } else if (
+          (name === 'href' || name === 'xlink:href' || name === 'src') &&
+          (val.startsWith('javascript:') ||
+            val.startsWith('vbscript:') ||
+            val.startsWith('data:text/html'))
+        ) {
+          el.removeAttribute(attr.name);
+        }
+      }
+    });
+    return new XMLSerializer().serializeToString(doc.documentElement);
+  } catch {
+    return rawSvg
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  }
+}
+
 export type DiagramExportNotifyKind = 'saved-svg' | 'saved-png' | 'copied-latex' | 'error';
 
 interface PreviewPaneProps {
@@ -301,14 +340,15 @@ const CodeBlockNodeView: React.FC<NodeViewProps> = ({ node, updateAttributes }) 
         mermaid.initialize({
           startOnLoad: false,
           theme: isDark ? 'dark' : 'default',
-          securityLevel: 'loose',
+          securityLevel: 'strict',
           fontFamily: 'inherit',
         });
         const id = `mf-mermaid-${++mermaidCounter}`;
         const { svg } = await mermaid.render(id, trimmed);
-        mermaidSvgCache.set(cacheKey, svg);
+        const safeSvg = sanitizeRenderedSvg(svg);
+        mermaidSvgCache.set(cacheKey, safeSvg);
         if (!cancelled) {
-          setSvgStr(svg);
+          setSvgStr(safeSvg);
           setMermaidErr(null);
         }
       } catch (err) {

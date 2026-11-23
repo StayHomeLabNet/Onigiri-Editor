@@ -30,6 +30,7 @@ import {
   BookMarked,
   Network,
   Images,
+  Compass,
 } from 'lucide-react';
 import type { AppMode, Locale, ThemeId, ViewLayout } from '../types';
 import type { Translations } from '../i18n/types';
@@ -76,6 +77,7 @@ interface TopBarProps {
   onOpenCitationModal?: () => void;
   onOpenKnowledgeGraph?: () => void;
   onOpenUnusedAssets?: () => void;
+  onOpenFeatureGuide?: () => void;
   focusMode?: boolean;
   onToggleFocusMode?: () => void;
   isMarkdown?: boolean;
@@ -120,6 +122,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenCitationModal,
   onOpenKnowledgeGraph,
   onOpenUnusedAssets,
+  onOpenFeatureGuide,
   focusMode,
   onToggleFocusMode,
   isMarkdown = true,
@@ -583,6 +586,18 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Languages size={14} />
           <span className="topbar-btn-label">{locale === 'ja' ? '日本語' : 'EN'}</span>
         </button>
+
+        {onOpenFeatureGuide && (
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onOpenFeatureGuide}
+            data-tooltip={locale === 'ja' ? '機能を探すガイド' : 'Feature Finder Guide'}
+            aria-label={locale === 'ja' ? '機能を探すガイド' : 'Feature Finder Guide'}
+          >
+            <Compass size={15} />
+          </button>
+        )}
 
         <button
           type="button"

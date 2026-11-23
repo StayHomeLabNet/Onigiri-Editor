@@ -27,6 +27,8 @@ import {
   Smartphone,
   SmartphoneCharging,
   Trash2,
+  MoreVertical,
+  FileDown,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import type { Locale, ProjectInfo, ProjectServerStatus } from '../types';
@@ -57,7 +59,7 @@ import {
   ProjectServerLogsToggle,
 } from './ProjectServerLogs';
 
-export type BrowserViewportMode = 'full' | 'tablet' | 'mobile';
+export type BrowserViewportMode = 'full' | 'tablet' | 'mobile' | 'custom';
 export type BrowserViewportOrientation = 'portrait' | 'landscape';
 
 export interface BrowserBookmarkItem {
@@ -76,6 +78,7 @@ interface RightBrowserPaneProps {
   onUrlChange: (url: string) => void;
   onOpenBrowserSettings?: () => void;
   onCaptureScreenshotToMarkdown?: (base64Png: string, pageUrl: string) => Promise<void> | void;
+  onClipCurrentPage?: (pageUrl: string) => Promise<void> | void;
   visible: boolean;
   projectInfo?: ProjectInfo | null;
   projectServer?: ProjectServerStatus | null;
@@ -135,13 +138,17 @@ export function urlsShareOrigin(a?: string | null, b?: string | null): boolean {
 export function computeBrowserViewportBounds(
   rect: { left: number; top: number; width: number; height: number },
   viewport: BrowserViewportMode,
-  orientation: BrowserViewportOrientation = 'portrait'
+  orientation: BrowserViewportOrientation = 'portrait',
+  customWidthPx?: number
 ): { x: number; y: number; width: number; height: number } {
   const availW = Math.max(120, Math.round(rect.width));
   const availH = Math.max(120, Math.round(rect.height));
   let maxW = availW;
   let maxH = availH;
-  if (viewport === 'mobile') {
+  if (viewport === 'custom') {
+    const parsedW = Number(customWidthPx);
+    maxW = Number.isFinite(parsedW) && parsedW >= 240 ? Math.min(2400, Math.round(parsedW)) : 480;
+  } else if (viewport === 'mobile') {
     if (orientation === 'landscape') {
       maxW = 844;
       maxH = 390;
@@ -161,6 +168,26 @@ export function computeBrowserViewportBounds(
   const x = Math.round(rect.left + Math.max(0, (availW - width) / 2));
   const y = Math.round(rect.top + Math.max(0, (availH - height) / 2));
   return { x, y, width, height };
+}
+
+/**
+ * Keeps the native child WebView below the browser controls. A child WebView is
+ * composited above the React WebView on desktop, so even a briefly stale frame
+ * can otherwise cover the navigation toolbar and make its buttons appear gone.
+ */
+export function constrainBrowserHostRect(
+  hostRect: { left: number; top: number; width: number; height: number },
+  toolbarBottom?: number | null
+): { left: number; top: number; width: number; height: number } {
+  if (toolbarBottom == null || !Number.isFinite(toolbarBottom)) return hostRect;
+  const bottom = hostRect.top + hostRect.height;
+  const top = Math.max(hostRect.top, toolbarBottom);
+  return {
+    left: hostRect.left,
+    top,
+    width: hostRect.width,
+    height: Math.max(0, bottom - top),
+  };
 }
 
 export function formatBookmarkShortLabel(rawUrl: string): string {
@@ -212,6 +239,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   onUrlChange,
   onOpenBrowserSettings,
   onCaptureScreenshotToMarkdown,
+  onClipCurrentPage,
   visible,
   projectInfo,
   projectServer,
@@ -238,6 +266,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
 }) => {
   const resolvedHomeUrl = resolveBrowserHomeUrl(homeUrl);
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const toolbarRef = useRef<HTMLFormElement | null>(null);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const lastServerUrlRef = useRef<string | null>(null);
   const [draftUrl, setDraftUrl] = useState(url);
@@ -250,6 +279,10 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   const [dismissedStoppedBannerUrl, setDismissedStoppedBannerUrl] = useState<string | null>(null);
   const [viewport, setViewport] = useState<BrowserViewportMode>('full');
   const [orientation, setOrientation] = useState<BrowserViewportOrientation>('portrait');
+  const [customViewportWidth, setCustomViewportWidth] = useState<number>(480);
+  const [isToolbarCompact, setIsToolbarCompact] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [clippingPage, setClippingPage] = useState(false);
   const [capturingShot, setCapturingShot] = useState(false);
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
 
@@ -290,6 +323,29 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   latestViewportRef.current = viewport;
   const latestOrientationRef = useRef<BrowserViewportOrientation>(orientation);
   latestOrientationRef.current = orientation;
+  const latestCustomWidthRef = useRef<number>(customViewportWidth);
+  latestCustomWidthRef.current = customViewportWidth;
+
+  useEffect(() => {
+    const tb = toolbarRef.current;
+    if (!tb || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setIsToolbarCompact(entry.contentRect.width < 520);
+      }
+    });
+    ro.observe(tb);
+    return () => ro.disconnect();
+  }, []);
+
+  const getSafeHostRect = useCallback(() => {
+    const host = hostRef.current;
+    if (!host) return null;
+    return constrainBrowserHostRect(
+      host.getBoundingClientRect(),
+      toolbarRef.current?.getBoundingClientRect().bottom
+    );
+  }, []);
 
   const recordHistoryUrl = useCallback((targetUrl: string) => {
     setHistory((prev) => {
@@ -417,13 +473,13 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   const syncBounds = useCallback(
     async (isVisible: boolean) => {
       if (!isTauri()) return;
-      const el = hostRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
+      const rect = getSafeHostRect();
+      if (!rect) return;
       const { x, y, width, height } = computeBrowserViewportBounds(
         rect,
         latestViewportRef.current,
-        latestOrientationRef.current
+        latestOrientationRef.current,
+        latestCustomWidthRef.current
       );
 
       const effectiveVisible =
@@ -449,13 +505,13 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           onUrlChange(finalUrl);
 
           // Re-sync bounds after async creation in case layout shifted (e.g. project bar)
-          const postEl = hostRef.current;
-          if (postEl) {
-            const postRect = postEl.getBoundingClientRect();
+          const postRect = getSafeHostRect();
+          if (postRect) {
             const postBounds = computeBrowserViewportBounds(
               postRect,
               latestViewportRef.current,
-              latestOrientationRef.current
+              latestOrientationRef.current,
+              latestCustomWidthRef.current
             );
             await browserSetBounds({
               ...postBounds,
@@ -485,7 +541,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         });
       }
     },
-    [onUrlChange, browserError, t.project.browserErrorHint]
+    [onUrlChange, browserError, getSafeHostRect, t.project.browserErrorHint]
   );
 
   // Sync visibility and container geometry continuously (including when project bar or viewport toggles)
@@ -496,12 +552,14 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     });
 
     const el = hostRef.current;
+    const toolbarEl = toolbarRef.current;
     const ro = el
       ? new ResizeObserver(() => {
           syncBounds(visible);
         })
       : null;
     if (el && ro) ro.observe(el);
+    if (toolbarEl && ro) ro.observe(toolbarEl);
 
     const onWinResize = () => syncBounds(visible);
     window.addEventListener('resize', onWinResize);
@@ -515,8 +573,10 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     visible,
     viewport,
     orientation,
+    customViewportWidth,
     bookmarks.length,
     showHistoryDrawer,
+    moreMenuOpen,
     showProjectBar,
     projectServer?.running,
     projectServer?.url,
@@ -560,6 +620,9 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             } else if (ev.payload?.state === 'finished') {
               setIsLoadingPage(false);
             }
+            // Navigation and WebKit process swaps can restore an older native
+            // child frame on macOS. Reassert the safe frame after either event.
+            window.requestAnimationFrame(() => void syncBounds(latestVisibleRef.current));
           }
         );
       } catch {
@@ -570,7 +633,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       unlistenUrl?.();
       unlistenLoad?.();
     };
-  }, [onUrlChange, recordHistoryUrl]);
+  }, [onUrlChange, recordHistoryUrl, syncBounds]);
 
   const navigateTo = async (targetRaw: string) => {
     const target = targetRaw.trim() || 'https://www.google.com';
@@ -581,7 +644,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
         const finalUrl = initializedRef.current
           ? await browserNavigate(target)
           : await (async () => {
-              const rect = hostRef.current?.getBoundingClientRect() ?? {
+              const rect = getSafeHostRect() ?? {
                 left: 400,
                 top: 120,
                 width: 500,
@@ -590,7 +653,8 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
               const bounds = computeBrowserViewportBounds(
                 rect,
                 latestViewportRef.current,
-                latestOrientationRef.current
+                latestOrientationRef.current,
+                latestCustomWidthRef.current
               );
               const res = await browserOpenOrUpdate({
                 url: target,
@@ -650,13 +714,13 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
 
   const handleCaptureScreenshot = useCallback(async () => {
     if (!isTauri() || !onCaptureScreenshotToMarkdown || capturingShot) return;
-    const el = hostRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
+    const rect = getSafeHostRect();
+    if (!rect) return;
     const bounds = computeBrowserViewportBounds(
       rect,
       latestViewportRef.current,
-      latestOrientationRef.current
+      latestOrientationRef.current,
+      latestCustomWidthRef.current
     );
     setCapturingShot(true);
     try {
@@ -667,7 +731,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     } finally {
       setCapturingShot(false);
     }
-  }, [capturingShot, draftUrl, onCaptureScreenshotToMarkdown, url]);
+  }, [capturingShot, draftUrl, getSafeHostRect, onCaptureScreenshotToMarkdown, url]);
 
   useEffect(() => {
     const onReloadEvent = () => handleReload();
@@ -703,6 +767,12 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
       browserNavAction('forward').catch(() => {});
       return;
     }
+    if (e.key === 'Escape' && moreMenuOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      setMoreMenuOpen(false);
+      return;
+    }
     if (e.key === 'F12') {
       e.preventDefault();
       e.stopPropagation();
@@ -712,7 +782,12 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
 
   return (
     <div className="right-browser-pane" tabIndex={-1} onKeyDown={handlePaneKeyDown}>
-      <form className="browser-toolbar" onSubmit={handleNavigate}>
+      <form
+        ref={toolbarRef}
+        className="browser-toolbar"
+        data-tooltip-placement="top"
+        onSubmit={handleNavigate}
+      >
         <button
           type="button"
           className="icon-btn-sm"
@@ -805,25 +880,51 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           >
             <Monitor size={13} />
           </button>
-          <button
-            type="button"
-            className={`icon-btn-sm ${viewport === 'tablet' ? 'is-active' : ''}`}
-            onClick={() => setViewport('tablet')}
-            title={t.browser.viewportTablet}
-            aria-label={t.browser.viewportTablet}
-          >
-            <Tablet size={13} />
-          </button>
-          <button
-            type="button"
-            className={`icon-btn-sm ${viewport === 'mobile' ? 'is-active' : ''}`}
-            onClick={() => setViewport('mobile')}
-            title={t.browser.viewportMobile}
-            aria-label={t.browser.viewportMobile}
-          >
-            <Smartphone size={13} />
-          </button>
-          {viewport !== 'full' && (
+          {!isToolbarCompact && (
+            <>
+              <button
+                type="button"
+                className={`icon-btn-sm ${viewport === 'tablet' ? 'is-active' : ''}`}
+                onClick={() => setViewport('tablet')}
+                title={t.browser.viewportTablet}
+                aria-label={t.browser.viewportTablet}
+              >
+                <Tablet size={13} />
+              </button>
+              <button
+                type="button"
+                className={`icon-btn-sm ${viewport === 'mobile' ? 'is-active' : ''}`}
+                onClick={() => setViewport('mobile')}
+                title={t.browser.viewportMobile}
+                aria-label={t.browser.viewportMobile}
+              >
+                <Smartphone size={13} />
+              </button>
+              <label
+                className={`browser-custom-width-wrap ${viewport === 'custom' ? 'is-active' : ''}`}
+                title={locale === 'ja' ? '表示幅を数値指定 (px)' : 'Custom viewport width (px)'}
+              >
+                <input
+                  type="number"
+                  min={240}
+                  max={2400}
+                  step={10}
+                  className="browser-custom-width-input"
+                  value={customViewportWidth}
+                  onFocus={() => setViewport('custom')}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (Number.isFinite(n)) {
+                      setCustomViewportWidth(Math.max(240, Math.min(2400, n)));
+                      setViewport('custom');
+                    }
+                  }}
+                />
+                <span>px</span>
+              </label>
+            </>
+          )}
+          {viewport !== 'full' && viewport !== 'custom' && (
             <button
               type="button"
               className={`icon-btn-sm ${orientation === 'landscape' ? 'is-active' : ''}`}
@@ -844,51 +945,178 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           )}
         </div>
 
-        {isTauri() && onCaptureScreenshotToMarkdown && (
-          <button
-            type="button"
-            className="icon-btn-sm"
-            disabled={capturingShot}
-            onClick={() => void handleCaptureScreenshot()}
-            title={t.browser.captureToMarkdownTitle}
-            aria-label={t.browser.captureToMarkdownTitle}
-          >
-            {capturingShot ? <Loader2 size={13} className="spin" /> : <Camera size={14} />}
-          </button>
+        {!isToolbarCompact && (
+          <>
+            {onClipCurrentPage && (
+              <button
+                type="button"
+                className="icon-btn-sm"
+                disabled={clippingPage}
+                onClick={async () => {
+                  setClippingPage(true);
+                  try {
+                    await onClipCurrentPage(draftUrl || url);
+                  } finally {
+                    setClippingPage(false);
+                  }
+                }}
+                title={locale === 'ja' ? 'このページをMarkdownにクリップ' : 'Clip current page to Markdown'}
+                aria-label={locale === 'ja' ? 'このページをMarkdownにクリップ' : 'Clip current page to Markdown'}
+              >
+                {clippingPage ? <Loader2 size={13} className="spin" /> : <FileDown size={14} />}
+              </button>
+            )}
+
+            {isTauri() && onCaptureScreenshotToMarkdown && (
+              <button
+                type="button"
+                className="icon-btn-sm"
+                disabled={capturingShot}
+                onClick={() => void handleCaptureScreenshot()}
+                title={t.browser.captureToMarkdownTitle}
+                aria-label={t.browser.captureToMarkdownTitle}
+              >
+                {capturingShot ? <Loader2 size={13} className="spin" /> : <Camera size={14} />}
+              </button>
+            )}
+
+            {isTauri() && (
+              <button
+                type="button"
+                className="icon-btn-sm"
+                onClick={() => void handleOpenDevtools()}
+                title={t.browser.devtoolsTitle}
+                aria-label={t.browser.devtools}
+              >
+                <Bug size={14} />
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="icon-btn-sm"
+              onClick={() => openInExternalBrowser(draftUrl || url)}
+              title={t.browser.openExternal}
+            >
+              <ExternalLink size={14} />
+            </button>
+            {onOpenBrowserSettings && (
+              <button
+                type="button"
+                className="icon-btn-sm"
+                onClick={onOpenBrowserSettings}
+                title={t.browser.openSettings}
+                aria-label={t.browser.openSettings}
+              >
+                <Settings size={14} />
+              </button>
+            )}
+          </>
         )}
 
-        {isTauri() && (
+        <div className="browser-more-wrap">
           <button
             type="button"
-            className="icon-btn-sm"
-            onClick={() => void handleOpenDevtools()}
-            title={t.browser.devtoolsTitle}
-            aria-label={t.browser.devtools}
+            className={`icon-btn-sm ${moreMenuOpen ? 'is-active' : ''}`}
+            onClick={() => setMoreMenuOpen((v) => !v)}
+            title={locale === 'ja' ? 'ブラウザ操作メニュー・表示位置修復' : 'Browser tools & layout recovery'}
+            aria-label={locale === 'ja' ? 'ブラウザ操作メニュー' : 'Browser tools'}
+            aria-expanded={moreMenuOpen}
           >
-            <Bug size={14} />
+            <MoreVertical size={14} />
           </button>
-        )}
-
-        <button
-          type="button"
-          className="icon-btn-sm"
-          onClick={() => openInExternalBrowser(draftUrl || url)}
-          title={t.browser.openExternal}
-        >
-          <ExternalLink size={14} />
-        </button>
-        {onOpenBrowserSettings && (
-          <button
-            type="button"
-            className="icon-btn-sm"
-            onClick={onOpenBrowserSettings}
-            title={t.browser.openSettings}
-            aria-label={t.browser.openSettings}
-          >
-            <Settings size={14} />
-          </button>
-        )}
+        </div>
       </form>
+
+      {moreMenuOpen && (
+        <div className="browser-more-strip" role="toolbar" aria-label={locale === 'ja' ? 'ブラウザ操作メニュー' : 'Browser tools'}>
+          {isToolbarCompact && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setViewport('tablet');
+                  setMoreMenuOpen(false);
+                }}
+              >
+                <Tablet size={13} />
+                <span>{t.browser.viewportTablet}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setViewport('mobile');
+                  setMoreMenuOpen(false);
+                }}
+              >
+                <Smartphone size={13} />
+                <span>{t.browser.viewportMobile}</span>
+              </button>
+              {onClipCurrentPage && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setMoreMenuOpen(false);
+                    setClippingPage(true);
+                    try {
+                      await onClipCurrentPage(draftUrl || url);
+                    } finally {
+                      setClippingPage(false);
+                    }
+                  }}
+                >
+                  <FileDown size={13} />
+                  <span>{locale === 'ja' ? 'Markdownへクリップ' : 'Clip to Markdown'}</span>
+                </button>
+              )}
+              {isTauri() && onCaptureScreenshotToMarkdown && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    void handleCaptureScreenshot();
+                  }}
+                >
+                  <Camera size={13} />
+                  <span>{t.browser.captureToMarkdownTitle}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  openInExternalBrowser(draftUrl || url);
+                }}
+              >
+                <ExternalLink size={13} />
+                <span>{t.browser.openExternal}</span>
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setMoreMenuOpen(false);
+              void syncBounds(visible);
+            }}
+          >
+            <RotateCw size={13} />
+            <span>{locale === 'ja' ? 'Web表示位置を再同期（修復）' : 'Resync Browser Bounds'}</span>
+          </button>
+          {onOpenBrowserSettings && (
+            <button
+              type="button"
+              onClick={() => {
+                setMoreMenuOpen(false);
+                onOpenBrowserSettings();
+              }}
+            >
+              <Settings size={13} />
+              <span>{t.browser.openSettings}</span>
+            </button>
+          )}
+        </div>
+      )}
 
       {(bookmarks.length > 0 || showHistoryDrawer) && (
         <div className="browser-bookmarks-bar">

@@ -291,7 +291,7 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
   const isAiCleanIconOnly = collapseLevel >= 2;
 
   return (
-    <div className="format-toolbar-wrap">
+    <div className="format-toolbar-wrap" data-tooltip-placement="top">
       {canScrollLeft && (
         <div className="tb-scroll-edge is-left">
           <button

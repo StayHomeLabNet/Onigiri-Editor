@@ -62,9 +62,24 @@ fn theme_palette(theme: &str) -> (&'static str, &'static str, &'static str, &'st
     }
 }
 
+fn escape_html_text(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn sanitize_inline_style_css(css: &str) -> String {
+    // Prevent breaking out of <style>...</style> tags via `</style><script>...`
+    css.replace("</", "<\\/")
+}
+
 fn render_shell_html(content: &LivePreviewContent) -> String {
     let (bg, fg, muted, border, code_bg) = theme_palette(&content.theme);
-    let safe_title = content.title.replace('<', "&lt;").replace('>', "&gt;");
+    let safe_title = escape_html_text(&content.title);
+    let safe_custom_css = sanitize_inline_style_css(&content.custom_css);
     let is_dark = content.theme == "dark" || content.theme == "midnight";
     let hljs_css = if is_dark {
         "https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css"
@@ -136,7 +151,7 @@ fn render_shell_html(content: &LivePreviewContent) -> String {
         if (!mermaidApi) {{
           const mod = await import('https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs');
           mermaidApi = mod.default;
-          mermaidApi.initialize({{ startOnLoad: false, theme: {mermaid_dark} ? 'dark' : 'default' }});
+          mermaidApi.initialize({{ startOnLoad: false, securityLevel: 'strict', theme: {mermaid_dark} ? 'dark' : 'default' }});
         }}
         let idx = 0;
         for (const codeEl of nodes) {{
@@ -180,7 +195,7 @@ fn render_shell_html(content: &LivePreviewContent) -> String {
         muted = muted,
         border = border,
         code_bg = code_bg,
-        custom_css = content.custom_css,
+        custom_css = safe_custom_css,
         body = content.body_html,
         version = content.version,
         mermaid_dark = if is_dark { "true" } else { "false" }
@@ -612,7 +627,7 @@ async fn write_http_response(
     body: &[u8],
 ) {
     let header = format!(
-        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n",
         status,
         content_type,
         body.len()
@@ -943,5 +958,23 @@ mod tests {
             assert!(!parsed.is_unspecified());
             assert!(!parsed.is_link_local());
         }
+    }
+
+    #[test]
+    fn neutralizes_style_breakout_and_html_title_injection() {
+        let content = LivePreviewContent {
+            title: "Doc <script>alert(1)</script> & \"quotes\"".to_string(),
+            body_html: "<p>ok</p>".to_string(),
+            theme: "dark".to_string(),
+            custom_css: "body { color: red; }</style><script>alert(1)</script>".to_string(),
+            doc_dir: None,
+            workspace_root: None,
+            is_raw_page: false,
+            version: 1,
+        };
+        let html = render_shell_html(&content);
+        assert!(!html.contains("</style><script>alert(1)</script>"));
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(html.contains("securityLevel: 'strict'"));
     }
 }

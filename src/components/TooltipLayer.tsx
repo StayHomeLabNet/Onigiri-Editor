@@ -110,7 +110,14 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
       if (rect.width === 0 && rect.height === 0) return;
 
       const centerX = rect.left + rect.width / 2;
-      const preferTop = rect.bottom + 36 > window.innerHeight;
+      const placementHost = target.closest('[data-tooltip-placement]');
+      const requestedPlacement = placementHost?.getAttribute('data-tooltip-placement');
+      const preferTop =
+        requestedPlacement === 'top'
+          ? rect.top >= 36
+          : requestedPlacement === 'bottom'
+            ? false
+            : rect.bottom + 36 > window.innerHeight;
       const y = preferTop ? rect.top - 7 : rect.bottom + 7;
 
       setTooltip({

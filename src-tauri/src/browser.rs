@@ -46,6 +46,14 @@ fn configure_detached_inspector_defaults() {
     }
 }
 
+fn is_allowed_embedded_navigation_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https" | "about" | "blob" | "data")
+}
+
+fn is_allowed_external_browser_url(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+}
+
 fn create_embedded_browser_webview(
     app: &AppHandle,
     parsed: Url,
@@ -67,6 +75,9 @@ fn create_embedded_browser_webview(
 
     let builder = WebviewBuilder::new(BROWSER_WEBVIEW_LABEL, WebviewUrl::External(parsed))
         .on_navigation(move |nav_url| {
+            if !is_allowed_embedded_navigation_url(nav_url) {
+                return false;
+            }
             let _ = app_for_nav.emit("browser-url-changed", nav_url.to_string());
             true
         })
@@ -632,6 +643,9 @@ pub async fn browser_capture_screenshot(
 #[tauri::command]
 pub async fn open_in_external_browser(url: String) -> Result<(), String> {
     let parsed = normalize_url(&url)?;
+    if !is_allowed_external_browser_url(&parsed) {
+        return Err("Only http:// and https:// URLs can be opened externally".to_string());
+    }
     let target = parsed.to_string();
 
     #[cfg(target_os = "macos")]
@@ -678,5 +692,17 @@ mod tests {
     fn formats_x11_crop_geometry_including_negative_monitor_offsets() {
         assert_eq!(format_x11_crop_geometry(100, 50, 800, 600), "800x600+100+50");
         assert_eq!(format_x11_crop_geometry(-200, -40, 800, 600), "800x600-200-40");
+    }
+
+    #[test]
+    fn blocks_unsafe_url_schemes_for_embedded_and_external_browser() {
+        assert!(is_allowed_embedded_navigation_url(&Url::parse("https://example.com").unwrap()));
+        assert!(is_allowed_embedded_navigation_url(&Url::parse("http://localhost:3000").unwrap()));
+        assert!(!is_allowed_embedded_navigation_url(&Url::parse("file:///etc/passwd").unwrap()));
+        assert!(!is_allowed_embedded_navigation_url(&Url::parse("javascript:alert(1)").unwrap()));
+
+        assert!(is_allowed_external_browser_url(&Url::parse("https://example.com").unwrap()));
+        assert!(!is_allowed_external_browser_url(&Url::parse("about:blank").unwrap()));
+        assert!(!is_allowed_external_browser_url(&Url::parse("file:///etc/passwd").unwrap()));
     }
 }

@@ -1049,6 +1049,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <label className="check-row">
                     <input
                       type="checkbox"
+                      checked={Boolean(settings.aiSendPreviewEnabled)}
+                      onChange={(e) =>
+                        onSettingsChange({ ...settings, aiSendPreviewEnabled: e.target.checked })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? 'AI 送信前に送信内容プレビュー＆機密情報チェックを表示する'
+                        : 'Preview payload & check secrets before sending to AI'}
+                    </span>
+                  </label>
+
+                  {settings.aiSendPreviewEnabled && (
+                    <label className="check-row" style={{ marginLeft: 18 }}>
+                      <input
+                        type="checkbox"
+                        checked={settings.aiAutoRedactSecrets ?? true}
+                        onChange={(e) =>
+                          onSettingsChange({ ...settings, aiAutoRedactSecrets: e.target.checked })
+                        }
+                      />
+                      <span>
+                        {locale === 'ja'
+                          ? 'プレビュー時に検出された API キー等を自動で伏せ字にする'
+                          : 'Automatically mask detected API keys & tokens in preview'}
+                      </span>
+                    </label>
+                  )}
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
                       checked={Boolean(settings.globalHotkeyEnabled)}
                       onChange={(e) =>
                         onSettingsChange({ ...settings, globalHotkeyEnabled: e.target.checked })
@@ -1630,6 +1662,169 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         }
                       />
                     </div>
+                  )}
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.autoSnapshotEnabled ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({ ...settings, autoSnapshotEnabled: e.target.checked })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? '自動スナップショットのタイムライン（定期・保存前バックアップ）を有効にする'
+                        : 'Enable Auto Snapshot Timeline (periodic & pre-save backups)'}
+                    </span>
+                  </label>
+
+                  {(settings.autoSnapshotEnabled ?? true) && (
+                    <div className="field-row" style={{ marginLeft: 18 }}>
+                      <label>
+                        {locale === 'ja' ? '自動スナップショット間隔' : 'Auto Snapshot Interval'}
+                      </label>
+                      <select
+                        className="select-input"
+                        value={settings.autoSnapshotIntervalSec ?? 180}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            autoSnapshotIntervalSec: Number(e.target.value),
+                          })
+                        }
+                      >
+                        <option value={60}>{locale === 'ja' ? '1分ごと' : 'Every 1 min'}</option>
+                        <option value={180}>{locale === 'ja' ? '3分ごと (既定)' : 'Every 3 min (Default)'}</option>
+                        <option value={300}>{locale === 'ja' ? '5分ごと' : 'Every 5 min'}</option>
+                        <option value={600}>{locale === 'ja' ? '10分ごと' : 'Every 10 min'}</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.markdownCompatCheckEnabled ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          markdownCompatCheckEnabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? '校正タブで Markdown 互換性チェック（GitHub / CommonMark）を表示'
+                        : 'Show Markdown Compatibility Check in Review tab'}
+                    </span>
+                  </label>
+                </div>
+
+                <div className="settings-card">
+                  <div className="settings-card-title">
+                    {locale === 'ja'
+                      ? '画像の最適化と整理（貼り付け・ドロップ時）'
+                      : 'Image Optimization & Naming (On Paste / Drop)'}
+                  </div>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.imageOptimizeOnPasteEnabled)}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          imageOptimizeOnPasteEnabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? '貼り付け時に画像を自動リサイズ＆軽量化（WebP変換）する'
+                        : 'Resize & compress pasted images automatically (WebP)'}
+                    </span>
+                  </label>
+
+                  {settings.imageOptimizeOnPasteEnabled && (
+                    <div className="settings-grid-2" style={{ marginTop: 6 }}>
+                      <div className="field-row">
+                        <label>{locale === 'ja' ? '最大横幅 (px)' : 'Max Width (px)'}</label>
+                        <select
+                          className="select-input"
+                          value={settings.imageMaxWidth ?? 1600}
+                          onChange={(e) =>
+                            onSettingsChange({
+                              ...settings,
+                              imageMaxWidth: Number(e.target.value),
+                            })
+                          }
+                        >
+                          <option value={1280}>1280 px</option>
+                          <option value={1600}>1600 px</option>
+                          <option value={1920}>1920 px</option>
+                          <option value={2560}>2560 px</option>
+                        </select>
+                      </div>
+                      <div className="field-row">
+                        <label>
+                          {locale === 'ja'
+                            ? `圧縮品質: ${settings.imageQuality ?? 85}%`
+                            : `Quality: ${settings.imageQuality ?? 85}%`}
+                        </label>
+                        <input
+                          type="range"
+                          min={50}
+                          max={95}
+                          step={5}
+                          value={settings.imageQuality ?? 85}
+                          onChange={(e) =>
+                            onSettingsChange({
+                              ...settings,
+                              imageQuality: Number(e.target.value),
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.imageAutoOrganizeNames ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          imageAutoOrganizeNames: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? '画像ファイル名を日時ベース（YYYYMMDD-HHmmss）で自動整理する'
+                        : 'Auto-organize pasted image filenames with timestamp'}
+                    </span>
+                  </label>
+
+                  {settings.imageOptimizeOnPasteEnabled && (
+                    <label className="check-row">
+                      <input
+                        type="checkbox"
+                        checked={settings.imageKeepOriginal ?? true}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            imageKeepOriginal: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>
+                        {locale === 'ja'
+                          ? '最適化前の元画像を originals/ に残す'
+                          : 'Keep original unoptimized image in originals/'}
+                      </span>
+                    </label>
                   )}
                 </div>
               </div>

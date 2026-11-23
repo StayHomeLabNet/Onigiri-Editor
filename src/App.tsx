@@ -124,6 +124,8 @@ import {
   resolveAiProviderCallOptions,
 } from './utils/aiCustomButtons';
 import { buildExportPageCss, DEFAULT_EXPORT_PAGE_SETTINGS } from './utils/exportPresets';
+import { formatFileSizeShort, optimizeImageDataUrl } from './utils/imageOptimizer';
+import { clipHtmlToMarkdown } from './utils/webClipper';
 import {
   browserClose,
   browserNavAction,
@@ -135,6 +137,7 @@ import {
   createWorkspaceFolder,
   deleteWorkspaceEntry,
   duplicateWorkspaceFile,
+  fetchUrlContent,
   formatShortcut,
   getGitHeadFile,
   getGitPanelState,
@@ -207,6 +210,8 @@ import { TooltipLayer } from './components/TooltipLayer';
 import { ExportOptionsModal } from './components/ExportOptionsModal';
 import { ScratchpadModal } from './components/ScratchpadModal';
 import { TerminalDrawer } from './components/TerminalDrawer';
+import { AiSendPreviewModal, type AiSendPreviewRequest } from './components/AiSendPreviewModal';
+import { FeatureGuideModal } from './components/FeatureGuideModal';
 import { FormatToolbar } from './components/FormatToolbar';
 import { TabBar } from './components/TabBar';
 import { Sidebar } from './components/Sidebar';
@@ -384,6 +389,17 @@ const DEFAULT_SETTINGS: EditorSettings = {
   integratedTerminalEnabled: true,
   customTooltipsEnabled: true,
   previewSingleLineBreak: true,
+  autoSnapshotEnabled: true,
+  autoSnapshotIntervalSec: 180,
+  markdownCompatCheckEnabled: true,
+  markdownCompatTarget: 'github',
+  imageOptimizeOnPasteEnabled: false,
+  imageMaxWidth: 1600,
+  imageQuality: 85,
+  imageAutoOrganizeNames: true,
+  imageKeepOriginal: true,
+  aiSendPreviewEnabled: false,
+  aiAutoRedactSecrets: true,
 };
 
 const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
@@ -555,6 +571,8 @@ export function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [aiSendPreviewRequest, setAiSendPreviewRequest] = useState<AiSendPreviewRequest | null>(null);
+  const [showFeatureGuideModal, setShowFeatureGuideModal] = useState(false);
   const [exportOptionsModalMode, setExportOptionsModalMode] = useState<'html' | 'pdf' | null>(null);
   const [showScratchpad, setShowScratchpad] = useState(false);
   const [scratchpadContent, setScratchpadContent] = useState<string>(() => {
@@ -579,15 +597,6 @@ export function App() {
       setShowTerminal(false);
     }
   }, [settings.integratedTerminalEnabled, showTerminal]);
-
-  useEffect(() => {
-    if (!isTauri()) return;
-    const enabled = Boolean(settings.globalHotkeyEnabled);
-    const shortcut = (settings.globalHotkeyShortcut || 'CommandOrControl+Shift+Space').trim();
-    void setGlobalHotkey(enabled, shortcut).catch(() => {
-      // Ignore unavailable shortcut registration errors (e.g. Wayland or conflict)
-    });
-  }, [settings.globalHotkeyEnabled, settings.globalHotkeyShortcut]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -880,6 +889,22 @@ export function App() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const enabled = Boolean(settings.globalHotkeyEnabled);
+    const shortcut = (settings.globalHotkeyShortcut || 'CommandOrControl+Shift+Space').trim();
+    void setGlobalHotkey(enabled, shortcut).catch((err) => {
+      if (enabled) {
+        const msg = err instanceof Error ? err.message : String(err);
+        notify(
+          locale === 'ja'
+            ? `グローバルショートカットを登録できませんでした (${shortcut}): ${msg}`
+            : `Failed to register global shortcut (${shortcut}): ${msg}`
+        );
+      }
+    });
+  }, [settings.globalHotkeyEnabled, settings.globalHotkeyShortcut, locale, notify]);
 
   const openProjectUrlBridgeRef = useRef<
     (url: string, target: 'builtin' | 'external') => Promise<void> | void
@@ -1631,7 +1656,7 @@ export function App() {
   const handleImageFileInput = useCallback(
     async (file: File) => {
       try {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
+        const rawDataUrl = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result || ''));
           reader.onerror = () => reject(new Error('Failed to read image file'));
@@ -1639,20 +1664,50 @@ export function App() {
         });
         const extMatch = file.name.match(/\.([a-zA-Z0-9]+)$/);
         const mimeExt = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
-        const ext = extMatch ? extMatch[1] : mimeExt;
+        const rawExt = extMatch ? extMatch[1] : mimeExt;
+
         const targetTab =
           isSideEditorActive() && sideTabIdRef.current
             ? tabsRef.current.find((tb) => tb.id === sideTabIdRef.current) || activeTab
             : activeTab;
+
+        const s = settingsRef.current;
+        const opt = await optimizeImageDataUrl(rawDataUrl, file.name, rawExt, {
+          enabled: Boolean(s.imageOptimizeOnPasteEnabled),
+          maxWidth: s.imageMaxWidth ?? 1600,
+          qualityPercent: s.imageQuality ?? 85,
+          autoOrganizeName: s.imageAutoOrganizeNames ?? true,
+        });
+
+        // Optionally preserve original unoptimized image in `<assetFolder>/originals`
+        if (opt.wasResizedOrCompressed && (s.imageKeepOriginal ?? true)) {
+          const origFolder = `${(s.imageAssetFolder || 'assets').replace(/[/\\]+$/, '')}/originals`;
+          await savePastedImage(
+            rawDataUrl,
+            rawExt,
+            targetTab.filePath,
+            workspaceRootRef.current,
+            origFolder
+          ).catch(() => null);
+        }
+
         const savedPath = await savePastedImage(
-          dataUrl,
-          ext,
+          opt.dataUrl,
+          opt.ext,
           targetTab.filePath,
           workspaceRootRef.current,
-          settingsRef.current.imageAssetFolder
+          s.imageAssetFolder
         );
-        const alt = file.name.replace(/\.[^.]+$/, '');
+        const alt = opt.suggestedFileName.replace(/\.[^.]+$/, '');
         insertImageIntoActivePane(savedPath, alt);
+        if (opt.wasResizedOrCompressed) {
+          const savedBytes = Math.max(0, opt.originalBytes - opt.optimizedBytes);
+          notify(
+            locale === 'ja'
+              ? `画像を最適化して保存しました（-${formatFileSizeShort(savedBytes)}）`
+              : `Optimized & saved image (-${formatFileSizeShort(savedBytes)})`
+          );
+        }
         if (workspaceRootRef.current && isTauri()) {
           void refreshWorkspaceRef.current(workspaceRootRef.current);
         }
@@ -1660,7 +1715,7 @@ export function App() {
         notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
       }
     },
-    [activeTab, isSideEditorActive, insertImageIntoActivePane, notify, t.toasts.errorPrefix]
+    [activeTab, isSideEditorActive, insertImageIntoActivePane, locale, notify, t.toasts.errorPrefix]
   );
 
   const openPathInTab = useCallback(
@@ -2302,8 +2357,23 @@ export function App() {
               savedEncoding: targetEncoding,
               savedEol: targetEol,
             };
+            const backupSnap: Snapshot | null =
+              (effectiveSettings.autoSnapshotEnabled ?? true) &&
+              tab.filePath &&
+              tab.savedContent !== undefined &&
+              tab.savedContent !== savedSnapshot &&
+              tab.savedContent.trim().length > 0
+                ? {
+                    id: `snap-presave-${Date.now()}`,
+                    label: `${locale === 'ja' ? '上書き保存前' : 'Before Save'} (${new Date().toLocaleTimeString()})`,
+                    content: tab.savedContent,
+                    timestamp: Date.now(),
+                    kind: 'save-backup',
+                  }
+                : null;
             return {
               ...nextSaved,
+              snapshots: backupSnap ? [backupSnap, ...tab.snapshots].slice(0, 25) : tab.snapshots,
               dirty: computeTabDirty(
                 nextSaved,
                 nextContent,
@@ -4841,6 +4911,38 @@ export function App() {
         language: targetTab.languageOverride ?? detectedLanguageId ?? 'markdown',
       });
 
+      const callOpts = resolveAiProviderCallOptions(aiConfig);
+      const systemPrompt = [
+        'You are an AI assistant invoked from a custom toolbar button inside a Markdown editor.',
+        'Follow the user instruction faithfully and return ONLY the resulting text.',
+        'Do not add explanations, greetings, or surrounding Markdown code fences unless explicitly asked.',
+      ].join('\n');
+      let userPrompt = inputText.length > 0 ? `${promptText}\n\n${inputText}` : promptText;
+
+      if (settingsRef.current.aiSendPreviewEnabled) {
+        const confirmedPayload = await new Promise<string | null>((resolve) => {
+          setAiSendPreviewRequest({
+            title: buttonName,
+            providerLabel: aiConfig.provider,
+            modelLabel: callOpts.model || 'default',
+            scopeLabel: hasSelection
+              ? locale === 'ja'
+                ? `選択範囲 (${selectedText.length} 文字)`
+                : `Selection (${selectedText.length} chars)`
+              : locale === 'ja'
+                ? `文書全体 (${targetTab.content.length} 文字)`
+                : `Full Document (${targetTab.content.length} chars)`,
+            payloadText: userPrompt,
+            onConfirm: (finalText) => resolve(finalText),
+            onCancel: () => resolve(null),
+          });
+        });
+        if (confirmedPayload === null) {
+          return;
+        }
+        userPrompt = confirmedPayload;
+      }
+
       const requestId = `ai-custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const reqState = {
         requestId,
@@ -4851,14 +4953,6 @@ export function App() {
       aiCustomRequestRef.current = reqState;
       setRunningAiCustom({ buttonId: toolbarButtonId, label: buttonName });
       notify(t.toasts.aiCustomRunning.replace('{name}', buttonName));
-
-      const callOpts = resolveAiProviderCallOptions(aiConfig);
-      const systemPrompt = [
-        'You are an AI assistant invoked from a custom toolbar button inside a Markdown editor.',
-        'Follow the user instruction faithfully and return ONLY the resulting text.',
-        'Do not add explanations, greetings, or surrounding Markdown code fences unless explicitly asked.',
-      ].join('\n');
-      const userPrompt = inputText.length > 0 ? `${promptText}\n\n${inputText}` : promptText;
 
       try {
         const res = await sendAiChat({
@@ -4974,16 +5068,48 @@ export function App() {
         label,
         content: activeTab.content,
         timestamp: Date.now(),
+        kind: 'manual',
       };
       setTabs((prev) =>
         prev.map((tab) =>
-          tab.id === activeTab.id ? { ...tab, snapshots: [snap, ...tab.snapshots] } : tab
+          tab.id === activeTab.id ? { ...tab, snapshots: [snap, ...tab.snapshots].slice(0, 25) } : tab
         )
       );
       notify(t.toasts.snapshotCreated);
     },
     [activeTab.id, activeTab.content, notify, t.toasts.snapshotCreated]
   );
+
+  // Periodic Auto Snapshot Timeline recorder
+  useEffect(() => {
+    if (settings.autoSnapshotEnabled === false) return;
+    const intervalSec = Math.max(30, Math.min(1800, settings.autoSnapshotIntervalSec ?? 180));
+    const timer = window.setInterval(() => {
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (tab.id !== activeTabIdRef.current) return tab;
+          if (!tab.dirty || tab.content.trim().length === 0) return tab;
+          const latest = tab.snapshots[0];
+          if (latest && latest.content === tab.content) return tab;
+          if (latest && Math.abs(tab.content.length - latest.content.length) < 12) return tab;
+          const autoSnap: Snapshot = {
+            id: `snap-auto-${Date.now()}`,
+            label: `${locale === 'ja' ? '自動スナップショット' : 'Auto Snapshot'} (${new Date().toLocaleTimeString()})`,
+            content: tab.content,
+            timestamp: Date.now(),
+            kind: 'auto',
+          };
+          const manuals = tab.snapshots.filter((s) => s.kind !== 'auto');
+          const autos = [autoSnap, ...tab.snapshots.filter((s) => s.kind === 'auto')].slice(0, 15);
+          const merged = [...manuals, ...autos]
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 25);
+          return { ...tab, snapshots: merged };
+        })
+      );
+    }, intervalSec * 1000);
+    return () => window.clearInterval(timer);
+  }, [settings.autoSnapshotEnabled, settings.autoSnapshotIntervalSec, locale]);
 
   const handleRestoreSnapshot = useCallback(
     (snap: Snapshot) => {
@@ -7018,6 +7144,7 @@ export function App() {
               onOpenCitationModal={handleOpenCitationModal}
               onOpenKnowledgeGraph={() => setShowKnowledgeGraphModal(true)}
               onOpenUnusedAssets={() => setShowUnusedAssetsModal(true)}
+              onOpenFeatureGuide={() => setShowFeatureGuideModal(true)}
               focusMode={Boolean(settings.focusMode)}
               onToggleFocusMode={handleToggleFocusMode}
               isMarkdown={previewKind === 'markdown'}
@@ -7920,6 +8047,29 @@ export function App() {
                     onUrlChange={setBrowserUrl}
                     onOpenBrowserSettings={() => openSettingsModal('integrations')}
                     onCaptureScreenshotToMarkdown={handleCaptureBrowserScreenshotToMarkdown}
+                    onClipCurrentPage={async (pageUrl) => {
+                      try {
+                        const fetched = await fetchUrlContent(pageUrl);
+                        const clipped = clipHtmlToMarkdown(fetched.html, fetched.finalUrl || pageUrl, {
+                          includeFrontmatter: true,
+                        });
+                        const title = `${clipped.suggestedFileName || 'web-clip'}.md`;
+                        const created = makeTab(title, clipped.markdown, undefined, undefined, {
+                          encoding: effectiveSettings.defaultNewFileEncoding ?? 'utf-8',
+                          eol: effectiveSettings.defaultNewFileEol ?? '\n',
+                        });
+                        created.dirty = true;
+                        setTabs((prev) => [...prev, created]);
+                        setActiveTabId(created.id);
+                        notify(
+                          locale === 'ja'
+                            ? 'WebページをMarkdownとして新規タブにクリップしました'
+                            : 'Clipped web page to a new Markdown tab'
+                        );
+                      } catch (err) {
+                        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+                      }
+                    }}
                     visible={nativeBrowserVisible}
                     projectInfo={projectInfo}
                     projectServer={projectServer}
@@ -8336,8 +8486,10 @@ export function App() {
 
         <UnusedAssetsModal
           t={t}
+          locale={locale}
           open={showUnusedAssetsModal}
           workspaceRoot={workspaceRoot}
+          workspaceEntries={workspaceEntries}
           extraContents={unusedAssetExtraContents}
           onClose={() => setShowUnusedAssetsModal(false)}
           onDeleted={(count) => {
@@ -8420,6 +8572,56 @@ export function App() {
           setActiveTabId(created.id);
         }}
         onClose={() => setShowScratchpad(false)}
+      />
+
+      <AiSendPreviewModal
+        request={aiSendPreviewRequest}
+        locale={locale}
+        defaultAutoRedact={settings.aiAutoRedactSecrets ?? true}
+        onClose={() => setAiSendPreviewRequest(null)}
+      />
+
+      <FeatureGuideModal
+        open={showFeatureGuideModal}
+        locale={locale}
+        onRunAction={(actionId) => {
+          switch (actionId) {
+            case 'insert-image':
+              setShowImageModal(true);
+              break;
+            case 'export-page-setup':
+              setExportOptionsModalMode('pdf');
+              break;
+            case 'toggle-browser-preview':
+              setSettings((s) => ({ ...s, builtinBrowserEnabled: true }));
+              setRightPaneMode('browser');
+              break;
+            case 'open-editor-settings':
+              openSettingsModal('editor');
+              break;
+            case 'open-general-settings':
+              openSettingsModal('general');
+              break;
+            case 'open-keybindings-settings':
+              openSettingsModal('keybindings');
+              break;
+            case 'open-diff-inspector':
+              setShowInspector(true);
+              setInspectorTab('diff');
+              break;
+            case 'open-review-inspector':
+              setShowInspector(true);
+              setInspectorTab('review');
+              break;
+            case 'open-scratchpad':
+              setShowScratchpad(true);
+              break;
+            case 'toggle-integrated-terminal':
+              setShowTerminal((v) => !v);
+              break;
+          }
+        }}
+        onClose={() => setShowFeatureGuideModal(false)}
       />
 
       <TooltipLayer enabled={settings.customTooltipsEnabled ?? true} />
