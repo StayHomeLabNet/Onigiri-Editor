@@ -12,7 +12,11 @@ fn compile_apple_foundation_models_bridge() {
     use std::process::Command;
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    if target_os != "macos" {
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    // Apple Intelligence / FoundationModels only runs on Apple Silicon (arm64).
+    // Skipping Swift bridge compilation on x86_64 also keeps macOS universal builds clean
+    // when newer macOS Command Line Tools drop x86_64 slices from Swift compatibility archives.
+    if target_os != "macos" || target_arch != "aarch64" {
         return;
     }
 
@@ -24,11 +28,7 @@ fn compile_apple_foundation_models_bridge() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let static_lib = out_dir.join("libapple_foundation_models.a");
 
-    let arch = match env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default().as_str() {
-        "aarch64" => "arm64",
-        "x86_64" => "x86_64",
-        other => other.to_string().leak(),
-    };
+    let arch = "arm64";
     let deployment_target =
         env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "10.15".to_string());
     let swift_target = format!("{}-apple-macos{}", arch, deployment_target);

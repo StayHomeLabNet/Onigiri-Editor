@@ -1,5 +1,9 @@
-use crate::ai::{AiChatProgressEvent, AiChatResponse, ChatMessageInput};
+use crate::ai::{AiChatResponse, ChatMessageInput};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+use crate::ai::AiChatProgressEvent;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use std::time::Instant;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 use tauri::Emitter;
 use tokio::sync::watch;
 
@@ -10,7 +14,7 @@ pub struct AppleFmAvailability {
     pub status: String,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod ffi {
     use std::os::raw::{c_char, c_int, c_void};
 
@@ -35,7 +39,7 @@ mod ffi {
 }
 
 pub fn check_availability() -> AppleFmAvailability {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         let compiled_with_sdk = unsafe { ffi::afm_is_compiled_with_sdk() } != 0;
         let code = unsafe { ffi::afm_check_availability() };
@@ -54,6 +58,15 @@ pub fn check_availability() -> AppleFmAvailability {
         }
     }
 
+    #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+    {
+        AppleFmAvailability {
+            supported: false,
+            available: false,
+            status: "device_not_eligible".to_string(),
+        }
+    }
+
     #[cfg(not(target_os = "macos"))]
     {
         AppleFmAvailability {
@@ -64,6 +77,7 @@ pub fn check_availability() -> AppleFmAvailability {
     }
 }
 
+#[allow(dead_code)]
 fn clamp_chars_head_tail(input: &str, max_chars: usize) -> String {
     let count = input.chars().count();
     if count <= max_chars {
@@ -79,6 +93,7 @@ fn clamp_chars_head_tail(input: &str, max_chars: usize) -> String {
     format!("{}\n...[truncated for on-device context limit]...\n{}", head, tail)
 }
 
+#[allow(dead_code)]
 pub fn build_prompt_payload(
     system_prompt: Option<&str>,
     messages: &[ChatMessageInput],
@@ -140,14 +155,14 @@ pub fn build_prompt_payload(
     (clean_system, prompt)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 struct ProgressBridgeCtx {
     app: tauri::AppHandle,
     request_id: String,
     started_at: Instant,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 extern "C" fn on_afm_progress(ctx: *mut std::os::raw::c_void, msg: *const std::os::raw::c_char) {
     if ctx.is_null() || msg.is_null() {
         return;
@@ -174,7 +189,7 @@ extern "C" fn on_afm_progress(ctx: *mut std::os::raw::c_void, msg: *const std::o
     );
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub async fn generate(
     app: tauri::AppHandle,
     request_id: String,
@@ -313,6 +328,18 @@ pub async fn generate(
         content,
         model_used,
     })
+}
+
+#[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+pub async fn generate(
+    _app: tauri::AppHandle,
+    _request_id: String,
+    _cancel_rx: watch::Receiver<bool>,
+    _model_opt: Option<&str>,
+    _system_prompt: Option<&str>,
+    _messages: &[ChatMessageInput],
+) -> Result<AiChatResponse, String> {
+    Err("Apple Foundation Models requires an Apple Silicon Mac (M1 or later).".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
