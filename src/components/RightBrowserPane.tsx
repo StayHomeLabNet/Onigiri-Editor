@@ -281,6 +281,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
   const [orientation, setOrientation] = useState<BrowserViewportOrientation>('portrait');
   const [customViewportWidth, setCustomViewportWidth] = useState<number>(480);
   const [isToolbarCompact, setIsToolbarCompact] = useState(false);
+  const [showInlineCustomWidth, setShowInlineCustomWidth] = useState(true);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [clippingPage, setClippingPage] = useState(false);
   const [capturingShot, setCapturingShot] = useState(false);
@@ -331,7 +332,9 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
     if (!tb || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setIsToolbarCompact(entry.contentRect.width < 520);
+        const w = entry.contentRect.width;
+        setShowInlineCustomWidth(w >= 580);
+        setIsToolbarCompact(w < 380);
       }
     });
     ro.observe(tb);
@@ -497,6 +500,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
             width,
             height,
             visible: true,
+            viewportHeight: window.innerHeight,
           });
           initializedRef.current = true;
           setBrowserError(null);
@@ -517,6 +521,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
               ...postBounds,
               visible:
                 latestVisibleRef.current && postRect.width > 20 && postRect.height > 20,
+              viewportHeight: window.innerHeight,
             });
           }
 
@@ -538,6 +543,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
           width,
           height,
           visible: effectiveVisible,
+          viewportHeight: window.innerHeight,
         });
       }
     },
@@ -660,6 +666,7 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                 url: target,
                 ...bounds,
                 visible,
+                viewportHeight: window.innerHeight,
               });
               initializedRef.current = true;
               return res;
@@ -900,28 +907,30 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
               >
                 <Smartphone size={13} />
               </button>
-              <label
-                className={`browser-custom-width-wrap ${viewport === 'custom' ? 'is-active' : ''}`}
-                title={locale === 'ja' ? '表示幅を数値指定 (px)' : 'Custom viewport width (px)'}
-              >
-                <input
-                  type="number"
-                  min={240}
-                  max={2400}
-                  step={10}
-                  className="browser-custom-width-input"
-                  value={customViewportWidth}
-                  onFocus={() => setViewport('custom')}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    if (Number.isFinite(n)) {
-                      setCustomViewportWidth(Math.max(240, Math.min(2400, n)));
-                      setViewport('custom');
-                    }
-                  }}
-                />
-                <span>px</span>
-              </label>
+              {showInlineCustomWidth && (
+                <label
+                  className={`browser-custom-width-wrap ${viewport === 'custom' ? 'is-active' : ''}`}
+                  title={locale === 'ja' ? '表示幅を数値指定 (px)' : 'Custom viewport width (px)'}
+                >
+                  <input
+                    type="number"
+                    min={240}
+                    max={2400}
+                    step={10}
+                    className="browser-custom-width-input"
+                    value={customViewportWidth}
+                    onFocus={() => setViewport('custom')}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (Number.isFinite(n)) {
+                        setCustomViewportWidth(Math.max(240, Math.min(2400, n)));
+                        setViewport('custom');
+                      }
+                    }}
+                  />
+                  <span>px</span>
+                </label>
+              )}
             </>
           )}
           {viewport !== 'full' && viewport !== 'custom' && (
@@ -1081,6 +1090,18 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                   <span>{t.browser.captureToMarkdownTitle}</span>
                 </button>
               )}
+              {isTauri() && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    void handleOpenDevtools();
+                  }}
+                >
+                  <Bug size={13} />
+                  <span>{t.browser.devtools}</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -1092,6 +1113,30 @@ export const RightBrowserPane: React.FC<RightBrowserPaneProps> = ({
                 <span>{t.browser.openExternal}</span>
               </button>
             </>
+          )}
+          {!showInlineCustomWidth && (
+            <label
+              className={`browser-custom-width-wrap ${viewport === 'custom' ? 'is-active' : ''}`}
+              title={locale === 'ja' ? '表示幅を数値指定 (px)' : 'Custom viewport width (px)'}
+            >
+              <input
+                type="number"
+                min={240}
+                max={2400}
+                step={10}
+                className="browser-custom-width-input"
+                value={customViewportWidth}
+                onFocus={() => setViewport('custom')}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) {
+                    setCustomViewportWidth(Math.max(240, Math.min(2400, n)));
+                    setViewport('custom');
+                  }
+                }}
+              />
+              <span>px</span>
+            </label>
           )}
           <button
             type="button"

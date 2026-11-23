@@ -17,6 +17,36 @@ struct SavedBrowserBounds {
     visible: bool,
 }
 
+fn compute_macos_y_offset(inner_logical_height: f64, viewport_height: Option<f64>) -> f64 {
+    let Some(vh) = viewport_height else {
+        return 0.0;
+    };
+    if !inner_logical_height.is_finite() || !vh.is_finite() || vh <= 0.0 {
+        return 0.0;
+    }
+    let delta = inner_logical_height - vh;
+    if delta > 1.0 && delta <= 80.0 {
+        delta
+    } else {
+        0.0
+    }
+}
+
+fn adjust_y_for_macos_content_view(app: &AppHandle, y: f64, viewport_height: Option<f64>) -> f64 {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(win) = app.get_window("main") {
+            if let (Ok(inner), Ok(scale)) = (win.inner_size(), win.scale_factor()) {
+                let logical_h = inner.to_logical::<f64>(scale.max(0.1)).height;
+                return y + compute_macos_y_offset(logical_h, viewport_height);
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, viewport_height);
+    y
+}
+
 static LAST_BROWSER_BOUNDS: OnceLock<Mutex<Option<SavedBrowserBounds>>> = OnceLock::new();
 
 fn save_browser_bounds(bounds: SavedBrowserBounds) {
@@ -253,14 +283,16 @@ pub async fn browser_open_or_update(
     width: f64,
     height: f64,
     visible: bool,
+    viewport_height: Option<f64>,
 ) -> Result<String, String> {
     let parsed = normalize_url(&url)?;
     let parsed_str = parsed.to_string();
     let w = width.max(120.0);
     let h = height.max(120.0);
+    let adj_y = adjust_y_for_macos_content_view(&app, y, viewport_height);
     save_browser_bounds(SavedBrowserBounds {
         x,
-        y,
+        y: adj_y,
         width: w,
         height: h,
         visible,
@@ -269,7 +301,7 @@ pub async fn browser_open_or_update(
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(wv) = app.get_webview(BROWSER_WEBVIEW_LABEL) {
             let _ = wv.set_bounds(Rect {
-                position: LogicalPosition::new(x, y).into(),
+                position: LogicalPosition::new(x, adj_y).into(),
                 size: LogicalSize::new(w, h).into(),
             });
             if visible {
@@ -284,7 +316,7 @@ pub async fn browser_open_or_update(
             return Ok(parsed_str);
         }
 
-        create_embedded_browser_webview(&app, parsed, x, y, w, h, visible)?;
+        create_embedded_browser_webview(&app, parsed, x, adj_y, w, h, visible)?;
         Ok(parsed_str)
     })
     .await
@@ -299,12 +331,14 @@ pub async fn browser_set_bounds(
     width: f64,
     height: f64,
     visible: bool,
+    viewport_height: Option<f64>,
 ) -> Result<(), String> {
     let w = width.max(80.0);
     let h = height.max(80.0);
+    let adj_y = adjust_y_for_macos_content_view(&app, y, viewport_height);
     save_browser_bounds(SavedBrowserBounds {
         x,
-        y,
+        y: adj_y,
         width: w,
         height: h,
         visible,
@@ -313,7 +347,7 @@ pub async fn browser_set_bounds(
         return Ok(());
     };
     let _ = wv.set_bounds(Rect {
-        position: LogicalPosition::new(x, y).into(),
+        position: LogicalPosition::new(x, adj_y).into(),
         size: LogicalSize::new(w, h).into(),
     });
     if visible {

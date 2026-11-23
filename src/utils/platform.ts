@@ -678,6 +678,7 @@ export async function browserOpenOrUpdate(params: {
   width: number;
   height: number;
   visible: boolean;
+  viewportHeight?: number;
 }): Promise<string> {
   if (!isTauri()) return params.url;
   const { invoke } = await import('@tauri-apps/api/core');
@@ -690,6 +691,7 @@ export async function browserSetBounds(params: {
   width: number;
   height: number;
   visible: boolean;
+  viewportHeight?: number;
 }): Promise<void> {
   if (!isTauri()) return;
   try {
