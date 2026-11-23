@@ -89,6 +89,9 @@ pub struct AiCapabilities {
     pub lmstudio_installed: bool,
     pub lmstudio_running: bool,
     pub lmstudio_models: Vec<String>,
+    pub apple_foundation_models_supported: bool,
+    pub apple_foundation_models_available: bool,
+    pub apple_foundation_models_status: Option<String>,
     pub node_installed: bool,
     pub homebrew_installed: bool,
 }
@@ -1206,6 +1209,7 @@ pub async fn detect_ai_capabilities() -> AiCapabilities {
         check_antigravity_logged_in(antigravity_cli.is_some(), &antigravity_models);
     let ollama_res = t_ollama.await.unwrap_or((false, Vec::new()));
     let lmstudio_res = t_lm.await.unwrap_or((false, Vec::new()));
+    let apple_fm = crate::apple_fm::check_availability();
     let node_installed =
         find_executable(&["node"]).is_some() && find_executable(&["npm"]).is_some();
     let homebrew_installed = find_executable(&["brew"]).is_some();
@@ -1232,6 +1236,9 @@ pub async fn detect_ai_capabilities() -> AiCapabilities {
         lmstudio_installed,
         lmstudio_running: lmstudio_res.0,
         lmstudio_models: lmstudio_res.1,
+        apple_foundation_models_supported: apple_fm.supported,
+        apple_foundation_models_available: apple_fm.available,
+        apple_foundation_models_status: Some(apple_fm.status),
         node_installed,
         homebrew_installed,
     }
@@ -1369,6 +1376,32 @@ pub async fn assist_ai_connection(
                     .spawn()
                     .map_err(|e| format!("Failed to open LM Studio: {}", e))?;
                 Ok("LM Studio launched. Start the Local Server in Developer tab.".to_string())
+            }
+        }
+
+        "open-apple-intelligence-settings" => {
+            #[cfg(target_os = "macos")]
+            {
+                let status = Command::new("open")
+                    .arg("x-apple.systempreferences:com.apple.Siri-Settings.extension")
+                    .status()
+                    .await;
+                match status {
+                    Ok(s) if s.success() => Ok(
+                        "Opened Apple Intelligence & Siri in System Settings.".to_string(),
+                    ),
+                    _ => {
+                        Command::new("open")
+                            .args(["-a", "System Settings"])
+                            .spawn()
+                            .map_err(|e| format!("Failed to open System Settings: {}", e))?;
+                        Ok("Opened System Settings.".to_string())
+                    }
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Err("Apple Intelligence settings are only available on macOS.".to_string())
             }
         }
 
@@ -2863,6 +2896,18 @@ pub async fn ai_chat(
                 content,
                 model_used: model.to_string(),
             })
+        }
+
+        "apple-foundation-models" => {
+            crate::apple_fm::generate(
+                app,
+                request_id,
+                cancel_rx,
+                model_opt,
+                request.system_prompt.as_deref(),
+                &request.messages,
+            )
+            .await
         }
 
         other => Err(format!("Unsupported AI provider: {}", other)),

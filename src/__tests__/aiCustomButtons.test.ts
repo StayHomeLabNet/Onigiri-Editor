@@ -3,10 +3,14 @@ import {
   cleanAiCustomResponse,
   cloneDefaultAiCustomButtons,
   createNewAiCustomButton,
+  createNewAiCustomSubmenuItem,
   DEFAULT_AI_CUSTOM_BUTTONS,
   DEFAULT_AI_TRANSLATE_PROMPT,
+  getActiveSubmenuItems,
   MAX_AI_CUSTOM_BUTTONS,
+  MAX_AI_CUSTOM_SUBMENU_ITEMS,
   normalizeAiCustomButtons,
+  resolveAiProviderCallOptions,
 } from '../utils/aiCustomButtons';
 
 describe('aiCustomButtons', () => {
@@ -21,6 +25,8 @@ describe('aiCustomButtons', () => {
     expect(preset.prompt).toContain('返答は、翻訳結果だけにしてください');
     expect(preset.replaceContent).toBe(true);
     expect(preset.copyToClipboard).toBe(false);
+    expect(preset.submenuEnabled).toBe(false);
+    expect(preset.submenuItems).toEqual([]);
   });
 
   it('falls back to default preset when undefined, but preserves explicit empty array', () => {
@@ -77,5 +83,63 @@ describe('aiCustomButtons', () => {
     expect(
       cleanAiCustomResponse('```ts\nconst x = 1;\n```', '```ts\nconst y = 2;\n```', 'リファクタ')
     ).toBe('```ts\nconst x = 1;\n```');
+  });
+
+  it('normalizes submenu items, clamps to MAX_AI_CUSTOM_SUBMENU_ITEMS (10), and respects submenuEnabled', () => {
+    const rawSubmenus = Array.from({ length: 14 }, (_, idx) => ({
+      id: `sub-${idx}`,
+      name: `Sub ${idx + 1}`,
+      icon: idx === 0 ? 'bad-icon' : 'zap',
+      prompt: `Sub prompt ${idx + 1}`,
+      copyToClipboard: idx % 2 === 0,
+      replaceContent: idx % 2 === 1,
+    }));
+
+    const [btn] = normalizeAiCustomButtons([
+      {
+        id: 'btn-1',
+        name: 'Main',
+        icon: 'languages',
+        prompt: 'Main prompt',
+        copyToClipboard: false,
+        replaceContent: true,
+        submenuEnabled: true,
+        submenuItems: rawSubmenus,
+      },
+    ]);
+
+    expect(btn.submenuEnabled).toBe(true);
+    expect(btn.submenuItems).toHaveLength(MAX_AI_CUSTOM_SUBMENU_ITEMS);
+    expect(btn.submenuItems?.[0].icon).toBe('sparkles');
+    expect(btn.submenuItems?.[1].icon).toBe('zap');
+    expect(getActiveSubmenuItems(btn)).toHaveLength(MAX_AI_CUSTOM_SUBMENU_ITEMS);
+
+    const disabledBtn = { ...btn, submenuEnabled: false };
+    expect(getActiveSubmenuItems(disabledBtn)).toEqual([]);
+  });
+
+  it('creates a new submenu item with localized default name and replaceContent=true', () => {
+    const ja = createNewAiCustomSubmenuItem(0, 'ja');
+    expect(ja.name).toBe('サブメニュー 1');
+    expect(ja.replaceContent).toBe(true);
+    expect(ja.copyToClipboard).toBe(false);
+
+    const en = createNewAiCustomSubmenuItem(2, 'en');
+    expect(en.name).toBe('Submenu 3');
+  });
+
+  it('resolves default model for apple-foundation-models provider', () => {
+    const opts = resolveAiProviderCallOptions({
+      provider: 'apple-foundation-models',
+      model: '',
+      apiKeys: {},
+      baseUrls: {},
+      customCliCmd: '',
+      includeDocContext: false,
+      includeFolderContext: false,
+    });
+    expect(opts.model).toBe('default');
+    expect(opts.apiKey).toBeUndefined();
+    expect(opts.baseUrl).toBeUndefined();
   });
 });

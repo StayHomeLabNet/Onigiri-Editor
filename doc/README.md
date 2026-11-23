@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.5)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.6)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -40,7 +40,7 @@
 
 ## 2. Three UI Modes, Dual Editor & Layout Controls
 
-Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
+Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cycle), or direct shortcuts (**`⌘⌥1`** Simple / **`⌘⌥2`** Basic / **`⌘⌥3`** Advanced — `Ctrl+Alt+1/2/3` on Windows/Linux):
 
 | Mode | Best For | Layout & Capabilities |
 | :--- | :--- | :--- |
@@ -58,6 +58,7 @@ Switch anytime via the top header bar, **View** menu, or **`⌘\` / `Ctrl+\`**:
 - **Header Bar, Format Toolbar & Status Bar Toggles**:
   - Toggle **View → Show Header Bar**, **View → Show Format Toolbar**, and **Status Bar** from the menu bar, Settings, or Command Palette.
   - **Settings → General & View** also provides **Hide top header bar in Simple mode** and **Show format toolbar in Simple mode**.
+  - **Status Bar One-Step Mode Switcher**: Whenever the top header bar is hidden, the right side of the Status Bar displays a compact one-click mode switcher (`Simple → Basic`, `Basic → Advanced`, or `Advanced → Basic`) alongside a quick Settings button.
 
 ---
 
@@ -225,12 +226,14 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 | :--- | :--- | :--- |
 | **Subscription CLIs** | **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI** (`agy`) | Local CLI execution, model selector, live streaming progress + Stop, plus **Setup / Sign in via Terminal** |
 | **Cloud APIs** | **OpenAI API**, **Anthropic API**, **Gemini API** | Direct connection with your API key, model name, and custom Base URL |
-| **Local AI** | **Ollama**, **LM Studio** | Offline private models with Ollama launcher/model-pull helpers |
+| **Local AI** | **Apple Foundation Models (macOS 26+ only)**, **Ollama**, **LM Studio** | Offline private models: native Apple Intelligence on-device (Default & Content Transformations modes, zero setup on Apple Silicon Macs) plus Ollama launcher/model-pull helpers |
 | **Custom CLI** | Any custom command | Integrate custom CLI tools via `{prompt}` placeholder or stdin |
 
-### Per-Tab Chat Threads, Toolbar AI Custom Buttons, Note Export & Inline Selection Edit (`⌘⇧E`)
+### Per-Tab Chat Threads, Toolbar AI Custom Buttons & Submenus, Note Export & Inline Selection Edit (`⌘⇧E`)
 
-- **Toolbar AI Custom Buttons (Up to 5 Buttons)**: Configure up to **5 one-click AI prompt buttons** in **Settings → AI Custom** (each with a **24-icon Lucide picker**, **hover tooltip name**, **custom AI prompt**, and independent **Copy to clipboard** / **Replace document (or selection)** checkboxes). Displayed to the right of the formatting buttons in all modes (ships with an **AI Translate** preset for automatic English ↔ Japanese translation). Sends the active selection when highlighted or the entire document otherwise, replaces immediately with single-step Undo (`⌘Z` / `Ctrl+Z`), and lets you click the spinner while running to cancel.
+- **Toolbar AI Custom Buttons & Submenus (Up to 5 Buttons × 10 Submenu Items)**: Configure up to **5 AI prompt buttons** in **Settings → AI Custom** (each with a **24-icon Lucide picker**, **hover tooltip name**, **custom AI prompt**, independent **Copy to clipboard** / **Replace document (or selection)** checkboxes, and optional **custom shortcut key**). Displayed to the right of the formatting buttons in all modes (ships with an **AI Translate** preset for automatic English ↔ Japanese translation).
+  - **Long-Press / Right-Click Submenus**: Enable the **Enable submenu** checkbox on any button (off by default) to add up to **10 submenu items** with individual icons, labels, prompts, output options, and shortcuts. Normal click runs the parent button; **long-pressing (~0.4s) or right-clicking** slides open the submenu popover below the button (marked with a subtle corner triangle).
+  - Sends the active selection when highlighted or the entire document otherwise, replaces immediately with single-step Undo (`⌘Z` / `Ctrl+Z`), and lets you click the spinner (or press its shortcut again) while running to cancel.
 - **Per-Tab vs. Shared Threads**: Switch between keeping an isolated AI conversation per active tab or using a shared workspace thread.
 - **Save Chat as `.md` Note**: Export the current AI conversation directly into a new Markdown tab for archiving or further editing.
 - **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets, with **Diff Preview** confirmation before applying.
@@ -252,8 +255,8 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
   - **General & View**: Language, Theme, Preview Style, Font Size, Line Height, Preview Width, Editor Font, Bar visibility toggles, **Inspector Tab Style** (`Icons only`, `Active label`, or `Always show labels`), Focus Mode, Session Restore, Auto-Save, Writing Goal, **Daily Notes Folder**, **Image Asset Folder**, **Embed Local Images on HTML Export**, **App Updates & Auto-Update** (**Automatically check for updates** toggle, **Check Interval** `Startup Only` / `1h` / `6h` / `12h` / `24h`, **Enable Auto-Update** background download toggle, **Action When a New Update Is Available** `Banner & Badge` / `Open Update Dialog` / `Subtle Badge Only` / `Auto-Download & Notify`, plus **Auto-Update Now** with **SHA-256 verification**, **Cancel Download**, **Unsaved Changes Guard** before restart, **Apply on Next Quit**, rich Markdown release notes, **ETag** caching, **Save Installer**, **Open Release Notes in Editor Tab**, **Skip Version**, and manual **Check for Updates**), Custom CSS.
   - **Editor & Line Copy**: Line Numbers, Word Wrap & Column Width, Column Ruler, Visible Symbols, Matching Brackets, Auto-Close Brackets, Default Encoding/EOL, Active Sync Highlight, Sync Scroll, Typewriter Scroll, Smart HTML Paste, **Auto-fetch webpage title on URL paste (`autoTitleOnUrlPaste`)**, Smart Line Copy, and **Project Config (`.editorconfig` / `.onigiri.json`)** status & quick creation.
   - **Syntax Colors**: 7 presets + 10 per-token color pickers.
-  - **Keybindings**: Interactive shortcut editor for 27 commands with search filter, conflict detection, clear, individual reset, and Reset All (dynamically reflected in Command Palette badges).
-  - **AI Custom**: Register up to 5 one-click AI buttons on the Format Toolbar (24-icon selector, hover name, custom AI prompt, independent **Copy to clipboard** and **Replace document/selection** checkboxes, reordering, deletion, and reset to default **AI Translate** preset).
+  - **Keybindings**: Interactive shortcut editor for **112 built-in commands + dynamic AI Custom buttons and enabled submenus** with search filter, **category filter chips**, conflict detection, clear, individual reset, and Reset All (dynamically reflected in toolbar tooltips, submenu badges, and Command Palette).
+  - **AI Custom**: Register up to 5 AI buttons on the Format Toolbar (24-icon selector, hover name, custom AI prompt, independent **Copy to clipboard** and **Replace document/selection** checkboxes, inline **Shortcut Key** assignment, optional **Long-Press / Right-Click Submenus** with up to 10 items per button, reordering, deletion, and reset to default **AI Translate** preset).
   - **AI & Browser**: AI Folder Access, Built-in Browser toggle & **Home URL (Initial Page)**, External Live Preview toggle, port & LAN sharing (with QR code display), and **Allow LAN access to Project Dev Server** (`projectServerAllowLan`).
   - **Reset & Data**: **Export / Import JSON Backup** (selectively save/restore App & Editor settings, AI config & presets with optional API key exclusion, Custom Snippets, Templates, and Keybindings with merge/replace), **Reset Settings to Defaults**, and **Clear User Data & Caches** (also clears the LRU in-memory image cache).
 
@@ -263,7 +266,7 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 
 ### Key Shortcuts
 
-> Most commands—including **Copy as Rich Text**, **Export Word (`.docx`)**, **Insert Citation / Link Card / Footnote**, **Open Knowledge Graph**, **Find Unused Workspace Images**, and **Open Git Panel**—can be freely customized or assigned in **Settings → Keybindings**.
+> **112 built-in commands**—including direct mode switches, layout & panel toggles, Markdown formatting, data formatters, Git, exports, and **every registered AI Custom button and enabled submenu item**—can be freely customized or assigned in **Settings → Keybindings** (and AI Custom items can also be edited directly inside **Settings → AI Custom**).
 
 | Action | macOS | Windows / Linux |
 | :--- | :--- | :--- |
@@ -288,7 +291,8 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
 | Rectangular Selection | `Option + Drag` | `Alt + Drag` |
 | Bold / Italic | `⌘ + B` / `⌘ + I` | `Ctrl + B` / `Ctrl + I` |
 | Zoom In / Zoom Out / Reset (`25%`–`400%`) | `⌘ + +` / `⌘ + -` / `⌘ + 0` | `Ctrl + +` / `Ctrl + -` / `Ctrl + 0` |
-| Switch Mode (Simple/Basic/Advanced) | `⌘ + \` | `Ctrl + \` |
+| Switch Mode (Cycle Simple/Basic/Advanced) | `⌘ + \` | `Ctrl + \` |
+| Switch to Simple / Basic / Advanced Mode | `⌘ + ⌥ + 1` / `2` / `3` | `Ctrl + Alt + 1` / `2` / `3` |
 | Toggle Zen Mode | `⌘ + ⇧ + F` | `Ctrl + Shift + F` |
 | Send AI Chat Message | `⌘ + Enter` | `Ctrl + Enter` |
 | Built-in Browser: URL Bar / Reload / Back & Forward / DevTools | `⌘ + L` / `F5`, `⌘ + R` / `Alt + ←`・`→` / `F12` | `Ctrl + L` / `F5`, `Ctrl + R` / `Alt + ←`・`→` / `F12` |

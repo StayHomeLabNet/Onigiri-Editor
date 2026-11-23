@@ -35,6 +35,12 @@ function clampZoomValue(val: number): number {
   return Math.max(25, Math.min(400, Math.round(val)));
 }
 
+export function getNextStatusBarMode(mode: AppMode): AppMode {
+  if (mode === 'simple') return 'basic';
+  if (mode === 'basic') return 'advanced';
+  return 'basic';
+}
+
 interface StatusBarProps {
   t: Translations;
   locale: Locale;
@@ -61,7 +67,7 @@ interface StatusBarProps {
   zoomPercent: number;
   onChangeZoom: (nextZoom: number) => void;
   topBarHidden?: boolean;
-  onSwitchToBasic?: () => void;
+  onChangeMode?: (mode: AppMode) => void;
   onOpenSettings?: () => void;
   onOpenGoToLine?: () => void;
   isRecordingMacro?: boolean;
@@ -104,7 +110,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   zoomPercent,
   onChangeZoom,
   topBarHidden,
-  onSwitchToBasic,
+  onChangeMode,
   onOpenSettings,
   onOpenGoToLine,
   isRecordingMacro,
@@ -769,16 +775,24 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
         {topBarHidden && (
           <>
-            {mode === 'simple' && onSwitchToBasic && (
-              <button
-                type="button"
-                className="status-btn"
-                onClick={onSwitchToBasic}
-                title={`${t.modes.basic} (${formatShortcut('⌘+\\')})`}
-              >
-                {t.modes.simple} → {t.modes.basic}
-              </button>
-            )}
+            {onChangeMode && (() => {
+              const nextMode = getNextStatusBarMode(mode);
+              const currentLabel = t.modes[mode];
+              const nextLabel = t.modes[nextMode];
+              return (
+                <button
+                  type="button"
+                  className="status-btn status-mode-switch-btn"
+                  onClick={() => onChangeMode(nextMode)}
+                  title={`${t.status.switchModeTitle.replace('{mode}', nextLabel)} (${formatShortcut('⌘+\\')})`}
+                  aria-label={`${currentLabel} → ${nextLabel}`}
+                >
+                  <span className="status-mode-current">{currentLabel}</span>
+                  <span className="status-mode-arrow" aria-hidden="true">→</span>
+                  <span className="status-mode-next">{nextLabel}</span>
+                </button>
+              );
+            })()}
             {onOpenSettings && (
               <button
                 type="button"

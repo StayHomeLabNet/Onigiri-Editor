@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v135">What's New in v1.3.5</a> ・
+    <a href="#whats-new-in-v136">What's New in v1.3.6</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.3.5-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.3.6-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,20 +39,21 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.3.5`
+Current version: `v1.3.6`
 
 ## Key Features
 
-- **Three UI Modes (`⌘\` / `Ctrl+\`)**:
+- **Three UI Modes (`⌘\` / `Ctrl+\`, or direct `⌘⌥1` / `⌘⌥2` / `⌘⌥3`)**:
   - **Simple Mode**: Ultra-minimal single-pane editor with distraction-free focus and automatic file-extension syntax highlighting.
   - **Basic Mode**: Clean editor + bidirectional live preview with synchronized scrolling and essential formatting controls.
   - **Advanced Mode**: Multi-tab editing (with pinning, drag-reordering, side-by-side dual editor & 2-tab diff compare), collapsible workspace folder explorer (Git status badges, tree D&D relative links, context menu, image gallery & **Unused Image Cleaner**), **Knowledge tab** (`[[WikiLinks]]`, Backlinks, `#tag` browser & **Interactive Knowledge Graph / Broken Link Diagnostics**), dedicated **Git Source Control tab** (Stage/Unstage/Discard, inline diff, Commit with **AI Commit Message**, Pull/Push), cross-folder Regex Grep & Replace (`⌘⇧G`), dev-server integration, snapshots, and AI workspace tools.
+  - **Header-Hidden Status Bar Switcher**: When the top header bar is hidden in any mode, the Status Bar shows a compact 1-click transition button (`Simple → Basic`, `Basic → Advanced`, `Advanced → Basic`).
 - **Bidirectional Visual Editing, Citations, Slide Mode & Writing Workflow**: Edit Markdown in CodeMirror 6 (left) or TipTap visual WYSIWYG (right) with real-time line/block highlights, **Slash Commands (`/`)**, **Custom Snippets**, **Auto TOC**, **Clipboard Image Paste Auto-Save (with auto-migration on first save)**, **Citations, Footnotes, BibTeX / DOI Lookup, Link Cards & URL Auto-Title Paste**, **Daily Notes & Templates**, **URL Web Clipper**, and **Markdown Slide Presentation Mode**.
 - **100+ Language Syntax Highlighting, Structured Data & Visual Previews**: Built-in support for Markdown, PHP, TypeScript/JavaScript, Python, Rust, SQL, HTML, CSS, YAML, JSON, CSV/TSV, SVG, and more—clickable Status Bar language override, **CSV/TSV interactive table preview**, **JSON/YAML/ENV formatting & conversion**, enhanced **SVG (zoom/background/PNG copy)** & **HTML Visual/Source preview**, **Mermaid & KaTeX SVG/PNG export**, code folding, persisted **Line Bookmarks (`F2`)**, **Focus Mode**, `⌘D` multi-occurrence selection, 7 syntax presets, and 10 per-token color pickers.
-- **Built-in AI Chat (Per-Tab Threads), Toolbar AI Custom Buttons, Document Review & Diff Preview**:
-  - Supports **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** with model selection, **per-tab or shared chat threads**, **Export Chat as `.md` Note**, live streaming progress & Stop/Cancel, folder permission pill, **Inline AI Selection Edit (`⌘⇧E`)**, **Toolbar AI Custom Buttons** (register up to 5 one-click AI prompt buttons with custom icons, hover tooltips, and independent copy-to-clipboard / immediate replace options—preloaded with an **AI Translate** preset), and **Proofread & Document Review**.
+- **Built-in AI Chat (Per-Tab Threads), Apple Foundation Models (macOS), Toolbar AI Custom Buttons & Submenus, Document Review & Diff Preview**:
+  - Supports **Apple Foundation Models (Apple Intelligence on-device, macOS 26+ only)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** with model selection, **per-tab or shared chat threads**, **Export Chat as `.md` Note**, live streaming progress & Stop/Cancel, folder permission pill, **Inline AI Selection Edit (`⌘⇧E`)**, **Toolbar AI Custom Buttons & Long-Press / Right-Click Submenus** (register up to 5 primary buttons + up to 10 submenu items each, with custom icons, prompts, copy/replace checkboxes, and per-item keyboard shortcuts—preloaded with an **AI Translate** preset), and **Proofread & Document Review**.
   - Shows a **line-by-line Diff Preview Modal** before applying AI document/selection replacements (with optional pre-apply snapshot) or workspace file writes.
-- **Project-Scoped Session Restore, `.editorconfig` / `.onigiri.json`, Keybindings & Backup**: Saves and restores open tabs, unsaved drafts, cursor & scroll positions, folding state, bookmarks, language overrides, recent history, and window geometry per workspace folder across restarts; auto-applies hierarchical **`.editorconfig`** & **`.onigiri.json`** project rules; lets you customize shortcuts across 27 commands (**Settings → Keybindings**); and supports selective **JSON Settings / AI / Snippets / Templates / Keybindings Backup Export & Import** plus granular **Factory Reset & Cache Cleaner**.
+- **Project-Scoped Session Restore, `.editorconfig` / `.onigiri.json`, Keybindings & Backup**: Saves and restores open tabs, unsaved drafts, cursor & scroll positions, folding state, bookmarks, language overrides, recent history, and window geometry per workspace folder across restarts; auto-applies hierarchical **`.editorconfig`** & **`.onigiri.json`** project rules; lets you customize shortcuts across **112 built-in commands + dynamic AI Custom buttons & submenus** (**Settings → Keybindings** with category filter chips and conflict detection); and supports selective **JSON Settings / AI / Snippets / Templates / Keybindings Backup Export & Import** plus granular **Factory Reset & Cache Cleaner**.
 - **External File Change Detection & Conflict Banner**: Watches open files on disk (including changes from external editors or AI CLIs)—auto-reloading clean tabs or displaying a conflict banner with **Reload**, **Compare Diff**, and **Keep Mine** actions when unsaved edits exist.
 - **Web Dev & Dual Browser Preview (Monorepo Multi-Server, Custom Port, AI Log Diagnostics, QR & LAN Sharing)**:
   - Auto-detects Vite, Next.js, Astro, Nuxt, Laravel, WordPress, PHP, Django, FastAPI, Flask, Streamlit, Python backends, Hugo, MkDocs, Docker Compose, monorepo subprojects, and static projects, runs pre-flight environment diagnostics, supports **simultaneous multi-server execution across monorepo targets** (e.g. `gui` frontend + `engine` backend with individual running pills and stop controls), and lets you select **Target Folder**, **Script**, and custom **Port (`1–65535`)** with collapsible live **`> Logs`** console output (Copy, Clear, error auto-highlighting & 1-click **Ask AI** diagnosis).
@@ -99,13 +100,29 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.3.5
+## What's New in v1.3.6
+
+- **macOS Only: Apple Foundation Models (Apple Intelligence) AI Provider**:
+  - Select **Apple Foundation Models** under **Local AI** on macOS (Apple Silicon, macOS 26+ with Apple Intelligence enabled; weak-linked so older macOS versions continue running safely) to run private on-device inference offline for free.
+  - Supports both **Default** and **Content Transformations (Permissive)** guardrails, live streaming progress, cancellation, and a 1-click **Open System Settings** button in Connection Support across AI Chat, Inline AI Edit, and AI Custom buttons.
+- **AI Custom Buttons: Long-Press / Right-Click Submenus (Up to 10 Items per Button)**:
+  - Long-pressing (~0.4s) or right-clicking any AI Custom button with submenus enabled smoothly opens a downward animated popover list of submenu actions (while normal click executes the parent button).
+  - Toggle submenus per button in **Settings → AI Custom** (off by default) to configure up to 10 submenu items—each with its own 24-icon picker, label, AI prompt, and independent **Copy to clipboard** / **Replace document (or selection)** checkboxes.
+- **All-Mode Status Bar Mode Switcher (When Header Bar Is Hidden)**:
+  - Displays a compact one-step mode switcher in the Status Bar whenever the top header bar is hidden: `Simple → Basic`, `Basic → Advanced`, and `Advanced → Basic`.
+- **Keyboard Shortcuts Expansion (112 Built-in Commands + AI Custom & Submenu Shortcuts)**:
+  - Added direct mode shortcuts (`⌘⌥1` Simple / `⌘⌥2` Basic / `⌘⌥3` Advanced) and expanded **Settings → Keybindings** to **112 customizable commands** with **category filter chips**, plus **dynamic shortcuts for every AI Custom button and enabled submenu item** (editable in both **Settings → Keybindings** and **Settings → AI Custom**, displayed on toolbar tooltips, submenu badges, and Command Palette) and macOS `⌥` physical-code key matching.
+
+<details>
+<summary>Previous release: v1.3.5</summary>
 
 - **Toolbar AI Custom Buttons (Up to 5 Configurable One-Click AI Actions)**:
   - Register up to **5 custom AI buttons** directly in the Format Toolbar (displayed to the right of the formatting buttons across **Simple**, **Basic**, and **Advanced** modes whenever the toolbar is visible).
   - **Built-in Default Preset (`AI翻訳` / AI Translate)**: Ships ready to use with 1 default button that automatically translates English → Japanese or Japanese → English and replaces the target text with only the translation result.
   - **Dedicated `Settings → AI Custom` Tab**: Add, reorder, edit, delete, or reset buttons with a **24-icon visual Lucide picker**, **custom hover tooltip name**, **AI prompt editor**, and independent **Copy to clipboard** / **Replace document (or selection)** checkboxes (usable separately or together).
   - **Smart Selection/Document Targeting, Instant Undoable Replace & Cancel**: Sends the **selected text** when text is highlighted, or the **entire document** when nothing is selected, using your active AI provider/model. Immediate replacements push onto CodeMirror's undo stack (`⌘Z` / `Ctrl+Z` reverts in one step), and clicking a running button's spinner cancels the request.
+
+</details>
 
 <details>
 <summary>Previous release: v1.3.4</summary>

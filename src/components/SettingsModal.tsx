@@ -35,13 +35,16 @@ import { AiCustomIcon } from './AiCustomIcon';
 import {
   AI_CUSTOM_ICON_OPTIONS,
   MAX_AI_CUSTOM_BUTTONS,
+  MAX_AI_CUSTOM_SUBMENU_ITEMS,
   cloneDefaultAiCustomButtons,
   createNewAiCustomButton,
+  createNewAiCustomSubmenuItem,
   normalizeAiCustomButtons,
 } from '../utils/aiCustomButtons';
 import type {
   AiCustomButton,
   AiCustomButtonIconId,
+  AiCustomSubmenuItem,
   AiFolderMode,
   AppUpdateInfo,
   ClearAppCacheResult,
@@ -66,9 +69,12 @@ import { formatShortcut, getHostOs, isTauri } from '../utils/platform';
 import { TEXT_ENCODINGS } from '../utils/encodings';
 import { getAutoPresetForTheme, resolveSyntaxColors, SYNTAX_PRESETS } from '../utils/syntaxThemes';
 import {
+  buildAiCustomKeybindingDefs,
   DEFAULT_KEYBINDING_DEFS,
   findKeybindingConflicts,
   formatKeybindingForDisplay,
+  getAiCustomButtonKeybindingId,
+  getAiCustomSubmenuKeybindingId,
   normalizeKeyboardEventToBinding,
   resolveEffectiveKeybindings,
 } from '../utils/keybindings';
@@ -246,6 +252,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Keybindings editor state
   const [kbFilter, setKbFilter] = useState('');
+  const [kbCategory, setKbCategory] = useState<string>('ALL');
   const [recordingCmdId, setRecordingCmdId] = useState<string | null>(null);
   const [activeLanQrUrl, setActiveLanQrUrl] = useState<string | null>(null);
   const [openIconPickerId, setOpenIconPickerId] = useState<string | null>(null);
@@ -287,8 +294,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleDeleteAiCustomButton = (id: string) => {
-    if (openIconPickerId === id) setOpenIconPickerId(null);
+    if (openIconPickerId === id || openIconPickerId?.startsWith(`${id}::`)) {
+      setOpenIconPickerId(null);
+    }
     updateAiCustomButtons(aiCustomButtons.filter((btn) => btn.id !== id));
+  };
+
+  const handleToggleAiCustomSubmenu = (btn: AiCustomButton, enabled: boolean) => {
+    const existing = btn.submenuItems ?? [];
+    const nextItems =
+      enabled && existing.length === 0
+        ? [createNewAiCustomSubmenuItem(0, locale)]
+        : existing;
+    handlePatchAiCustomButton(btn.id, {
+      submenuEnabled: enabled,
+      submenuItems: nextItems,
+    });
+  };
+
+  const handleAddAiCustomSubmenuItem = (btn: AiCustomButton) => {
+    const existing = btn.submenuItems ?? [];
+    if (existing.length >= MAX_AI_CUSTOM_SUBMENU_ITEMS) return;
+    handlePatchAiCustomButton(btn.id, {
+      submenuItems: [...existing, createNewAiCustomSubmenuItem(existing.length, locale)],
+    });
+  };
+
+  const handlePatchAiCustomSubmenuItem = (
+    btn: AiCustomButton,
+    subId: string,
+    patch: Partial<AiCustomSubmenuItem>
+  ) => {
+    const existing = btn.submenuItems ?? [];
+    handlePatchAiCustomButton(btn.id, {
+      submenuItems: existing.map((item) =>
+        item.id === subId ? { ...item, ...patch } : item
+      ),
+    });
+  };
+
+  const handleMoveAiCustomSubmenuItem = (
+    btn: AiCustomButton,
+    subIndex: number,
+    delta: -1 | 1
+  ) => {
+    const existing = btn.submenuItems ?? [];
+    const nextIdx = subIndex + delta;
+    if (nextIdx < 0 || nextIdx >= existing.length) return;
+    const next = [...existing];
+    const [moved] = next.splice(subIndex, 1);
+    next.splice(nextIdx, 0, moved);
+    handlePatchAiCustomButton(btn.id, { submenuItems: next });
+  };
+
+  const handleDeleteAiCustomSubmenuItem = (btn: AiCustomButton, subId: string) => {
+    const pickerKey = `${btn.id}::${subId}`;
+    if (openIconPickerId === pickerKey) setOpenIconPickerId(null);
+    const existing = btn.submenuItems ?? [];
+    handlePatchAiCustomButton(btn.id, {
+      submenuItems: existing.filter((item) => item.id !== subId),
+    });
   };
 
   const handleResetAiCustomButtons = () => {
@@ -296,9 +361,45 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     updateAiCustomButtons(cloneDefaultAiCustomButtons());
   };
 
+  const aiCustomKeybindingDefs = useMemo(
+    () =>
+      buildAiCustomKeybindingDefs(
+        aiCustomButtons,
+        t.settingsModal.aiCustom.defaultButtonName,
+        t.settingsModal.aiCustom.submenuDefaultName
+      ),
+    [
+      aiCustomButtons,
+      t.settingsModal.aiCustom.defaultButtonName,
+      t.settingsModal.aiCustom.submenuDefaultName,
+    ]
+  );
+  const allKeybindingDefs = useMemo(
+    () => [...DEFAULT_KEYBINDING_DEFS, ...aiCustomKeybindingDefs],
+    [aiCustomKeybindingDefs]
+  );
+  const keybindingLabelById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const def of allKeybindingDefs) {
+      map[def.id] = def.label ?? t.settingsModal.keybindings.commands[def.id] ?? def.id;
+    }
+    return map;
+  }, [allKeybindingDefs, t.settingsModal.keybindings.commands]);
+  const keybindingCategories = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    for (const def of allKeybindingDefs) {
+      if (!seen.has(def.category)) {
+        seen.add(def.category);
+        list.push(def.category);
+      }
+    }
+    return list;
+  }, [allKeybindingDefs]);
+
   const effectiveKeybindings = useMemo(
-    () => resolveEffectiveKeybindings(customKeybindings),
-    [customKeybindings]
+    () => resolveEffectiveKeybindings(customKeybindings, aiCustomKeybindingDefs),
+    [customKeybindings, aiCustomKeybindingDefs]
   );
   const keybindingConflicts = useMemo(
     () => findKeybindingConflicts(effectiveKeybindings),
@@ -327,7 +428,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
       const nextBinding = normalizeKeyboardEventToBinding(e);
       if (!nextBinding) return;
-      const def = DEFAULT_KEYBINDING_DEFS.find((d) => d.id === recordingCmdId);
+      const def = allKeybindingDefs.find((d) => d.id === recordingCmdId);
       const nextMap = { ...customKeybindings };
       if (def && nextBinding === def.defaultBinding) {
         delete nextMap[recordingCmdId];
@@ -339,7 +440,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [open, recordingCmdId, customKeybindings, onCustomKeybindingsChange]);
+  }, [open, recordingCmdId, customKeybindings, onCustomKeybindingsChange, allKeybindingDefs]);
 
   if (!open) return null;
 
@@ -1431,11 +1532,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     placeholder={t.settingsModal.keybindings.searchPlaceholder}
                   />
 
+                  <div className="keybindings-category-chips" role="tablist">
+                    <button
+                      type="button"
+                      className={`mini-pill-btn ${kbCategory === 'ALL' ? 'is-active' : ''}`}
+                      onClick={() => setKbCategory('ALL')}
+                    >
+                      {t.settingsModal.keybindings.allCategories}
+                    </button>
+                    {keybindingCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        className={`mini-pill-btn ${kbCategory === cat ? 'is-active' : ''}`}
+                        onClick={() => setKbCategory(cat)}
+                      >
+                        {t.settingsModal.keybindings.categories[cat] || cat}
+                      </button>
+                    ))}
+                  </div>
+
                   <div className="keybindings-list">
-                    {DEFAULT_KEYBINDING_DEFS.filter((def) => {
+                    {allKeybindingDefs.filter((def) => {
+                      if (kbCategory !== 'ALL' && def.category !== kbCategory) return false;
                       const q = kbFilter.trim().toLowerCase();
                       if (!q) return true;
-                      const label = (t.settingsModal.keybindings.commands[def.id] || def.id).toLowerCase();
+                      const label = (keybindingLabelById[def.id] || def.id).toLowerCase();
                       const cat = (t.settingsModal.keybindings.categories[def.category] || def.category).toLowerCase();
                       const binding = (effectiveKeybindings[def.id] || '').toLowerCase();
                       const disp = formatKeybindingForDisplay(effectiveKeybindings[def.id]).toLowerCase();
@@ -1452,12 +1574,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       const isRecording = recordingCmdId === def.id;
                       const conflictIds = keybindingConflicts[def.id] || [];
                       const conflictNames = conflictIds
-                        .map((cid) => t.settingsModal.keybindings.commands[cid] || cid)
+                        .map((cid) => keybindingLabelById[cid] || cid)
                         .join(', ');
                       const catLabel =
                         t.settingsModal.keybindings.categories[def.category] || def.category;
-                      const cmdLabel =
-                        t.settingsModal.keybindings.commands[def.id] || def.id;
+                      const cmdLabel = keybindingLabelById[def.id] || def.id;
 
                       return (
                         <div
@@ -1743,6 +1864,374 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <div className="ai-custom-warn">
                               <AlertTriangle size={12} />
                               <span>{t.settingsModal.aiCustom.noOutputWarning}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {onCustomKeybindingsChange && (() => {
+                          const kbId = getAiCustomButtonKeybindingId(btn.id);
+                          const currentBinding = effectiveKeybindings[kbId] || '';
+                          const isRecording = recordingCmdId === kbId;
+                          const conflictIds = keybindingConflicts[kbId] || [];
+                          const conflictNames = conflictIds
+                            .map((cid) => keybindingLabelById[cid] || cid)
+                            .join(', ');
+                          return (
+                            <div className="field-row">
+                              <label>{t.settingsModal.aiCustom.shortcutLabel}</label>
+                              <div
+                                className={`ai-custom-shortcut-row ${isRecording ? 'is-recording' : ''} ${
+                                  conflictIds.length > 0 ? 'has-conflict' : ''
+                                }`}
+                              >
+                                <div className="ai-custom-shortcut-controls">
+                                  <kbd className={`keybinding-kbd ${!currentBinding ? 'is-empty' : ''}`}>
+                                    {isRecording
+                                      ? t.settingsModal.keybindings.pressKeysPrompt
+                                      : currentBinding
+                                        ? formatKeybindingForDisplay(currentBinding)
+                                        : t.settingsModal.keybindings.unassigned}
+                                  </kbd>
+                                  {conflictIds.length > 0 && (
+                                    <span className="keybinding-conflict">
+                                      <AlertTriangle size={11} />
+                                      {t.settingsModal.keybindings.conflictWarning.replace(
+                                        '{others}',
+                                        conflictNames
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="ai-custom-shortcut-controls">
+                                  <button
+                                    type="button"
+                                    className="mini-pill-btn"
+                                    onClick={() =>
+                                      setRecordingCmdId(isRecording ? null : kbId)
+                                    }
+                                  >
+                                    {isRecording
+                                      ? t.settingsModal.keybindings.cancelRecordBtn
+                                      : t.settingsModal.keybindings.editBtn}
+                                  </button>
+                                  {currentBinding && (
+                                    <button
+                                      type="button"
+                                      className="mini-pill-btn"
+                                      onClick={() => {
+                                        setRecordingCmdId(null);
+                                        const next = { ...customKeybindings };
+                                        delete next[kbId];
+                                        onCustomKeybindingsChange(next);
+                                      }}
+                                    >
+                                      {t.settingsModal.keybindings.clearBtn}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        <div className="ai-custom-submenu-section">
+                          <div className="ai-custom-submenu-toggle-row">
+                            <label className="check-row">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(btn.submenuEnabled)}
+                                onChange={(e) =>
+                                  handleToggleAiCustomSubmenu(btn, e.target.checked)
+                                }
+                              />
+                              <span>{t.settingsModal.aiCustom.submenuEnableLabel}</span>
+                            </label>
+                            {btn.submenuEnabled && (
+                              <div className="ai-custom-submenu-header-actions">
+                                <span className="ai-custom-count-badge">
+                                  {(btn.submenuItems ?? []).length} / {MAX_AI_CUSTOM_SUBMENU_ITEMS}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="secondary-btn compact-btn"
+                                  disabled={
+                                    (btn.submenuItems ?? []).length >= MAX_AI_CUSTOM_SUBMENU_ITEMS
+                                  }
+                                  onClick={() => handleAddAiCustomSubmenuItem(btn)}
+                                  title={
+                                    (btn.submenuItems ?? []).length >= MAX_AI_CUSTOM_SUBMENU_ITEMS
+                                      ? t.settingsModal.aiCustom.submenuMaxReachedHint
+                                      : undefined
+                                  }
+                                >
+                                  <Plus size={12} />
+                                  <span>{t.settingsModal.aiCustom.submenuAddBtn}</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {btn.submenuEnabled && (
+                            <div className="ai-custom-submenu-list">
+                              {(btn.submenuItems ?? []).length === 0 ? (
+                                <div className="ai-custom-submenu-empty">
+                                  <span className="ai-hint-text">
+                                    {t.settingsModal.aiCustom.submenuEmptyState}
+                                  </span>
+                                </div>
+                              ) : (
+                                (btn.submenuItems ?? []).map((sub, subIdx) => {
+                                  const subPickerKey = `${btn.id}::${sub.id}`;
+                                  const subIconPickerOpen = openIconPickerId === subPickerKey;
+                                  const subNoOutputSelected =
+                                    !sub.copyToClipboard && !sub.replaceContent;
+                                  return (
+                                    <div key={sub.id} className="ai-custom-submenu-card">
+                                      <div className="ai-custom-card-header">
+                                        <div className="ai-custom-card-title">
+                                          <span className="ai-custom-slot-badge">
+                                            {t.settingsModal.aiCustom.submenuSlotLabel.replace(
+                                              '{n}',
+                                              String(subIdx + 1)
+                                            )}
+                                          </span>
+                                          <span
+                                            className="ai-custom-preview-chip"
+                                            title={sub.name || undefined}
+                                          >
+                                            <AiCustomIcon icon={sub.icon} size={13} />
+                                            <span>
+                                              {sub.name.trim() ||
+                                                t.settingsModal.aiCustom.submenuDefaultName}
+                                            </span>
+                                          </span>
+                                        </div>
+                                        <div className="ai-custom-card-actions">
+                                          <button
+                                            type="button"
+                                            className="icon-btn"
+                                            disabled={subIdx === 0}
+                                            onClick={() =>
+                                              handleMoveAiCustomSubmenuItem(btn, subIdx, -1)
+                                            }
+                                            title={t.settingsModal.aiCustom.moveUpTitle}
+                                          >
+                                            <ArrowUp size={12} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="icon-btn"
+                                            disabled={
+                                              subIdx === (btn.submenuItems ?? []).length - 1
+                                            }
+                                            onClick={() =>
+                                              handleMoveAiCustomSubmenuItem(btn, subIdx, 1)
+                                            }
+                                            title={t.settingsModal.aiCustom.moveDownTitle}
+                                          >
+                                            <ArrowDown size={12} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="icon-btn is-danger"
+                                            onClick={() =>
+                                              handleDeleteAiCustomSubmenuItem(btn, sub.id)
+                                            }
+                                            title={t.settingsModal.aiCustom.deleteTitle}
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      <div className="ai-custom-row-main">
+                                        <div className="field-row ai-custom-icon-field">
+                                          <label>{t.settingsModal.aiCustom.iconLabel}</label>
+                                          <button
+                                            type="button"
+                                            className={`ai-custom-icon-trigger ${subIconPickerOpen ? 'is-open' : ''}`}
+                                            onClick={() =>
+                                              setOpenIconPickerId((cur) =>
+                                                cur === subPickerKey ? null : subPickerKey
+                                              )
+                                            }
+                                            title={t.settingsModal.aiCustom.chooseIconTitle}
+                                          >
+                                            <AiCustomIcon icon={sub.icon} size={15} />
+                                            <ChevronDown size={12} />
+                                          </button>
+                                        </div>
+
+                                        <div className="field-row ai-custom-name-field">
+                                          <label>{t.settingsModal.aiCustom.submenuNameLabel}</label>
+                                          <input
+                                            type="text"
+                                            className="text-input"
+                                            value={sub.name}
+                                            placeholder={
+                                              t.settingsModal.aiCustom.submenuNamePlaceholder
+                                            }
+                                            onChange={(e) =>
+                                              handlePatchAiCustomSubmenuItem(btn, sub.id, {
+                                                name: e.target.value,
+                                              })
+                                            }
+                                          />
+                                        </div>
+                                      </div>
+
+                                      {subIconPickerOpen && (
+                                        <div className="ai-custom-icon-grid" role="listbox">
+                                          {AI_CUSTOM_ICON_OPTIONS.map((opt) => {
+                                            const selected = sub.icon === opt.id;
+                                            const optLabel =
+                                              locale === 'ja' ? opt.labelJa : opt.labelEn;
+                                            return (
+                                              <button
+                                                key={opt.id}
+                                                type="button"
+                                                className={`ai-custom-icon-option ${selected ? 'is-selected' : ''}`}
+                                                title={optLabel}
+                                                aria-label={optLabel}
+                                                aria-selected={selected}
+                                                onClick={() => {
+                                                  handlePatchAiCustomSubmenuItem(btn, sub.id, {
+                                                    icon: opt.id as AiCustomButtonIconId,
+                                                  });
+                                                  setOpenIconPickerId(null);
+                                                }}
+                                              >
+                                                <AiCustomIcon icon={opt.id} size={15} />
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+
+                                      <div className="field-row">
+                                        <label>{t.settingsModal.aiCustom.promptLabel}</label>
+                                        <textarea
+                                          className="text-input ai-custom-prompt-textarea is-compact"
+                                          rows={3}
+                                          value={sub.prompt}
+                                          placeholder={t.settingsModal.aiCustom.promptPlaceholder}
+                                          onChange={(e) =>
+                                            handlePatchAiCustomSubmenuItem(btn, sub.id, {
+                                              prompt: e.target.value,
+                                            })
+                                          }
+                                        />
+                                      </div>
+
+                                      <div className="field-row">
+                                        <label>{t.settingsModal.aiCustom.outputHandlingLabel}</label>
+                                        <div className="ai-custom-output-checks">
+                                          <label className="check-row">
+                                            <input
+                                              type="checkbox"
+                                              checked={sub.copyToClipboard}
+                                              onChange={(e) =>
+                                                handlePatchAiCustomSubmenuItem(btn, sub.id, {
+                                                  copyToClipboard: e.target.checked,
+                                                })
+                                              }
+                                            />
+                                            <span>
+                                              {t.settingsModal.aiCustom.copyToClipboardLabel}
+                                            </span>
+                                          </label>
+                                          <label className="check-row">
+                                            <input
+                                              type="checkbox"
+                                              checked={sub.replaceContent}
+                                              onChange={(e) =>
+                                                handlePatchAiCustomSubmenuItem(btn, sub.id, {
+                                                  replaceContent: e.target.checked,
+                                                })
+                                              }
+                                            />
+                                            <span>
+                                              {t.settingsModal.aiCustom.replaceContentLabel}
+                                            </span>
+                                          </label>
+                                        </div>
+                                        {subNoOutputSelected && (
+                                          <div className="ai-custom-warn">
+                                            <AlertTriangle size={12} />
+                                            <span>{t.settingsModal.aiCustom.noOutputWarning}</span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {onCustomKeybindingsChange && (() => {
+                                        const subKbId = getAiCustomSubmenuKeybindingId(btn.id, sub.id);
+                                        const currentBinding = effectiveKeybindings[subKbId] || '';
+                                        const isRecording = recordingCmdId === subKbId;
+                                        const conflictIds = keybindingConflicts[subKbId] || [];
+                                        const conflictNames = conflictIds
+                                          .map((cid) => keybindingLabelById[cid] || cid)
+                                          .join(', ');
+                                        return (
+                                          <div className="field-row">
+                                            <label>{t.settingsModal.aiCustom.shortcutLabel}</label>
+                                            <div
+                                              className={`ai-custom-shortcut-row ${isRecording ? 'is-recording' : ''} ${
+                                                conflictIds.length > 0 ? 'has-conflict' : ''
+                                              }`}
+                                            >
+                                              <div className="ai-custom-shortcut-controls">
+                                                <kbd className={`keybinding-kbd ${!currentBinding ? 'is-empty' : ''}`}>
+                                                  {isRecording
+                                                    ? t.settingsModal.keybindings.pressKeysPrompt
+                                                    : currentBinding
+                                                      ? formatKeybindingForDisplay(currentBinding)
+                                                      : t.settingsModal.keybindings.unassigned}
+                                                </kbd>
+                                                {conflictIds.length > 0 && (
+                                                  <span className="keybinding-conflict">
+                                                    <AlertTriangle size={11} />
+                                                    {t.settingsModal.keybindings.conflictWarning.replace(
+                                                      '{others}',
+                                                      conflictNames
+                                                    )}
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <div className="ai-custom-shortcut-controls">
+                                                <button
+                                                  type="button"
+                                                  className="mini-pill-btn"
+                                                  onClick={() =>
+                                                    setRecordingCmdId(isRecording ? null : subKbId)
+                                                  }
+                                                >
+                                                  {isRecording
+                                                    ? t.settingsModal.keybindings.cancelRecordBtn
+                                                    : t.settingsModal.keybindings.editBtn}
+                                                </button>
+                                                {currentBinding && (
+                                                  <button
+                                                    type="button"
+                                                    className="mini-pill-btn"
+                                                    onClick={() => {
+                                                      setRecordingCmdId(null);
+                                                      const next = { ...customKeybindings };
+                                                      delete next[subKbId];
+                                                      onCustomKeybindingsChange(next);
+                                                    }}
+                                                  >
+                                                    {t.settingsModal.keybindings.clearBtn}
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })()}
+                                    </div>
+                                  );
+                                })
+                              )}
                             </div>
                           )}
                         </div>

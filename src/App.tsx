@@ -20,6 +20,7 @@ import {
 import type {
   AiCleanOptions,
   AiCustomButton,
+  AiCustomSubmenuItem,
   AiProviderConfig,
   AppMode,
   ClearAppCacheResult,
@@ -103,7 +104,11 @@ import {
   type OnigiriSettingsBackup,
 } from './utils/settingsBackup';
 import {
+  buildAiCustomKeybindingDefs,
+  DEFAULT_KEYBINDING_DEFS,
   formatKeybindingForDisplay,
+  getAiCustomButtonKeybindingId,
+  getAiCustomSubmenuKeybindingId,
   loadCustomKeybindings,
   matchesKeybinding,
   resolveEffectiveKeybindings,
@@ -112,6 +117,7 @@ import {
 import {
   cleanAiCustomResponse,
   cloneDefaultAiCustomButtons,
+  getActiveSubmenuItems,
   normalizeAiCustomButtons,
   resolveAiProviderCallOptions,
 } from './utils/aiCustomButtons';
@@ -139,6 +145,7 @@ import {
   gitStageFiles,
   gitUnstageFiles,
   indexWorkspaceNotes,
+  isMacOs,
   isTauri,
   migrateTempImagesOnSave,
   openFolderDialog,
@@ -424,9 +431,13 @@ export function App() {
   const [cleanOptions, setCleanOptions] = useState<AiCleanOptions>(() =>
     loadJson('onigiri-markdown.cleanOpts', DEFAULT_CLEAN_OPTS)
   );
-  const [aiConfig, setAiConfig] = useState<AiProviderConfig>(() =>
-    loadJson('onigiri-markdown.aiConfig', DEFAULT_AI_CONFIG)
-  );
+  const [aiConfig, setAiConfig] = useState<AiProviderConfig>(() => {
+    const loaded = loadJson('onigiri-markdown.aiConfig', DEFAULT_AI_CONFIG);
+    if (!isMacOs() && loaded.provider === 'apple-foundation-models') {
+      return { ...loaded, provider: DEFAULT_AI_CONFIG.provider };
+    }
+    return loaded;
+  });
 
   const initialSessionRef = useRef<ReturnType<typeof buildInitialSessionState> | null>(null);
   if (!initialSessionRef.current) {
@@ -459,6 +470,25 @@ export function App() {
   const [customSnippets, setCustomSnippets] = useState<CustomSnippetRecord[]>(() =>
     loadCustomSnippets()
   );
+  // Toolbar AI Custom Buttons (declared early so dynamic shortcuts integrate everywhere)
+  const aiCustomButtons = useMemo(
+    () => normalizeAiCustomButtons(settings.aiCustomButtons),
+    [settings.aiCustomButtons]
+  );
+  const aiCustomKeybindingDefs = useMemo(
+    () =>
+      buildAiCustomKeybindingDefs(
+        aiCustomButtons,
+        t.settingsModal.aiCustom.defaultButtonName,
+        t.settingsModal.aiCustom.submenuDefaultName
+      ),
+    [
+      aiCustomButtons,
+      t.settingsModal.aiCustom.defaultButtonName,
+      t.settingsModal.aiCustom.submenuDefaultName,
+    ]
+  );
+
   const [customKeybindings, setCustomKeybindings] = useState<Record<string, string>>(() =>
     loadCustomKeybindings()
   );
@@ -466,8 +496,8 @@ export function App() {
     saveCustomKeybindings(customKeybindings);
   }, [customKeybindings]);
   const effectiveKeybindings = useMemo(
-    () => resolveEffectiveKeybindings(customKeybindings),
-    [customKeybindings]
+    () => resolveEffectiveKeybindings(customKeybindings, aiCustomKeybindingDefs),
+    [customKeybindings, aiCustomKeybindingDefs]
   );
   const shortcutDisplay = useCallback(
     (id: string) => formatKeybindingForDisplay(effectiveKeybindings[id]),
@@ -3928,16 +3958,25 @@ export function App() {
         if (backup.ai.aiConfig) {
           const importedAi = backup.ai.aiConfig;
           const excludeKeys = Boolean(backup.ai.apiKeysExcluded);
-          setAiConfig((prev) => ({
-            ...DEFAULT_AI_CONFIG,
-            ...prev,
-            ...importedAi,
-            apiKeys: excludeKeys
-              ? { ...prev.apiKeys }
-              : { ...prev.apiKeys, ...(importedAi.apiKeys || {}) },
-            baseUrls: { ...prev.baseUrls, ...(importedAi.baseUrls || {}) },
-            models: { ...(prev.models || {}), ...(importedAi.models || {}) },
-          }));
+          setAiConfig((prev) => {
+            const nextProvider =
+              !isMacOs() && importedAi.provider === 'apple-foundation-models'
+                ? prev.provider === 'apple-foundation-models'
+                  ? DEFAULT_AI_CONFIG.provider
+                  : prev.provider
+                : importedAi.provider ?? prev.provider;
+            return {
+              ...DEFAULT_AI_CONFIG,
+              ...prev,
+              ...importedAi,
+              provider: nextProvider,
+              apiKeys: excludeKeys
+                ? { ...prev.apiKeys }
+                : { ...prev.apiKeys, ...(importedAi.apiKeys || {}) },
+              baseUrls: { ...prev.baseUrls, ...(importedAi.baseUrls || {}) },
+              models: { ...(prev.models || {}), ...(importedAi.models || {}) },
+            };
+          });
         }
         if (backup.ai.cleanOptions) {
           setCleanOptions((prev) => ({ ...prev, ...backup.ai!.cleanOptions }));
@@ -4574,12 +4613,11 @@ export function App() {
     [executeToolbarAction]
   );
 
-  // Toolbar AI Custom Buttons
-  const aiCustomButtons = useMemo(
-    () => normalizeAiCustomButtons(settings.aiCustomButtons),
-    [settings.aiCustomButtons]
-  );
-  const [runningAiCustomId, setRunningAiCustomId] = useState<string | null>(null);
+  // Toolbar AI Custom Buttons runtime state
+  const [runningAiCustom, setRunningAiCustom] = useState<{
+    buttonId: string;
+    label: string;
+  } | null>(null);
   const aiCustomRequestRef = useRef<{
     requestId: string;
     buttonId: string;
@@ -4592,15 +4630,22 @@ export function App() {
     if (!active) return;
     active.cancelled = true;
     aiCustomRequestRef.current = null;
-    setRunningAiCustomId(null);
+    setRunningAiCustom(null);
     void cancelAiChat(active.requestId).catch(() => {});
     notify(t.toasts.aiCustomCancelled.replace('{name}', active.buttonName));
   }, [notify, t.toasts.aiCustomCancelled]);
 
   const handleRunAiCustomButton = useCallback(
-    async (button: AiCustomButton) => {
+    async (
+      button: AiCustomButton | AiCustomSubmenuItem,
+      parentButtonId?: string
+    ) => {
       if (aiCustomRequestRef.current) return;
-      const buttonName = button.name.trim() || t.settingsModal.aiCustom.defaultButtonName;
+      const toolbarButtonId = parentButtonId ?? button.id;
+      const fallbackName = parentButtonId && parentButtonId !== button.id
+        ? t.settingsModal.aiCustom.submenuDefaultName
+        : t.settingsModal.aiCustom.defaultButtonName;
+      const buttonName = button.name.trim() || fallbackName;
       const promptText = button.prompt.trim();
       if (!promptText) {
         notify(t.toasts.aiCustomEmptyPrompt.replace('{name}', buttonName));
@@ -4629,12 +4674,12 @@ export function App() {
       const requestId = `ai-custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const reqState = {
         requestId,
-        buttonId: button.id,
+        buttonId: toolbarButtonId,
         buttonName,
         cancelled: false,
       };
       aiCustomRequestRef.current = reqState;
-      setRunningAiCustomId(button.id);
+      setRunningAiCustom({ buttonId: toolbarButtonId, label: buttonName });
       notify(t.toasts.aiCustomRunning.replace('{name}', buttonName));
 
       const callOpts = resolveAiProviderCallOptions(aiConfig);
@@ -4728,7 +4773,7 @@ export function App() {
       } finally {
         if (aiCustomRequestRef.current?.requestId === requestId) {
           aiCustomRequestRef.current = null;
-          setRunningAiCustomId(null);
+          setRunningAiCustom(null);
         }
       }
     },
@@ -4739,6 +4784,7 @@ export function App() {
       notify,
       t.gitPanel.noAiProviderToast,
       t.settingsModal.aiCustom.defaultButtonName,
+      t.settingsModal.aiCustom.submenuDefaultName,
       t.toasts.aiCustomCopied,
       t.toasts.aiCustomEmptyPrompt,
       t.toasts.aiCustomNoOutputTarget,
@@ -5380,6 +5426,260 @@ export function App() {
     tabs,
   ]);
 
+  // Dynamic shortcut command handlers (kept fresh via ref every render)
+  const shortcutHandlersRef = useRef<Record<string, () => void>>({});
+  shortcutHandlersRef.current = {
+    // Mode
+    'mode-simple': () => handleModeChange('simple'),
+    'mode-basic': () => handleModeChange('basic'),
+    'mode-advanced': () => handleModeChange('advanced'),
+    'cycle-mode': () => {
+      const nextMode: AppMode =
+        mode === 'simple' ? 'basic' : mode === 'basic' ? 'advanced' : 'simple';
+      handleModeChange(nextMode);
+    },
+
+    // File
+    'quick-open': () => setShowQuickOpen((v) => !v),
+    'new-file': () => handleNewFile(),
+    'open-file': () => handleOpenFile(),
+    'save-file': () => handleSave(false),
+    'save-as': () => handleSave(true),
+    'open-folder': () => handleOpenFolder(),
+    'close-folder': () => {
+      if (workspaceRoot) handleCloseFolder();
+    },
+    'close-tab': () => handleCloseTab(activeTab.id),
+    'new-file-with-encoding': () => setEncodingModalMode('new'),
+    'reopen-with-encoding': () => {
+      if (activeTab.filePath) {
+        setEncodingModalMode('reopen');
+      } else {
+        notify(t.encoding.noFileToReopen);
+      }
+    },
+    'change-encoding': () => setEncodingModalMode('convert'),
+
+    // View & Layout
+    palette: () => setShowPalette((v) => !v),
+    zen: () => toggleZenMode(),
+    'zoom-in': () => handleZoomIn(),
+    'zoom-out': () => handleZoomOut(),
+    'zoom-reset': () => handleSetZoom(100),
+    'layout-editor': () => setLayout('editor'),
+    'layout-split': () => {
+      if (mode === 'simple') handleModeChange('basic');
+      setLayout('split');
+    },
+    'layout-preview': () => {
+      if (mode === 'simple') handleModeChange('basic');
+      setLayout('preview');
+    },
+    'toggle-sidebar': () => {
+      if (mode !== 'advanced') handleModeChange('advanced');
+      setShowSidebar((v) => !v);
+    },
+    'toggle-inspector': () => {
+      if (mode === 'simple') handleModeChange('basic');
+      setShowInspector((v) => !v);
+    },
+    'toggle-top-bar': () => handleToggleTopBar(),
+    'toggle-format-toolbar': () => handleToggleFormatToolbar(),
+    'toggle-status-bar': () =>
+      setSettings((s) => ({ ...s, showStatusBar: !(s.showStatusBar ?? true) })),
+    'toggle-editor-split': () => handleToggleEditorSplit(),
+    'focus-other-split-pane': () => {
+      if (editorSplitVertical) handleFocusOtherSplitPane();
+    },
+    'toggle-focus-mode': () => handleToggleFocusMode(),
+    'toggle-typewriter-mode': () =>
+      setSettings((s) => ({ ...s, typewriterMode: !s.typewriterMode })),
+    'toggle-sync-scroll': () =>
+      setSettings((s) => ({ ...s, syncScroll: !s.syncScroll })),
+    'toggle-line-numbers': () =>
+      setSettings((s) => ({ ...s, lineNumbers: !s.lineNumbers })),
+    'toggle-ruler': () =>
+      setSettings((s) => ({ ...s, showRuler: !s.showRuler })),
+    'toggle-newline-symbols': () =>
+      setSettings((s) => ({ ...s, showNewlineSymbols: !s.showNewlineSymbols })),
+    'toggle-whitespace-symbols': () =>
+      setSettings((s) => ({ ...s, showWhitespaceSymbols: !s.showWhitespaceSymbols })),
+    'cycle-wrap-mode': () =>
+      setSettings((s) => {
+        const cur = s.wrapMode ?? (s.wordWrap ? 'window' : 'none');
+        const next = cur === 'window' ? 'column' : cur === 'column' ? 'none' : 'window';
+        return { ...s, wrapMode: next, wordWrap: next !== 'none' };
+      }),
+    'compare-tabs': () => {
+      const other = tabs.find((tb) => tb.id !== activeTab.id);
+      if (other) {
+        handleCompareTabWithActive(other.id);
+      } else {
+        notify(t.sideSplit.needTwoTabsToast);
+      }
+    },
+    'dual-editor-side': () => {
+      if (sideTabId) {
+        setSideTabId(null);
+        setGitHeadComparison(null);
+      } else {
+        const other = tabs.find((tb) => tb.id !== activeTab.id);
+        handleOpenTabToSide(other ? other.id : activeTab.id);
+      }
+    },
+
+    // Edit
+    find: () => openFindBar({ target: 'find' }),
+    replace: () => openFindBar({ target: 'replace' }),
+    'go-to-line': () => setShowGoToLine((v) => !v),
+    'copy-rich': () => void handleCopyRichText(),
+    'paste-html': () => void handlePasteHtmlAsMd(),
+    'copy-markdown': () => {
+      void writeClipboardText(activeTab.content);
+      notify(t.toasts.copiedMarkdown);
+    },
+    'copy-html': () => void handleCopyHtml(),
+    'insert-image': () => setShowImageModal(true),
+    'fold-all': () => editorRef.current?.foldAllLines(),
+    'unfold-all': () => editorRef.current?.unfoldAllLines(),
+    'toggle-bookmark': () => getActiveEditorTarget()?.toggleBookmarkAction(),
+    'next-bookmark': () => getActiveEditorTarget()?.nextBookmarkAction(),
+    'prev-bookmark': () => getActiveEditorTarget()?.prevBookmarkAction(),
+    'clear-bookmarks': () => getActiveEditorTarget()?.clearBookmarksAction(),
+    'sort-lines-asc': () => void editorRef.current?.runContextAction('sortLinesAsc'),
+    'sort-lines-desc': () => void editorRef.current?.runContextAction('sortLinesDesc'),
+    'dedupe-lines': () => void editorRef.current?.runContextAction('dedupeLines'),
+    'reverse-lines': () => void editorRef.current?.runContextAction('reverseLines'),
+    'remove-empty-lines': () => void editorRef.current?.runContextAction('removeEmptyLines'),
+
+    // Format
+    bold: () => handleToolbarAction('bold'),
+    italic: () => handleToolbarAction('italic'),
+    strike: () => handleToolbarAction('strike'),
+    code: () => handleToolbarAction('code'),
+    codeblock: () => handleToolbarAction('codeblock'),
+    'heading-1': () => handleToolbarAction('h1'),
+    'heading-2': () => handleToolbarAction('h2'),
+    'heading-3': () => handleToolbarAction('h3'),
+    link: () => handleToolbarAction('link'),
+    ul: () => handleToolbarAction('ul'),
+    ol: () => handleToolbarAction('ol'),
+    task: () => handleToolbarAction('task'),
+    quote: () => handleToolbarAction('quote'),
+    table: () => handleToolbarAction('table'),
+    hr: () => handleToolbarAction('hr'),
+    math: () => handleToolbarAction('math'),
+    mermaid: () => handleToolbarAction('mermaid'),
+    callout: () => handleToolbarAction('callout'),
+
+    // AI
+    'ai-edit-selection': () => handleOpenInlineAiEdit(),
+    'ai-chat-panel': () => {
+      if (mode === 'simple') handleModeChange('basic');
+      setInspectorTab('chat');
+      setShowInspector((v) => !v);
+    },
+    'review-panel': () => {
+      if (mode === 'simple') handleModeChange('basic');
+      setInspectorTab('review');
+      setShowInspector(true);
+    },
+    'ai-clean': () => handleAiClean(),
+
+    // Markdown
+    'insert-citation': () => handleOpenCitationModal(),
+    'insert-update-toc': () => handleInsertOrUpdateToc(),
+    'format-markdown-tables': () =>
+      void editorRef.current?.runContextAction('formatMarkdownTables'),
+    'slide-presentation': () => setShowSlideModal((v) => !v),
+
+    // Note
+    'open-daily-note': () => void handleOpenDailyNote(),
+    'new-from-template': () => setShowTemplateModal((v) => !v),
+    'web-clip-url': () => setShowWebClipModal((v) => !v),
+
+    // Data
+    'format-json': () => void editorRef.current?.runContextAction('formatJson'),
+    'minify-json': () => void editorRef.current?.runContextAction('minifyJson'),
+    'sort-json-keys': () => void editorRef.current?.runContextAction('sortJsonKeys'),
+    'json-to-yaml': () => void editorRef.current?.runContextAction('jsonToYaml'),
+    'yaml-to-json': () => void editorRef.current?.runContextAction('yamlToJson'),
+    'format-env': () => void editorRef.current?.runContextAction('formatEnv'),
+
+    // Browser
+    'toggle-right-browser': () => {
+      if (mode === 'simple') handleModeChange('basic');
+      if (layout === 'editor') setLayout('split');
+      setSettings((s) => ({ ...s, builtinBrowserEnabled: true }));
+      setRightPaneMode((m) => (m === 'browser' ? 'markdown' : 'browser'));
+    },
+    'toggle-external-preview': () => handleToggleExternalPreview(),
+
+    // Workspace & Knowledge & Git
+    'workspace-grep': () => setShowWorkspaceGrep((v) => !v),
+    'unused-assets': () => setShowUnusedAssetsModal((v) => !v),
+    'knowledge-graph': () => setShowKnowledgeGraphModal((v) => !v),
+    'git-panel': () => {
+      if (mode !== 'advanced') handleModeChange('advanced');
+      setShowSidebar(true);
+      setSidebarTab('git');
+      if (workspaceRootRef.current) void refreshGitPanel(workspaceRootRef.current);
+    },
+    'compare-git-head': () => {
+      if (activeTab.filePath) {
+        void handleCompareTabWithGitHead(activeTab.id);
+      }
+    },
+
+    // Macro
+    'macro-toggle-record': () => handleToggleMacroRecording(),
+    'macro-play': () => void handlePlayMacro(),
+    'macro-clear': () => handleClearMacro(),
+
+    // Export
+    'export-docx': () => void handleExportDocx(),
+    'export-html': () => void handleExportHtml(),
+    'export-pdf': () => handleExportPdf(),
+    'print-source': () => handlePrintSource(),
+
+    // Settings & Theme
+    'open-settings': () => {
+      if (showSettings) {
+        setShowSettings(false);
+      } else {
+        openSettingsModal('general');
+      }
+    },
+    'open-settings-keybindings': () => openSettingsModal('keybindings'),
+    'theme-cycle': () => {
+      const order: ThemeId[] = ['light', 'dark', 'sepia', 'midnight'];
+      setTheme((cur) => order[(order.indexOf(cur) + 1) % order.length]);
+    },
+    'lang-toggle': () => setLocale((l) => (l === 'ja' ? 'en' : 'ja')),
+  };
+
+  const aiCustomShortcutRunnerRef = useRef<{
+    buttons: AiCustomButton[];
+    runningButtonId: string | null;
+    run: (action: AiCustomButton | AiCustomSubmenuItem, parentButtonId?: string) => void;
+    cancel: () => void;
+  }>({
+    buttons: aiCustomButtons,
+    runningButtonId: runningAiCustom?.buttonId ?? null,
+    run: (action, parentId) => {
+      void handleRunAiCustomButton(action, parentId);
+    },
+    cancel: handleCancelAiCustom,
+  });
+  aiCustomShortcutRunnerRef.current = {
+    buttons: aiCustomButtons,
+    runningButtonId: runningAiCustom?.buttonId ?? null,
+    run: (action, parentId) => {
+      void handleRunAiCustomButton(action, parentId);
+    },
+    cancel: handleCancelAiCustom,
+  };
+
   // Global keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -5395,43 +5695,57 @@ export function App() {
         return;
       }
       const meta = e.metaKey || e.ctrlKey;
-      if (matchesKeybinding(e, effectiveKeybindings['save-file'])) {
-        e.preventDefault();
-        handleSave(false);
-      } else if (matchesKeybinding(e, effectiveKeybindings['save-as'])) {
-        e.preventDefault();
-        handleSave(true);
-      } else if (matchesKeybinding(e, effectiveKeybindings['open-file'])) {
-        e.preventDefault();
-        handleOpenFile();
-      } else if (matchesKeybinding(e, effectiveKeybindings['new-file'])) {
-        e.preventDefault();
-        handleNewFile();
-      } else if (matchesKeybinding(e, effectiveKeybindings['open-settings'])) {
-        e.preventDefault();
-        if (showSettings) {
-          setShowSettings(false);
-        } else {
-          openSettingsModal('general');
+
+      // Built-in & customizable commands
+      for (const def of DEFAULT_KEYBINDING_DEFS) {
+        const binding = effectiveKeybindings[def.id];
+        if (!binding) continue;
+        if (
+          matchesKeybinding(e, binding) ||
+          (def.id === 'zoom-in' &&
+            meta &&
+            e.key === '+' &&
+            binding === 'Mod+=')
+        ) {
+          e.preventDefault();
+          shortcutHandlersRef.current[def.id]?.();
+          return;
         }
-      } else if (matchesKeybinding(e, effectiveKeybindings['quick-open'])) {
-        e.preventDefault();
-        setShowQuickOpen((v) => !v);
-      } else if (
-        matchesKeybinding(e, effectiveKeybindings['palette']) ||
-        (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p')
-      ) {
+      }
+
+      // Dynamic AI custom buttons & submenus
+      const aiCustomState = aiCustomShortcutRunnerRef.current;
+      for (const btn of aiCustomState.buttons) {
+        const btnBinding = effectiveKeybindings[getAiCustomButtonKeybindingId(btn.id)];
+        if (btnBinding && matchesKeybinding(e, btnBinding)) {
+          e.preventDefault();
+          if (aiCustomState.runningButtonId === btn.id) {
+            aiCustomState.cancel();
+          } else {
+            aiCustomState.run(btn, btn.id);
+          }
+          return;
+        }
+        const submenus = getActiveSubmenuItems(btn);
+        for (const sub of submenus) {
+          const subBinding =
+            effectiveKeybindings[getAiCustomSubmenuKeybindingId(btn.id, sub.id)];
+          if (subBinding && matchesKeybinding(e, subBinding)) {
+            e.preventDefault();
+            if (aiCustomState.runningButtonId === btn.id) {
+              aiCustomState.cancel();
+            } else {
+              aiCustomState.run(sub, btn.id);
+            }
+            return;
+          }
+        }
+      }
+
+      // Secondary legacy/convenience fallbacks
+      if (meta && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         setShowPalette((v) => !v);
-      } else if (matchesKeybinding(e, effectiveKeybindings['replace'])) {
-        e.preventDefault();
-        openFindBar({ target: 'replace' });
-      } else if (matchesKeybinding(e, effectiveKeybindings['find'])) {
-        e.preventDefault();
-        openFindBar({ target: 'find' });
-      } else if (matchesKeybinding(e, effectiveKeybindings['go-to-line'])) {
-        e.preventDefault();
-        setShowGoToLine((v) => !v);
       } else if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'h') {
         e.preventDefault();
         openFindBar({ target: 'replace' });
@@ -5442,65 +5756,6 @@ export function App() {
         } else {
           findBarRef.current?.findNext();
         }
-      } else if (matchesKeybinding(e, effectiveKeybindings['workspace-grep'])) {
-        e.preventDefault();
-        setShowWorkspaceGrep((v) => !v);
-      } else if (matchesKeybinding(e, effectiveKeybindings['zen'])) {
-        e.preventDefault();
-        toggleZenMode();
-      } else if (matchesKeybinding(e, effectiveKeybindings['ai-edit-selection'])) {
-        e.preventDefault();
-        handleOpenInlineAiEdit();
-      } else if (matchesKeybinding(e, effectiveKeybindings['macro-toggle-record'])) {
-        e.preventDefault();
-        handleToggleMacroRecording();
-      } else if (matchesKeybinding(e, effectiveKeybindings['macro-play'])) {
-        e.preventDefault();
-        void handlePlayMacro();
-      } else if (matchesKeybinding(e, effectiveKeybindings['cycle-mode'])) {
-        e.preventDefault();
-        const nextMode: AppMode =
-          mode === 'simple' ? 'basic' : mode === 'basic' ? 'advanced' : 'simple';
-        handleModeChange(nextMode);
-      } else if (matchesKeybinding(e, effectiveKeybindings['bold'])) {
-        e.preventDefault();
-        handleToolbarAction('bold');
-      } else if (matchesKeybinding(e, effectiveKeybindings['italic'])) {
-        e.preventDefault();
-        handleToolbarAction('italic');
-      } else if (
-        matchesKeybinding(e, effectiveKeybindings['zoom-in']) ||
-        (meta && e.key === '+' && effectiveKeybindings['zoom-in'] === 'Mod+=')
-      ) {
-        e.preventDefault();
-        handleZoomIn();
-      } else if (matchesKeybinding(e, effectiveKeybindings['zoom-out'])) {
-        e.preventDefault();
-        handleZoomOut();
-      } else if (matchesKeybinding(e, effectiveKeybindings['zoom-reset'])) {
-        e.preventDefault();
-        handleSetZoom(100);
-      } else if (matchesKeybinding(e, effectiveKeybindings['copy-rich'])) {
-        e.preventDefault();
-        void handleCopyRichText();
-      } else if (matchesKeybinding(e, effectiveKeybindings['export-docx'])) {
-        e.preventDefault();
-        void handleExportDocx();
-      } else if (matchesKeybinding(e, effectiveKeybindings['insert-citation'])) {
-        e.preventDefault();
-        handleOpenCitationModal();
-      } else if (matchesKeybinding(e, effectiveKeybindings['knowledge-graph'])) {
-        e.preventDefault();
-        setShowKnowledgeGraphModal((v) => !v);
-      } else if (matchesKeybinding(e, effectiveKeybindings['unused-assets'])) {
-        e.preventDefault();
-        setShowUnusedAssetsModal((v) => !v);
-      } else if (matchesKeybinding(e, effectiveKeybindings['git-panel'])) {
-        e.preventDefault();
-        if (mode !== 'advanced') handleModeChange('advanced');
-        setShowSidebar(true);
-        setSidebarTab('git');
-        if (workspaceRootRef.current) void refreshGitPanel(workspaceRootRef.current);
       } else if (e.key === 'Escape') {
         if (
           diffPreview ||
@@ -5530,11 +5785,6 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     effectiveKeybindings,
-    mode,
-    handleModeChange,
-    handleSave,
-    handleOpenFile,
-    handleNewFile,
     toggleZenMode,
     zenMode,
     folderSwitchGuardMode,
@@ -5542,7 +5792,6 @@ export function App() {
     showQuickOpen,
     showGoToLine,
     showSettings,
-    openSettingsModal,
     showFind,
     showSlideModal,
     showWorkspaceGrep,
@@ -5553,18 +5802,7 @@ export function App() {
     showKnowledgeGraphModal,
     diffPreview,
     inlineAiState,
-    handleOpenInlineAiEdit,
-    handleToolbarAction,
-    handleToggleMacroRecording,
-    handlePlayMacro,
     openFindBar,
-    handleZoomIn,
-    handleZoomOut,
-    handleSetZoom,
-    handleCopyRichText,
-    handleExportDocx,
-    handleOpenCitationModal,
-    refreshGitPanel,
   ]);
 
   // Listen to native macOS/Win/Linux menu bar actions
@@ -5676,6 +5914,7 @@ export function App() {
         id: 'open-settings-keybindings',
         category: 'Settings',
         label: t.settingsModal.keybindings.title,
+        shortcut: shortcutDisplay('open-settings-keybindings'),
         action: () => openSettingsModal('keybindings'),
       },
       {
@@ -5688,36 +5927,42 @@ export function App() {
         id: 'mode-simple',
         category: 'Mode',
         label: t.modes.simple,
+        shortcut: shortcutDisplay('mode-simple'),
         action: () => handleModeChange('simple'),
       },
       {
         id: 'mode-basic',
         category: 'Mode',
         label: t.modes.basic,
+        shortcut: shortcutDisplay('mode-basic'),
         action: () => handleModeChange('basic'),
       },
       {
         id: 'mode-advanced',
         category: 'Mode',
         label: t.modes.advanced,
+        shortcut: shortcutDisplay('mode-advanced'),
         action: () => handleModeChange('advanced'),
       },
       {
         id: 'toggle-top-bar',
         category: 'View',
         label: t.actions.toggleTopBar,
+        shortcut: shortcutDisplay('toggle-top-bar'),
         action: handleToggleTopBar,
       },
       {
         id: 'toggle-format-toolbar',
         category: 'View',
         label: t.actions.toggleFormatToolbar,
+        shortcut: shortcutDisplay('toggle-format-toolbar'),
         action: handleToggleFormatToolbar,
       },
       {
         id: 'toggle-editor-split',
         category: 'View',
         label: t.actions.toggleEditorSplit,
+        shortcut: shortcutDisplay('toggle-editor-split'),
         action: handleToggleEditorSplit,
       },
       ...(editorSplitVertical
@@ -6305,6 +6550,28 @@ export function App() {
       })),
     ];
 
+    // Add AI Custom buttons & enabled submenus to command palette with their shortcuts
+    for (const btn of aiCustomButtons) {
+      const btnLabel = btn.name.trim() || t.settingsModal.aiCustom.defaultButtonName;
+      list.push({
+        id: getAiCustomButtonKeybindingId(btn.id),
+        category: t.settingsModal.keybindings.categories.AiCustom || 'AI Custom',
+        label: btnLabel,
+        shortcut: shortcutDisplay(getAiCustomButtonKeybindingId(btn.id)),
+        action: () => void handleRunAiCustomButton(btn, btn.id),
+      });
+      for (const sub of getActiveSubmenuItems(btn)) {
+        const subLabel = sub.name.trim() || t.settingsModal.aiCustom.submenuDefaultName;
+        list.push({
+          id: getAiCustomSubmenuKeybindingId(btn.id, sub.id),
+          category: t.settingsModal.keybindings.categories.AiCustom || 'AI Custom',
+          label: `${btnLabel} › ${subLabel}`,
+          shortcut: shortcutDisplay(getAiCustomSubmenuKeybindingId(btn.id, sub.id)),
+          action: () => void handleRunAiCustomButton(sub, btn.id),
+        });
+      }
+    }
+
     recentFiles.forEach((fp) => {
       const name = fp.split(/[/\\]/).pop() || fp;
       list.push({
@@ -6337,7 +6604,11 @@ export function App() {
         });
       });
 
-    return list;
+    return list.map((item) => {
+      if (item.shortcut) return item;
+      const dyn = shortcutDisplay(item.id);
+      return dyn ? { ...item, shortcut: dyn } : item;
+    });
   }, [
     mode,
     layout,
@@ -6356,6 +6627,8 @@ export function App() {
     isRecordingMacro,
     macroSteps.length,
     shortcutDisplay,
+    aiCustomButtons,
+    handleRunAiCustomButton,
     notify,
     handleModeChange,
     handleToggleTopBar,
@@ -6571,9 +6844,13 @@ export function App() {
               hasMacro={macroSteps.length > 0}
               macroStepCount={macroSteps.length}
               aiCustomButtons={aiCustomButtons}
-              runningAiCustomId={runningAiCustomId}
-              onRunAiCustomButton={(btn) => void handleRunAiCustomButton(btn)}
+              runningAiCustomId={runningAiCustom?.buttonId ?? null}
+              runningAiCustomLabel={runningAiCustom?.label ?? null}
+              onRunAiCustomButton={(action, parentId) =>
+                void handleRunAiCustomButton(action, parentId)
+              }
               onCancelAiCustom={handleCancelAiCustom}
+              effectiveKeybindings={effectiveKeybindings}
             />
           )}
           {shouldShowAutoUpdateNotification(
@@ -7576,7 +7853,7 @@ export function App() {
           zoomPercent={zoomPercent}
           onChangeZoom={handleSetZoom}
           topBarHidden={!isTopBarVisible}
-          onSwitchToBasic={() => handleModeChange('basic')}
+          onChangeMode={handleModeChange}
           onOpenSettings={() => openSettingsModal('general')}
           onOpenGoToLine={() => setShowGoToLine(true)}
           isRecordingMacro={isRecordingMacro}

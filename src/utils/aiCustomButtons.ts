@@ -1,12 +1,14 @@
 import type {
   AiCustomButton,
   AiCustomButtonIconId,
+  AiCustomSubmenuItem,
   AiProviderConfig,
   AiProviderId,
   Locale,
 } from '../types';
 
 export const MAX_AI_CUSTOM_BUTTONS = 5;
+export const MAX_AI_CUSTOM_SUBMENU_ITEMS = 10;
 
 export interface AiCustomIconOption {
   id: AiCustomButtonIconId;
@@ -59,15 +61,47 @@ export const DEFAULT_AI_CUSTOM_BUTTONS: AiCustomButton[] = [
     prompt: DEFAULT_AI_TRANSLATE_PROMPT,
     copyToClipboard: false,
     replaceContent: true,
+    submenuEnabled: false,
+    submenuItems: [],
   },
 ];
 
 export function cloneDefaultAiCustomButtons(): AiCustomButton[] {
-  return DEFAULT_AI_CUSTOM_BUTTONS.map((btn) => ({ ...btn }));
+  return DEFAULT_AI_CUSTOM_BUTTONS.map((btn) => ({
+    ...btn,
+    submenuItems: (btn.submenuItems ?? []).map((item) => ({ ...item })),
+  }));
 }
 
 export function isValidAiCustomIconId(val: unknown): val is AiCustomButtonIconId {
   return typeof val === 'string' && VALID_ICON_IDS.has(val as AiCustomButtonIconId);
+}
+
+export function normalizeAiCustomSubmenuItems(raw: unknown): AiCustomSubmenuItem[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const result: AiCustomSubmenuItem[] = [];
+  for (let i = 0; i < raw.length && result.length < MAX_AI_CUSTOM_SUBMENU_ITEMS; i++) {
+    const item = raw[i];
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Partial<AiCustomSubmenuItem>;
+    const baseId =
+      typeof obj.id === 'string' && obj.id.trim()
+        ? obj.id.trim()
+        : `ai-custom-sub-${i + 1}`;
+    const id = seen.has(baseId) ? `${baseId}-${i + 1}` : baseId;
+    seen.add(id);
+    result.push({
+      id,
+      name: typeof obj.name === 'string' ? obj.name : '',
+      icon: isValidAiCustomIconId(obj.icon) ? obj.icon : 'sparkles',
+      prompt: typeof obj.prompt === 'string' ? obj.prompt : '',
+      copyToClipboard: Boolean(obj.copyToClipboard),
+      replaceContent:
+        typeof obj.replaceContent === 'boolean' ? obj.replaceContent : false,
+    });
+  }
+  return result;
 }
 
 /**
@@ -100,9 +134,16 @@ export function normalizeAiCustomButtons(raw: unknown): AiCustomButton[] {
       copyToClipboard: Boolean(obj.copyToClipboard),
       replaceContent:
         typeof obj.replaceContent === 'boolean' ? obj.replaceContent : false,
+      submenuEnabled: Boolean(obj.submenuEnabled),
+      submenuItems: normalizeAiCustomSubmenuItems(obj.submenuItems),
     });
   }
   return result;
+}
+
+export function getActiveSubmenuItems(button: AiCustomButton): AiCustomSubmenuItem[] {
+  if (!button.submenuEnabled || !Array.isArray(button.submenuItems)) return [];
+  return button.submenuItems;
 }
 
 export function createNewAiCustomButton(
@@ -113,6 +154,23 @@ export function createNewAiCustomButton(
   return {
     id: `ai-custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     name: locale === 'ja' ? `AIカスタム ${num}` : `AI Custom ${num}`,
+    icon: 'sparkles',
+    prompt: '',
+    copyToClipboard: false,
+    replaceContent: true,
+    submenuEnabled: false,
+    submenuItems: [],
+  };
+}
+
+export function createNewAiCustomSubmenuItem(
+  existingCount: number,
+  locale: Locale
+): AiCustomSubmenuItem {
+  const num = existingCount + 1;
+  return {
+    id: `ai-custom-sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    name: locale === 'ja' ? `サブメニュー ${num}` : `Submenu ${num}`,
     icon: 'sparkles',
     prompt: '',
     copyToClipboard: false,
@@ -132,6 +190,7 @@ const DEFAULT_MODELS: Partial<Record<AiProviderId, string>> = {
   'openai-api': 'gpt-4.1',
   'anthropic-api': 'claude-sonnet-4-5',
   'gemini-api': 'gemini-2.5-flash',
+  'apple-foundation-models': 'default',
   ollama: 'llama3.2',
   lmstudio: 'local-model',
   'openai-compat': 'gpt-4.1-mini',

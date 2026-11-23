@@ -18,6 +18,7 @@ const DEFAULT_MODELS: Partial<Record<AiProviderId, string>> = {
   'openai-api': 'gpt-4.1',
   'anthropic-api': 'claude-sonnet-4-5',
   'gemini-api': 'gemini-2.5-flash',
+  'apple-foundation-models': 'default',
   ollama: 'llama3.2',
   lmstudio: 'local-model',
   'openai-compat': 'gpt-4.1-mini',

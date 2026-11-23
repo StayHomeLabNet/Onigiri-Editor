@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Bold,
   Italic,
@@ -39,10 +40,19 @@ import {
   BookMarked,
   Loader2,
 } from 'lucide-react';
-import type { AiCustomButton, AppMode } from '../types';
+import type { AiCustomButton, AiCustomSubmenuItem, AppMode } from '../types';
 import type { Translations } from '../i18n/types';
 import { formatShortcut } from '../utils/platform';
+import { getActiveSubmenuItems } from '../utils/aiCustomButtons';
+import {
+  formatKeybindingForDisplay,
+  getAiCustomButtonKeybindingId,
+  getAiCustomSubmenuKeybindingId,
+} from '../utils/keybindings';
 import { AiCustomIcon } from './AiCustomIcon';
+
+const LONG_PRESS_MS = 400;
+const LONG_PRESS_MOVE_THRESHOLD_PX = 8;
 
 interface FormatToolbarProps {
   t: Translations;
@@ -56,8 +66,19 @@ interface FormatToolbarProps {
   macroStepCount?: number;
   aiCustomButtons?: AiCustomButton[];
   runningAiCustomId?: string | null;
-  onRunAiCustomButton?: (button: AiCustomButton) => void;
+  runningAiCustomLabel?: string | null;
+  onRunAiCustomButton?: (
+    action: AiCustomButton | AiCustomSubmenuItem,
+    parentButtonId?: string
+  ) => void;
   onCancelAiCustom?: () => void;
+  effectiveKeybindings?: Record<string, string>;
+}
+
+interface OpenSubmenuState {
+  buttonId: string;
+  top: number;
+  left: number;
 }
 
 export const FormatToolbar: React.FC<FormatToolbarProps> = ({
@@ -72,9 +93,80 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
   macroStepCount,
   aiCustomButtons = [],
   runningAiCustomId = null,
+  runningAiCustomLabel = null,
   onRunAiCustomButton,
   onCancelAiCustom,
+  effectiveKeybindings,
 }) => {
+  const [openSubmenu, setOpenSubmenu] = useState<OpenSubmenuState | null>(null);
+  const submenuRef = useRef<HTMLDivElement | null>(null);
+  const triggerBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const pressStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    pressStartRef.current = null;
+  }, []);
+
+  useEffect(() => clearLongPressTimer, [clearLongPressTimer]);
+
+  const openSubmenuForButton = useCallback((buttonId: string, anchorEl: HTMLButtonElement) => {
+    const rect = anchorEl.getBoundingClientRect();
+    const estimatedWidth = 220;
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - estimatedWidth - 8));
+    const top = Math.min(rect.bottom + 4, window.innerHeight - 48);
+    setOpenSubmenu({ buttonId, top, left });
+  }, []);
+
+  useEffect(() => {
+    if (!openSubmenu) return;
+    const onMouseDownOutside = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (submenuRef.current?.contains(target)) return;
+      const triggerEl = triggerBtnRefs.current[openSubmenu.buttonId];
+      if (triggerEl?.contains(target)) return;
+      setOpenSubmenu(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpenSubmenu(null);
+      }
+    };
+    const onViewportChange = () => setOpenSubmenu(null);
+    window.addEventListener('mousedown', onMouseDownOutside, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('scroll', onViewportChange, true);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDownOutside, true);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('resize', onViewportChange);
+      window.removeEventListener('scroll', onViewportChange, true);
+    };
+  }, [openSubmenu]);
+
+  // Close submenu if the button or its submenu items disappear or another action starts running
+  useEffect(() => {
+    if (!openSubmenu) return;
+    const btn = aiCustomButtons.find((b) => b.id === openSubmenu.buttonId);
+    if (!btn || getActiveSubmenuItems(btn).length === 0 || runningAiCustomId) {
+      setOpenSubmenu(null);
+    }
+  }, [openSubmenu, aiCustomButtons, runningAiCustomId]);
+
+  const activeSubmenuButton = openSubmenu
+    ? aiCustomButtons.find((b) => b.id === openSubmenu.buttonId) ?? null
+    : null;
+  const activeSubmenuItems = activeSubmenuButton
+    ? getActiveSubmenuItems(activeSubmenuButton)
+    : [];
   const keepFocusMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
   };
@@ -251,20 +343,86 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
           <div className="tb-group">
             {aiCustomButtons.map((btn) => {
               const isRunning = runningAiCustomId === btn.id;
+              const isDisabled = Boolean(runningAiCustomId) && !isRunning;
+              const submenuItems = getActiveSubmenuItems(btn);
+              const hasSubmenu = submenuItems.length > 0;
+              const isSubmenuOpen = openSubmenu?.buttonId === btn.id;
               const label = btn.name.trim() || t.settingsModal.aiCustom.defaultButtonName;
+              const runningName = runningAiCustomLabel?.trim() || label;
+              const btnShortcut = formatKeybindingForDisplay(
+                effectiveKeybindings?.[getAiCustomButtonKeybindingId(btn.id)]
+              );
+              const labelWithShortcut = btnShortcut ? `${label} (${btnShortcut})` : label;
               const tooltip = isRunning
-                ? `${label}${t.settingsModal.aiCustom.runningTooltipSuffix}`
-                : label;
+                ? `${runningName}${t.settingsModal.aiCustom.runningTooltipSuffix}`
+                : hasSubmenu
+                  ? `${labelWithShortcut}${t.settingsModal.aiCustom.submenuTooltipHint}`
+                  : labelWithShortcut;
               return (
                 <button
                   key={btn.id}
+                  ref={(el) => {
+                    triggerBtnRefs.current[btn.id] = el;
+                  }}
                   type="button"
-                  className={`tb-btn ${isRunning ? 'is-ai-running' : ''}`}
-                  disabled={Boolean(runningAiCustomId) && !isRunning}
-                  onMouseDown={keepFocusMouseDown}
-                  onClick={() =>
-                    isRunning ? onCancelAiCustom?.() : onRunAiCustomButton?.(btn)
-                  }
+                  className={`tb-btn ${isRunning ? 'is-ai-running' : ''} ${hasSubmenu ? 'has-submenu' : ''} ${isSubmenuOpen ? 'is-submenu-open' : ''}`}
+                  disabled={isDisabled}
+                  aria-haspopup={hasSubmenu ? 'menu' : undefined}
+                  aria-expanded={hasSubmenu ? isSubmenuOpen : undefined}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    if (e.button !== 0) return;
+                    longPressTriggeredRef.current = false;
+                    clearLongPressTimer();
+                    if (!hasSubmenu || isRunning || isDisabled) return;
+                    const anchor = e.currentTarget;
+                    pressStartRef.current = { x: e.clientX, y: e.clientY };
+                    longPressTimerRef.current = window.setTimeout(() => {
+                      longPressTimerRef.current = null;
+                      pressStartRef.current = null;
+                      longPressTriggeredRef.current = true;
+                      openSubmenuForButton(btn.id, anchor);
+                    }, LONG_PRESS_MS);
+                  }}
+                  onMouseMove={(e) => {
+                    if (!pressStartRef.current) return;
+                    const dx = e.clientX - pressStartRef.current.x;
+                    const dy = e.clientY - pressStartRef.current.y;
+                    if (Math.hypot(dx, dy) > LONG_PRESS_MOVE_THRESHOLD_PX) {
+                      clearLongPressTimer();
+                    }
+                  }}
+                  onMouseUp={() => {
+                    clearLongPressTimer();
+                  }}
+                  onMouseLeave={() => {
+                    clearLongPressTimer();
+                  }}
+                  onContextMenu={(e) => {
+                    if (!hasSubmenu || isRunning || isDisabled) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    clearLongPressTimer();
+                    longPressTriggeredRef.current = false;
+                    if (isSubmenuOpen) {
+                      setOpenSubmenu(null);
+                    } else {
+                      openSubmenuForButton(btn.id, e.currentTarget);
+                    }
+                  }}
+                  onClick={() => {
+                    clearLongPressTimer();
+                    if (longPressTriggeredRef.current) {
+                      longPressTriggeredRef.current = false;
+                      return;
+                    }
+                    setOpenSubmenu(null);
+                    if (isRunning) {
+                      onCancelAiCustom?.();
+                    } else {
+                      onRunAiCustomButton?.(btn, btn.id);
+                    }
+                  }}
                   title={tooltip}
                   aria-label={label}
                 >
@@ -279,6 +437,50 @@ export const FormatToolbar: React.FC<FormatToolbarProps> = ({
           </div>
         </>
       )}
+
+      {openSubmenu &&
+        activeSubmenuButton &&
+        activeSubmenuItems.length > 0 &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div
+            ref={submenuRef}
+            className="tb-ai-submenu-popover"
+            role="menu"
+            style={{ top: openSubmenu.top, left: openSubmenu.left }}
+          >
+            {activeSubmenuItems.map((sub) => {
+              const subLabel =
+                sub.name.trim() || t.settingsModal.aiCustom.submenuDefaultName;
+              const subShortcut = formatKeybindingForDisplay(
+                effectiveKeybindings?.[
+                  getAiCustomSubmenuKeybindingId(activeSubmenuButton.id, sub.id)
+                ]
+              );
+              return (
+                <button
+                  key={sub.id}
+                  type="button"
+                  role="menuitem"
+                  className="tb-ai-submenu-item"
+                  onMouseDown={keepFocusMouseDown}
+                  onClick={() => {
+                    setOpenSubmenu(null);
+                    onRunAiCustomButton?.(sub, activeSubmenuButton.id);
+                  }}
+                  title={subShortcut ? `${subLabel} (${subShortcut})` : subLabel}
+                >
+                  <span className="tb-ai-submenu-item-icon">
+                    <AiCustomIcon icon={sub.icon} size={14} />
+                  </span>
+                  <span className="tb-ai-submenu-item-label">{subLabel}</span>
+                  {subShortcut && <kbd className="tb-ai-submenu-kbd">{subShortcut}</kbd>}
+                </button>
+              );
+            })}
+          </div>,
+          document.body
+        )}
 
       <div className="tb-spacer" />
 

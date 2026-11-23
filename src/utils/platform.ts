@@ -475,6 +475,9 @@ export async function detectAiCapabilities(): Promise<AiCapabilities> {
     lmstudioInstalled: false,
     lmstudioRunning: false,
     lmstudioModels: [],
+    appleFoundationModelsSupported: false,
+    appleFoundationModelsAvailable: false,
+    appleFoundationModelsStatus: null,
     nodeInstalled: false,
     homebrewInstalled: false,
   };

@@ -158,7 +158,10 @@ const DEFAULT_MODELS: Partial<Record<AiProviderId, string>> = {
   'openai-api': 'gpt-4.1',
   'anthropic-api': 'claude-sonnet-4-5',
   'gemini-api': 'gemini-2.5-flash',
+  'apple-foundation-models': 'default',
 };
+
+const APPLE_FM_MODELS = ['default', 'permissive'] as const;
 
 const CURATED_SUBSCRIPTION_MODELS: Partial<Record<AiProviderId, string[]>> = {
   'codex-cli': ['gpt-5.4', 'gpt-5.3-codex', 'gpt-5.2-codex', 'o4-mini', 'o3'],
@@ -214,6 +217,7 @@ const PROVIDER_LABELS: Record<AiProviderId, string> = {
   'openai-api': 'OpenAI API',
   'anthropic-api': 'Anthropic API',
   'gemini-api': 'Gemini API',
+  'apple-foundation-models': 'Apple Foundation Models',
   ollama: 'Ollama',
   lmstudio: 'LM Studio',
   'openai-compat': 'OpenAI-Compat',
@@ -578,6 +582,9 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   };
 
   const availableModelOptions = useMemo(() => {
+    if (config.provider === 'apple-foundation-models') {
+      return [...APPLE_FM_MODELS];
+    }
     if (isSubscriptionCliProvider(config.provider)) {
       if (subscriptionModels.length > 0) return subscriptionModels;
       return CURATED_SUBSCRIPTION_MODELS[config.provider] || [];
@@ -600,10 +607,11 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   }, [config.provider, subscriptionModels, localModels]);
 
   const isCustomModelValue =
-    customModelInputMode ||
-    (Boolean(config.model.trim()) &&
-      availableModelOptions.length > 0 &&
-      !availableModelOptions.includes(config.model.trim()));
+    config.provider !== 'apple-foundation-models' &&
+    (customModelInputMode ||
+      (Boolean(config.model.trim()) &&
+        availableModelOptions.length > 0 &&
+        !availableModelOptions.includes(config.model.trim())));
 
   const providerStatus = useMemo(() => {
     if (!caps) return null;
@@ -640,6 +648,52 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           return { ok: false, reason: 'missing-auth' as const, text: t.aiChat.loginNeeded };
         }
         return { ok: true, reason: 'ok' as const, text: t.aiChat.detected };
+      case 'apple-foundation-models': {
+        if (getHostOs() !== 'macos') {
+          return {
+            ok: false,
+            reason: 'apple-fm-unavailable' as const,
+            text: t.aiChat.appleFmUnavailable,
+          };
+        }
+        if (caps.appleFoundationModelsAvailable) {
+          return { ok: true, reason: 'ok' as const, text: t.aiChat.appleFmReady };
+        }
+        const status = caps.appleFoundationModelsStatus;
+        if (status === 'apple_intelligence_not_enabled') {
+          return {
+            ok: false,
+            reason: 'apple-fm-not-enabled' as const,
+            text: t.aiChat.appleFmUnavailable,
+          };
+        }
+        if (status === 'model_not_ready') {
+          return {
+            ok: false,
+            reason: 'apple-fm-model-not-ready' as const,
+            text: t.aiChat.appleFmUnavailable,
+          };
+        }
+        if (status === 'device_not_eligible') {
+          return {
+            ok: false,
+            reason: 'apple-fm-device-not-eligible' as const,
+            text: t.aiChat.appleFmUnavailable,
+          };
+        }
+        if (status === 'unsupported_os') {
+          return {
+            ok: false,
+            reason: 'apple-fm-unsupported-os' as const,
+            text: t.aiChat.appleFmUnavailable,
+          };
+        }
+        return {
+          ok: false,
+          reason: 'apple-fm-unavailable' as const,
+          text: t.aiChat.appleFmUnavailable,
+        };
+      }
       case 'ollama':
         if (!caps.ollamaRunning) {
           return {
@@ -710,6 +764,9 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     if (caps.claudeCli && caps.claudeLoggedIn) list.push('claude-cli');
     if (caps.geminiCli && caps.geminiLoggedIn) list.push('gemini-cli');
     if (caps.antigravityCli && caps.antigravityLoggedIn) list.push('antigravity-cli');
+    if (getHostOs() === 'macos' && caps.appleFoundationModelsAvailable) {
+      list.push('apple-foundation-models');
+    }
     if (caps.ollamaRunning && caps.ollamaModels.length > 0) list.push('ollama');
     if (caps.lmstudioRunning && caps.lmstudioModels.length > 0) list.push('lmstudio');
     if (config.apiKeys['openai-api']?.trim()) list.push('openai-api');
@@ -1111,6 +1168,12 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     else if (reason === 'ollama-no-models') problemText = t.aiChat.ollamaNoModelsDesc;
     else if (reason === 'ollama-not-installed') problemText = t.aiChat.ollamaNotInstalledDesc;
     else if (reason === 'lmstudio-not-running') problemText = t.aiChat.lmstudioNotRunningDesc;
+    else if (reason === 'apple-fm-not-enabled') problemText = t.aiChat.appleFmNotEnabledDesc;
+    else if (reason === 'apple-fm-model-not-ready') problemText = t.aiChat.appleFmModelNotReadyDesc;
+    else if (reason === 'apple-fm-device-not-eligible')
+      problemText = t.aiChat.appleFmDeviceNotEligibleDesc;
+    else if (reason === 'apple-fm-unsupported-os') problemText = t.aiChat.appleFmUnsupportedOsDesc;
+    else if (reason === 'apple-fm-unavailable') problemText = t.aiChat.appleFmUnavailableDesc;
     else if (reason === 'missing-apikey') problemText = t.aiChat.apiKeyMissingDesc;
     else if (reason === 'missing-custom-cli') problemText = t.aiChat.customCliMissingDesc;
     else problemText = `${PROVIDER_LABELS[config.provider]} (${providerStatus.text})`;
@@ -1360,6 +1423,26 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             </>
           )}
 
+          {(reason === 'apple-fm-not-enabled' || reason === 'apple-fm-model-not-ready') && (
+            <div className="ai-connect-btn-row">
+              <button
+                type="button"
+                className="mini-pill-btn is-active"
+                disabled={Boolean(assistBusy)}
+                onClick={() => handleAssistAction('open-apple-intelligence-settings')}
+              >
+                <Settings2 size={11} />
+                <span>{t.aiChat.appleFmOpenSettingsBtn}</span>
+              </button>
+            </div>
+          )}
+
+          {config.provider === 'apple-foundation-models' && providerStatus.ok && (
+            <div className="platform-hint-note">
+              <span>{t.aiChat.appleFmContextHint}</span>
+            </div>
+          )}
+
           {reason === 'missing-apikey' && (
             <div className="ai-connect-inline-key">
               <div className="ai-key-input-wrap">
@@ -1507,6 +1590,11 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
               <option value="gemini-api">Google Gemini API</option>
             </optgroup>
             <optgroup label={t.aiChat.catLocal}>
+              {hostOs === 'macos' && (
+                <option value="apple-foundation-models">
+                  Apple Foundation Models {caps?.appleFoundationModelsAvailable ? '●' : ''}
+                </option>
+              )}
               <option value="ollama">
                 Ollama {caps?.ollamaRunning ? '●' : ''}
               </option>
@@ -1544,7 +1632,15 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             {availableModelOptions.length > 0 ? (
               <select
                 className="select-input ai-model-select"
-                value={isCustomModelValue ? '__custom__' : config.model}
+                value={
+                  config.provider === 'apple-foundation-models'
+                    ? config.model === 'permissive'
+                      ? 'permissive'
+                      : 'default'
+                    : isCustomModelValue
+                      ? '__custom__'
+                      : config.model
+                }
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === '__custom__') {
@@ -1567,10 +1663,16 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                 )}
                 {availableModelOptions.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {config.provider === 'apple-foundation-models'
+                      ? m === 'permissive'
+                        ? t.aiChat.appleFmModelPermissive
+                        : t.aiChat.appleFmModelDefault
+                      : m}
                   </option>
                 ))}
-                <option value="__custom__">{t.aiChat.customModelOption}</option>
+                {config.provider !== 'apple-foundation-models' && (
+                  <option value="__custom__">{t.aiChat.customModelOption}</option>
+                )}
               </select>
             ) : (
               <input
@@ -1672,6 +1774,11 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
 
         {showSettings && (
           <div className="ai-settings-drawer">
+            {config.provider === 'apple-foundation-models' && (
+              <div className="platform-hint-note">
+                <span>{t.aiChat.appleFmContextHint}</span>
+              </div>
+            )}
             {config.provider === 'custom-cli' && (
               <div className="field-row">
                 <label>{t.aiChat.customCliLabel}</label>

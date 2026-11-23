@@ -413,11 +413,22 @@ export interface Translations {
       runningTooltipSuffix: string;
       providerHint: string;
       defaultButtonName: string;
+      submenuEnableLabel: string;
+      submenuAddBtn: string;
+      submenuMaxReachedHint: string;
+      submenuEmptyState: string;
+      submenuSlotLabel: string;
+      submenuNameLabel: string;
+      submenuNamePlaceholder: string;
+      submenuDefaultName: string;
+      submenuTooltipHint: string;
+      shortcutLabel: string;
     };
     keybindings: {
       title: string;
       desc: string;
       searchPlaceholder: string;
+      allCategories: string;
       resetAllBtn: string;
       resetOneBtn: string;
       clearBtn: string;
@@ -700,6 +711,17 @@ export interface Translations {
     ollamaNotInstalledDesc: string;
     lmstudioNotRunningDesc: string;
     lmstudioServerSteps: string;
+    appleFmReady: string;
+    appleFmUnavailable: string;
+    appleFmModelDefault: string;
+    appleFmModelPermissive: string;
+    appleFmNotEnabledDesc: string;
+    appleFmModelNotReadyDesc: string;
+    appleFmDeviceNotEligibleDesc: string;
+    appleFmUnsupportedOsDesc: string;
+    appleFmUnavailableDesc: string;
+    appleFmOpenSettingsBtn: string;
+    appleFmContextHint: string;
     apiKeyMissingDesc: string;
     customCliMissingDesc: string;
     startOllamaBtn: string;
@@ -800,6 +822,7 @@ export interface Translations {
     languageLabel: string;
     languageSelectTitle: string;
     languageAuto: string;
+    switchModeTitle: string;
   };
   externalChange: {
     modifiedTitle: string;

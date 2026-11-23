@@ -2376,11 +2376,18 @@
   font-size: 12px;
 }
 
+.keybindings-category-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+
 .keybindings-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 390px;
+  max-height: 410px;
   overflow-y: auto;
   padding-right: 2px;
 }

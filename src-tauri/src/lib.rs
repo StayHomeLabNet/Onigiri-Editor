@@ -1,4 +1,5 @@
 mod ai;
+mod apple_fm;
 mod browser;
 mod images;
 mod live_preview;

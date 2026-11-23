@@ -52,6 +52,7 @@ export type AiProviderId =
   | 'openai-api'
   | 'anthropic-api'
   | 'gemini-api'
+  | 'apple-foundation-models'
   | 'ollama'
   | 'lmstudio'
   | 'openai-compat';
@@ -78,6 +79,9 @@ export interface AiCapabilities {
   lmstudioInstalled: boolean;
   lmstudioRunning: boolean;
   lmstudioModels: string[];
+  appleFoundationModelsSupported?: boolean;
+  appleFoundationModelsAvailable?: boolean;
+  appleFoundationModelsStatus?: string | null;
   nodeInstalled?: boolean;
   homebrewInstalled?: boolean;
 }
@@ -322,6 +326,15 @@ export type AiCustomButtonIconId =
   | 'smile'
   | 'terminal';
 
+export interface AiCustomSubmenuItem {
+  id: string;
+  name: string;
+  icon: AiCustomButtonIconId;
+  prompt: string;
+  copyToClipboard: boolean;
+  replaceContent: boolean;
+}
+
 export interface AiCustomButton {
   id: string;
   name: string;
@@ -329,6 +342,8 @@ export interface AiCustomButton {
   prompt: string;
   copyToClipboard: boolean;
   replaceContent: boolean;
+  submenuEnabled?: boolean;
+  submenuItems?: AiCustomSubmenuItem[];
 }
 
 export type UpdateAvailableBehavior = 'banner' | 'modal' | 'badge-only' | 'auto-install';
