@@ -383,6 +383,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   globalHotkeyShortcut: 'CommandOrControl+Shift+Space',
   integratedTerminalEnabled: true,
   customTooltipsEnabled: true,
+  previewSingleLineBreak: true,
 };
 
 const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
@@ -3705,10 +3706,12 @@ export function App() {
   ]);
 
   const handleCopyHtml = useCallback(async () => {
-    const htmlStr = await renderMarkdownToHtml(activeTab.content);
+    const htmlStr = await renderMarkdownToHtml(activeTab.content, {
+      breaks: Boolean(effectiveSettings.previewSingleLineBreak),
+    });
     await navigator.clipboard.writeText(htmlStr);
     notify(t.toasts.copiedHtml);
-  }, [activeTab.content, notify, t.toasts.copiedHtml]);
+  }, [activeTab.content, effectiveSettings.previewSingleLineBreak, notify, t.toasts.copiedHtml]);
 
   const handlePasteHtmlAsMd = useCallback(async () => {
     try {
@@ -3733,7 +3736,9 @@ export function App() {
 
   const handleExportHtml = useCallback(
     async (overridePageSettings?: typeof DEFAULT_EXPORT_PAGE_SETTINGS) => {
-      const rawHtmlBody = await renderMarkdownToHtml(activeTab.content);
+      const rawHtmlBody = await renderMarkdownToHtml(activeTab.content, {
+        breaks: Boolean(effectiveSettings.previewSingleLineBreak),
+      });
       const docBaseDir = activeTab.filePath || workspaceRoot || undefined;
       const htmlBody =
         effectiveSettings.embedImagesOnHtmlExport !== false
@@ -5099,10 +5104,12 @@ export function App() {
       };
     }
     return {
-      bodyHtml: await renderMarkdownToHtml(activeTab.content),
+      bodyHtml: await renderMarkdownToHtml(activeTab.content, {
+        breaks: Boolean(effectiveSettings.previewSingleLineBreak),
+      }),
       isRawPage: false,
     };
-  }, [previewKind, activeTab.content]);
+  }, [previewKind, activeTab.content, effectiveSettings.previewSingleLineBreak]);
 
   // External Live Preview controller
   const handleToggleExternalPreview = useCallback(async () => {

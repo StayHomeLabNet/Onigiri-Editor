@@ -308,6 +308,7 @@ export interface EditorSettings {
   globalHotkeyShortcut?: string;
   integratedTerminalEnabled?: boolean;
   customTooltipsEnabled?: boolean;
+  previewSingleLineBreak?: boolean;
 }
 
 export type ExportPaperSize = 'A4' | 'Letter' | 'B5';

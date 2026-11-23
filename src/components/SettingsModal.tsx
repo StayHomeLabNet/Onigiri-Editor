@@ -1540,6 +1540,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <label className="check-row">
                     <input
                       type="checkbox"
+                      checked={settings.previewSingleLineBreak ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          previewSingleLineBreak: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? 'Enter 1 回の改行をそのままプレビューに反映する（単一改行を <br> として表示）'
+                        : 'Render single line breaks as <br> in Preview (GitHub / Notion style)'}
+                    </span>
+                  </label>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
                       checked={settings.selectionBubbleMenuEnabled ?? true}
                       onChange={(e) =>
                         onSettingsChange({

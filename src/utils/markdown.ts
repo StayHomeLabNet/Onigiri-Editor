@@ -362,11 +362,46 @@ export function preprocessMarkdownImageDestinations(markdown: string): string {
   return changed ? processed.join('\n') : markdown;
 }
 
+function remarkSoftBreaksToHardBreaks() {
+  return (tree: any) => {
+    visit(tree, 'text', (node: any, index: number | undefined, parent: any) => {
+      if (index === undefined || !parent || !Array.isArray(parent.children)) return;
+      if (typeof node.value !== 'string' || !node.value.includes('\n')) return;
+      const parts = node.value.split(/\r?\n/);
+      const replacement: any[] = [];
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i].length > 0) {
+          replacement.push({ type: 'text', value: parts[i] });
+        }
+        if (i < parts.length - 1) {
+          replacement.push({ type: 'break' });
+        }
+      }
+      parent.children.splice(index, 1, ...replacement);
+      return index + replacement.length;
+    });
+  };
+}
+
 const staticProcessor = unified()
   .use(remarkParse)
   .use(remarkFrontmatter, ['yaml'])
   .use(remarkGfm)
   .use(remarkMath)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeStaticExportPlugins)
+  .use(rehypeRaw)
+  .use(rehypeSanitize, editableSanitizeSchema)
+  .use(rehypeKatex)
+  .use(rehypeHighlight, { detect: false, ignoreMissing: true })
+  .use(rehypeStringify);
+
+const staticProcessorWithBreaks = unified()
+  .use(remarkParse)
+  .use(remarkFrontmatter, ['yaml'])
+  .use(remarkGfm)
+  .use(remarkMath)
+  .use(remarkSoftBreaksToHardBreaks)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(rehypeStaticExportPlugins)
   .use(rehypeRaw)
@@ -386,15 +421,40 @@ const editableProcessor = unified()
   .use(rehypeSanitize, editableSanitizeSchema)
   .use(rehypeStringify);
 
-export async function renderMarkdownToHtml(markdown: string): Promise<string> {
+const editableProcessorWithBreaks = unified()
+  .use(remarkParse)
+  .use(remarkFrontmatter, ['yaml'])
+  .use(remarkGfm)
+  .use(remarkMath)
+  .use(remarkSoftBreaksToHardBreaks)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(rehypeEditableTransform)
+  .use(rehypeRaw)
+  .use(rehypeSanitize, editableSanitizeSchema)
+  .use(rehypeStringify);
+
+export interface RenderMarkdownOptions {
+  /** Treat single line breaks (`\n`) as hard `<br>` breaks (like GitHub Issues / Notion). */
+  breaks?: boolean;
+}
+
+export async function renderMarkdownToHtml(
+  markdown: string,
+  options?: RenderMarkdownOptions
+): Promise<string> {
   const prepared = preprocessMarkdownImageDestinations(markdown);
-  const file = await staticProcessor.process(prepared);
+  const proc = options?.breaks ? staticProcessorWithBreaks : staticProcessor;
+  const file = await proc.process(prepared);
   return String(file);
 }
 
-export async function renderMarkdownToEditableHtml(markdown: string): Promise<string> {
+export async function renderMarkdownToEditableHtml(
+  markdown: string,
+  options?: RenderMarkdownOptions
+): Promise<string> {
   const prepared = preprocessMarkdownImageDestinations(markdown);
-  const file = await editableProcessor.process(prepared);
+  const proc = options?.breaks ? editableProcessorWithBreaks : editableProcessor;
+  const file = await proc.process(prepared);
   return String(file);
 }
 

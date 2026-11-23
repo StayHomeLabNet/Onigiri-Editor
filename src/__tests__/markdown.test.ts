@@ -3,6 +3,7 @@ import {
   computeStats,
   extractHeadings,
   preprocessMarkdownImageDestinations,
+  renderMarkdownToEditableHtml,
   renderMarkdownToHtml,
 } from '../utils/markdown';
 
@@ -52,5 +53,27 @@ describe('markdown utilities', () => {
     expect(stats.lines).toBe(8);
     expect(stats.words).toBeGreaterThan(0);
     expect(stats.chars).toBe(md.length);
+  });
+
+  it('converts single line breaks to <br> only when breaks option is enabled, preserving code blocks', async () => {
+    const md = [
+      'いつもお世話になっております。',
+      '早速',
+      '',
+      '```txt',
+      'line1',
+      'line2',
+      '```',
+    ].join('\n');
+
+    const defaultHtml = await renderMarkdownToHtml(md, { breaks: false });
+    expect(defaultHtml).not.toContain('<br>');
+
+    const breaksHtml = await renderMarkdownToHtml(md, { breaks: true });
+    expect(breaksHtml).toContain('いつもお世話になっております。<br>');
+    expect(breaksHtml).toContain('line1\nline2');
+
+    const editableBreaksHtml = await renderMarkdownToEditableHtml(md, { breaks: true });
+    expect(editableBreaksHtml).toContain('いつもお世話になっております。<br>');
   });
 });

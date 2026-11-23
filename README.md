@@ -102,6 +102,7 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 
 ## What's New in v1.4.0
 
+- **Single Line Break (`<br>`) Preview Option**: Renders single Enter line breaks directly as `<br>` across Live Preview, HTML Export, and External Live Preview without affecting code blocks (toggleable in **Settings → Editor**, on by default).
 - **Selection Floating Bubble Menu**: Selecting text in the editor reveals a mini toolbar right above the selection for **Bold**, **Italic**, **Inline Code**, **Link**, **Inline AI Edit (`⌘⇧E`)**, and up to **3 quick AI Custom buttons** (toggleable in **Settings → Editor**).
 - **AI Ghost Text Autocomplete (`Tab` to Accept / `Esc` to Dismiss)**: Displays muted inline continuation suggestions powered by your active AI provider (including offline free **Apple Foundation Models**, **Ollama**, or **LM Studio**) after a configurable typing pause (`400–2500ms`; opt-in via **Settings → Editor**).
 - **AI Custom Prompt Variables**: Supports dynamic `{{selection}}`, `{{clipboard}}`, `{{fileName}}`, `{{filePath}}`, `{{language}}`, `{{date}}`, and `{{time}}` expansion inside AI Custom buttons & submenus, with 1-click variable chips in **Settings → AI Custom**.

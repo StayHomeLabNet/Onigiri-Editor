@@ -1302,10 +1302,13 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
         }
       }
 
-      if (!docSwitched && markdown === lastEmittedMdRef.current) {
+      const breaksEnabled = Boolean(settings.previewSingleLineBreak);
+      const syncKey = `${breaksEnabled ? '1' : '0'}:${markdown}`;
+
+      if (!docSwitched && markdown === lastEmittedMdRef.current && lastSyncedMdRef.current === syncKey) {
         return;
       }
-      if (!docSwitched && markdown === lastSyncedMdRef.current) {
+      if (!docSwitched && syncKey === lastSyncedMdRef.current) {
         return;
       }
 
@@ -1316,7 +1319,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       const timer = window.setTimeout(async () => {
         try {
           const { body } = splitFrontmatter(markdown);
-          const html = await renderMarkdownToEditableHtml(body);
+          const html = await renderMarkdownToEditableHtml(body, { breaks: breaksEnabled });
           if (cancelled || !editor || editor.isDestroyed || targetDocId !== currentDocIdRef.current) {
             return;
           }
@@ -1325,7 +1328,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
 
           suppressingUpdateRef.current = true;
           editor.commands.setContent(html, { emitUpdate: false });
-          lastSyncedMdRef.current = markdown;
+          lastSyncedMdRef.current = syncKey;
           if (docSwitched && scrollRef.current) {
             scrollRef.current.scrollTop = 0;
           }
@@ -1345,7 +1348,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
         cancelled = true;
         window.clearTimeout(timer);
       };
-    }, [editor, docId, markdown, applyPreviewBlockHighlight]);
+    }, [editor, docId, markdown, settings.previewSingleLineBreak, applyPreviewBlockHighlight]);
 
     const handleScroll = () => {
       const el = scrollRef.current;

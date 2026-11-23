@@ -1,6 +1,8 @@
 Onigiri Editor `v1.4.0` introduces 8 major productivity upgrades—all configurable with individual ON/OFF toggles in Settings: **Selection Floating Bubble Menu**, **AI Ghost Text Autocomplete (`Tab` to accept)**, **AI Custom Prompt Variables (`{{clipboard}}`, `{{fileName}}`, etc.)**, **Markdown Table GUI Toolbar**, **PDF / HTML Export Page Setup & Design Presets**, **Quick Scratchpad & Global Summon Hotkey**, **Lightweight Integrated Terminal Drawer**, and **App-Wide Instant Custom Tooltips**.
 
 ### Highlights (`v1.4.0`)
+- **Render Single Line Breaks as `<br>` in Preview (Configurable in Settings → Editor, On by Default)**:
+  - Single Enter line breaks in Markdown paragraphs now render directly as `<br>` in Live Preview, HTML Export, HTML Copy, and External Browser Live Preview (while keeping fenced code blocks and math blocks untouched). Toggle off in **Settings → Editor** for strict CommonMark soft-break behavior.
 - **Selection Floating Bubble Menu (Configurable in Settings → Editor)**:
   - Selecting text in the editor reveals a floating mini toolbar right above the selection for instant **Bold**, **Italic**, **Inline Code**, **Link**, **Inline AI Edit (`⌘⇧E`)**, and up to **3 quick AI Custom buttons**—eliminating trips to the top toolbar.
 - **AI Ghost Text Autocomplete (`Tab` to Accept / `Esc` to Dismiss, Opt-in in Settings → Editor)**:
@@ -29,6 +31,8 @@ Onigiri Editor `v1.4.0` introduces 8 major productivity upgrades—all configura
 Onigiri Editor `v1.4.0` では、執筆・AI・ビジネス文書・開発ワークフローを一気に強化する **8つの新機能** を搭載しました（各機能は設定画面から個別に ON / OFF 可能）。
 
 ### 主な変更点（`v1.4.0`）
+- **Enter 1 回の改行をそのままプレビューに反映する設定（設定 → エディタで ON/OFF・既定 ON）**:
+  - 本文中の単一改行（`\n`）をライブプレビュー・HTML 書き出し・HTML コピー・外部ライブプレビューでそのまま `<br>` として改行表示します（コードブロックや数式ブロックには影響しません）。厳密な CommonMark 仕様に戻したい場合は **設定 → エディタ** からいつでも OFF にできます。
 - **選択範囲フローティングミニバー（Bubble Menu・設定 → エディタで ON/OFF）**:
   - エディタ上でテキストを選択すると、選択箇所のすぐ上にミニバー（**太字・斜体・コード・リンク・インライン AI 編集・登録済み AIカスタムボタン最大 3 件**）を表示。上部ツールバーまでマウスを往復させずに素早く装飾・翻訳・編集できます。
 - **AI ゴーストテキスト補完（`Tab` で確定 / `Esc` で却下・設定 → エディタで ON/OFF）**:
