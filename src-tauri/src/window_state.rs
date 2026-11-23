@@ -201,8 +201,8 @@ pub fn restore_main_window_state<R: Runtime>(app: &AppHandle<R>) {
     let saved = path.as_deref().and_then(read_window_state_file);
 
     if let Some(ref state) = saved {
-        let _ = window.set_size(LogicalSize::new(state.width, state.height));
-
+        // Position BEFORE sizing so the window adopts the target monitor's DPI/scale factor first
+        // (prevents 1/4-size Retina/1x backing-layer mismatch on macOS multi-monitor setups).
         let mut placed = false;
         if let (Some(x), Some(y)) = (state.x, state.y) {
             let monitors: Vec<LogicalRect> = window
@@ -234,6 +234,8 @@ pub fn restore_main_window_state<R: Runtime>(app: &AppHandle<R>) {
             }
         }
 
+        let _ = window.set_size(LogicalSize::new(state.width, state.height));
+
         if !placed {
             let _ = window.center();
         }
@@ -246,8 +248,8 @@ pub fn restore_main_window_state<R: Runtime>(app: &AppHandle<R>) {
     if let Some(mgr) = app.try_state::<WindowStateManager>() {
         let mut guard = mgr.inner.lock().unwrap();
         guard.file_path = path;
-        if let Some(state) = saved {
-            guard.state = state;
+        if let Some(ref state) = saved {
+            guard.state = state.clone();
         } else if let Ok(scale) = window.scale_factor() {
             let scale = scale.max(0.1);
             if let Ok(inner_size) = window.inner_size() {
@@ -268,6 +270,36 @@ pub fn restore_main_window_state<R: Runtime>(app: &AppHandle<R>) {
 
     let _ = window.show();
     let _ = window.set_focus();
+
+    // macOS mixed-DPI workaround: when a hidden NSWindow (`visible: false`) is moved to a
+    // monitor with a different backingScaleFactor (e.g. 2x Retina -> 1x external) and shown,
+    // AppKit / WKWebView can occasionally keep the old scale factor (rendering at 1/4 size).
+    // A 1px post-show size nudge on the main thread forces AppKit & WKWebView to flush the
+    // backing layer to the active screen's exact scale factor.
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(state) = saved {
+            if !state.maximized {
+                let app_handle = app.clone();
+                let target_w = state.width;
+                let target_h = state.height;
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(80));
+                    let handle_for_main = app_handle.clone();
+                    let _ = app_handle.run_on_main_thread(move || {
+                        if let Some(win) = handle_for_main.get_webview_window(MAIN_WINDOW_LABEL) {
+                            if !win.is_maximized().unwrap_or(false)
+                                && !win.is_fullscreen().unwrap_or(false)
+                            {
+                                let _ = win.set_size(LogicalSize::new(target_w + 1.0, target_h));
+                                let _ = win.set_size(LogicalSize::new(target_w, target_h));
+                            }
+                        }
+                    });
+                });
+            }
+        }
+    }
 }
 
 pub fn capture_main_window_state<R: Runtime>(app: &AppHandle<R>, flush_immediately: bool) {

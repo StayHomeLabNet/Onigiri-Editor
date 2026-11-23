@@ -13,6 +13,7 @@ Onigiri Editor `v1.4.1` delivers 6 major writing & reliability upgrades—**Auto
   - Click `?` in the TopBar or open **Feature Finder** from the Command Palette to search any Onigiri Editor capability in English or Japanese and launch it directly.
 - **Built-in Browser UX & Cross-Platform Fixes (macOS / Windows / Linux)**:
   - Adds custom viewport width (`px` input), 1-click **Clip Page to Markdown**, an inline `⋮` action strip & upward toolbar tooltips immune to native child WebView occlusion across all 3 OSes, and **Resync Browser Bounds**.
+  - **macOS Multi-Monitor / Mixed-DPI Startup Fix**: Positions the window on the target display before sizing and flushes the AppKit/WKWebView backing scale factor right after show, preventing 1/4-size rendering when launching or auto-restarting after an update across Retina (2x) and external (1x) monitors.
   - **Windows Integrated Terminal**: Adds Shift_JIS / CP932 output decoding fallback so Japanese `cmd /C` output never truncates, `cd ~\` support, and `taskkill /T /F` process-tree cancellation.
   - **Global Hotkey**: Displays a toast notification when shortcut registration fails (e.g., Linux Wayland or shortcut conflict).
 - **Comprehensive Security Hardening**:
@@ -44,6 +45,7 @@ Onigiri Editor `v1.4.1` では、**自動スナップショット＆部分復元
   - ヘッダー右上の `?` ボタンまたはコマンドパレットから、やりたいことを日本語／英語で検索して該当機能を直接起動できます。
 - **内蔵ブラウザ UX 強化＆macOS / Windows / Linux クロスプラットフォーム修正**:
   - 数値指定のカスタム幅 (`px`)、ワンクリック **Markdown クリップ**、全 OS でネイティブ子 WebView に隠れないインライン `⋮` 操作帯＆上方向ツールチップ、**表示位置再同期（修復）** を追加しました。
+  - **macOS マルチディスプレイ・混在 DPI 起動時の描画修正**: ウィンドウ復元時に位置移動（対象ディスプレイ確定）をサイズ設定より先に行い、表示直後に AppKit / WKWebView のスケール再同期を実行することで、Retina（2x）と外部モニター（1x）併用時の起動・アップデート再起動後に 1/4 サイズで縮小描画される不具合を解消しました。
   - **Windows 統合ターミナル**: Shift_JIS / CP932 デコードフォールバックにより日本語 `cmd /C` 出力の途中打ち切りを解消し、`cd ~\` 対応および `taskkill /T /F` によるプロセスツリー強制停止を実装しました。
   - **グローバルホットキー**: Linux Wayland やキー競合等で登録に失敗した際、トースト通知で理由を表示するようにしました。
 - **包括的なセキュリティ強化**:
