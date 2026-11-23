@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FilePlus2,
   FolderOpen,
@@ -34,6 +34,13 @@ import {
 import type { AppMode, Locale, ThemeId, ViewLayout } from '../types';
 import type { Translations } from '../i18n/types';
 import { formatShortcut, isMacOs } from '../utils/platform';
+import {
+  computeNextTopBarLevel,
+  DEFAULT_TOPBAR_SAVED_WIDTHS,
+  measureFlexChildrenNaturalWidth,
+  type TopBarCollapseLevel,
+  type TopBarSavedWidths,
+} from '../utils/toolbarLayout';
 
 interface TopBarProps {
   t: Translations;
@@ -121,6 +128,97 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenUpdateModal,
 }) => {
   const isMac = isMacOs();
+  const topbarRef = useRef<HTMLElement>(null);
+  const leftRef = useRef<HTMLDivElement>(null);
+  const centerRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  const themeBtnRef = useRef<HTMLButtonElement>(null);
+  const localeBtnRef = useRef<HTMLButtonElement>(null);
+  const layoutSwitchRef = useRef<HTMLDivElement>(null);
+  const versionPillRef = useRef<HTMLSpanElement>(null);
+
+  const [collapseLevel, setCollapseLevel] = useState<TopBarCollapseLevel>(0);
+  const savedWidthsRef = useRef<TopBarSavedWidths>({ ...DEFAULT_TOPBAR_SAVED_WIDTHS });
+  const hasLayoutSwitch = mode !== 'simple';
+
+  const evaluateLayout = useCallback(() => {
+    const header = topbarRef.current;
+    if (!header) return;
+
+    const headerStyle = window.getComputedStyle(header);
+    const padL = parseFloat(headerStyle.paddingLeft || '0') || 0;
+    const padR = parseFloat(headerStyle.paddingRight || '0') || 0;
+    const gap = parseFloat(headerStyle.columnGap || headerStyle.gap || '0') || 0;
+    const availableWidth = header.clientWidth - padL - padR - gap * 2;
+    if (availableWidth <= 0) return;
+
+    const leftWidth = measureFlexChildrenNaturalWidth(leftRef.current);
+    const centerWidth = measureFlexChildrenNaturalWidth(centerRef.current);
+    const rightWidth = measureFlexChildrenNaturalWidth(rightRef.current);
+
+    setCollapseLevel((prev) => {
+      const next = computeNextTopBarLevel(
+        prev,
+        { availableWidth, leftWidth, centerWidth, rightWidth },
+        savedWidthsRef.current,
+        hasLayoutSwitch
+      );
+
+      // Record actual saved width right before collapsing a stage
+      if (next > prev) {
+        if (prev < 2 && next >= 2) {
+          const themeW = themeBtnRef.current?.getBoundingClientRect().width ?? 0;
+          const localeW = localeBtnRef.current?.getBoundingClientRect().width ?? 0;
+          const delta = Math.max(0, themeW - 28) + Math.max(0, localeW - 28);
+          if (delta > 16) savedWidthsRef.current[2] = Math.ceil(delta);
+        }
+        if (prev < 3 && next >= 3 && layoutSwitchRef.current) {
+          const labels = layoutSwitchRef.current.querySelectorAll('.topbar-layout-label');
+          let labelDelta = 0;
+          labels.forEach((el) => {
+            const w = el.getBoundingClientRect().width;
+            if (w > 0) labelDelta += w + 5;
+          });
+          if (labelDelta > 16) savedWidthsRef.current[3] = Math.ceil(labelDelta);
+        }
+        if (prev < 4 && next >= 4 && versionPillRef.current) {
+          const pillW = versionPillRef.current.getBoundingClientRect().width;
+          if (pillW > 10) savedWidthsRef.current[4] = Math.ceil(pillW + 7);
+        }
+      }
+
+      return next;
+    });
+  }, [hasLayoutSwitch]);
+
+  useEffect(() => {
+    const el = topbarRef.current;
+    if (!el) return;
+
+    const rafId = window.requestAnimationFrame(evaluateLayout);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => evaluateLayout());
+      ro.observe(el);
+      return () => {
+        window.cancelAnimationFrame(rafId);
+        ro.disconnect();
+      };
+    }
+
+    window.addEventListener('resize', evaluateLayout);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', evaluateLayout);
+    };
+  }, [evaluateLayout]);
+
+  // Re-evaluate after a level change or content change so multi-step collapses settle smoothly
+  useEffect(() => {
+    const rafId = window.requestAnimationFrame(evaluateLayout);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [collapseLevel, mode, locale, theme, updateAvailableVersion, updateReadyToInstall, isMarkdown, evaluateLayout]);
+
   const nextTheme = (): ThemeId => {
     const order: ThemeId[] = ['light', 'dark', 'sepia', 'midnight'];
     const idx = order.indexOf(theme);
@@ -130,18 +228,41 @@ export const TopBar: React.FC<TopBarProps> = ({
   const ThemeIcon =
     theme === 'light' ? Sun : theme === 'sepia' ? BookOpen : theme === 'midnight' ? MoonStar : Moon;
 
+  const isRelaxedCenter = collapseLevel >= 1;
+  const isRightLabelsHidden = collapseLevel >= 2;
+  const isLayoutLabelsHidden = collapseLevel >= 3;
+  const isVersionHidden = collapseLevel >= 4;
+
+  const themeTooltip =
+    locale === 'ja' ? `テーマ: ${t.themes[theme]}` : `Theme: ${t.themes[theme]}`;
+  const localeTooltip =
+    locale === 'ja' ? '言語切替 (日本語 / English)' : 'Switch Language (English / 日本語)';
+
   return (
-    <header className="topbar">
-      <div className="topbar-left">
+    <header
+      ref={topbarRef}
+      className={[
+        'topbar',
+        isRelaxedCenter ? 'is-relaxed-center' : '',
+        isLayoutLabelsHidden ? 'is-layout-compact' : '',
+        isVersionHidden ? 'is-version-hidden' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div className="topbar-left" ref={leftRef}>
         <button
           type="button"
           className="brand-btn"
           onClick={onOpenAbout}
-          title={t.actions.about}
+          data-tooltip={t.actions.about}
+          aria-label={t.actions.about}
         >
           <img src="/icon.png" alt="Onigiri Editor" className="brand-icon" />
           <span className="brand-name">{t.appName}</span>
-          <span className="version-pill">{t.versionLabel}</span>
+          <span className="version-pill" ref={versionPillRef}>
+            {t.versionLabel}
+          </span>
         </button>
 
         {updateAvailableVersion && onOpenUpdateModal && (
@@ -149,7 +270,8 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className={`topbar-update-pill ${updateReadyToInstall ? 'is-ready' : ''}`}
             onClick={onOpenUpdateModal}
-            title={t.updates.availableBannerTitle.replace('{version}', updateAvailableVersion)}
+            data-tooltip={t.updates.availableBannerTitle.replace('{version}', updateAvailableVersion)}
+            aria-label={t.updates.availableBannerTitle.replace('{version}', updateAvailableVersion)}
           >
             <Download size={11} />
             <span>
@@ -165,7 +287,8 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className={`icon-btn ${showSidebar ? 'is-active' : ''}`}
             onClick={onToggleSidebar}
-            title={t.actions.sidebar}
+            data-tooltip={t.actions.sidebar}
+            aria-label={t.actions.sidebar}
           >
             <PanelLeft size={16} />
           </button>
@@ -176,7 +299,9 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className="icon-btn"
             onClick={onNewFile}
-            title={`${t.actions.newFile} (${formatShortcut('⌘N')})`}
+            data-tooltip={t.actions.newFile}
+            data-tooltip-shortcut={formatShortcut('⌘N')}
+            aria-label={t.actions.newFile}
           >
             <FilePlus2 size={16} />
           </button>
@@ -184,7 +309,9 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className="icon-btn"
             onClick={onOpenFile}
-            title={`${t.actions.openFile} (${formatShortcut('⌘O')})`}
+            data-tooltip={t.actions.openFile}
+            data-tooltip-shortcut={formatShortcut('⌘O')}
+            aria-label={t.actions.openFile}
           >
             <FileCode2 size={16} />
           </button>
@@ -193,7 +320,8 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               className="icon-btn"
               onClick={onOpenFolder}
-              title={t.actions.openFolder}
+              data-tooltip={t.actions.openFolder}
+              aria-label={t.actions.openFolder}
             >
               <FolderOpen size={16} />
             </button>
@@ -202,27 +330,30 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className={`icon-btn ${isDirty ? 'is-accent' : ''}`}
             onClick={onSave}
-            title={`${t.actions.save} (${formatShortcut('⌘S')})`}
+            data-tooltip={t.actions.save}
+            data-tooltip-shortcut={formatShortcut('⌘S')}
+            aria-label={t.actions.save}
           >
             <Save size={16} />
           </button>
         </div>
 
         {mode !== 'advanced' && (
-          <span className="basic-doc-title" title={activeTitle}>
+          <span className="basic-doc-title" data-tooltip={activeTitle}>
             {activeTitle}
             {isDirty ? <span className="dirty-dot" /> : null}
           </span>
         )}
       </div>
 
-      <div className="topbar-center">
+      <div className="topbar-center" ref={centerRef}>
         <div className="segmented-control mode-switch" role="tablist">
           <button
             type="button"
             className={`seg-btn ${mode === 'simple' ? 'is-active' : ''}`}
             onClick={() => onModeChange('simple')}
-            title={t.modes.simpleHint}
+            data-tooltip={t.modes.simpleHint}
+            aria-label={t.modes.simple}
           >
             {t.modes.simple}
           </button>
@@ -230,7 +361,8 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className={`seg-btn ${mode === 'basic' ? 'is-active' : ''}`}
             onClick={() => onModeChange('basic')}
-            title={t.modes.basicHint}
+            data-tooltip={t.modes.basicHint}
+            aria-label={t.modes.basic}
           >
             {t.modes.basic}
           </button>
@@ -238,7 +370,8 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className={`seg-btn ${mode === 'advanced' ? 'is-active' : ''}`}
             onClick={() => onModeChange('advanced')}
-            title={t.modes.advancedHint}
+            data-tooltip={t.modes.advancedHint}
+            aria-label={t.modes.advanced}
           >
             <Sparkles size={13} />
             {t.modes.advanced}
@@ -246,46 +379,51 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
 
         {mode !== 'simple' && (
-          <div className="segmented-control layout-switch">
+          <div className="segmented-control layout-switch" ref={layoutSwitchRef}>
             <button
               type="button"
               className={`seg-btn ${layout === 'editor' ? 'is-active' : ''}`}
               onClick={() => onLayoutChange('editor')}
-              title={t.layouts.editor}
+              data-tooltip={t.layouts.editor}
+              aria-label={t.layouts.editor}
             >
               <PenLine size={14} />
-              <span className="hide-sm">{t.layouts.editor}</span>
+              <span className="topbar-layout-label">{t.layouts.editor}</span>
             </button>
             <button
               type="button"
               className={`seg-btn ${layout === 'split' ? 'is-active' : ''}`}
               onClick={() => onLayoutChange('split')}
-              title={t.layouts.split}
+              data-tooltip={t.layouts.split}
+              aria-label={t.layouts.split}
             >
               <Columns2 size={14} />
-              <span className="hide-sm">{t.layouts.split}</span>
+              <span className="topbar-layout-label">{t.layouts.split}</span>
             </button>
             <button
               type="button"
               className={`seg-btn ${layout === 'preview' ? 'is-active' : ''}`}
               onClick={() => onLayoutChange('preview')}
-              title={t.layouts.preview}
+              data-tooltip={t.layouts.preview}
+              aria-label={t.layouts.preview}
             >
               <Eye size={14} />
-              <span className="hide-sm">{t.layouts.preview}</span>
+              <span className="topbar-layout-label">{t.layouts.preview}</span>
             </button>
           </div>
         )}
       </div>
 
-      <div className="topbar-right">
+      <div className="topbar-right" ref={rightRef}>
         {mode === 'advanced' && (
           <>
             <button
               type="button"
               className="pill-btn"
               onClick={onOpenCommandPalette}
-              title={`${t.actions.commandPalette} (${formatShortcut('⌘K')})`}
+              data-tooltip={t.actions.commandPalette}
+              data-tooltip-shortcut={formatShortcut('⌘K')}
+              aria-label={t.actions.commandPalette}
             >
               {isMac ? <Command size={13} /> : <span>Ctrl+</span>}
               <span>K</span>
@@ -300,7 +438,12 @@ export const TopBar: React.FC<TopBarProps> = ({
               onOpenUnusedAssets ||
               onToggleFocusMode) && (
               <div className="dropdown-wrapper">
-                <button type="button" className="icon-btn" title={t.actions.newFromTemplate}>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  data-tooltip={t.actions.newFromTemplate}
+                  aria-label={t.actions.newFromTemplate}
+                >
                   <Wrench size={15} />
                 </button>
                 <div className="dropdown-menu">
@@ -368,13 +511,19 @@ export const TopBar: React.FC<TopBarProps> = ({
                 type="button"
                 className="icon-btn"
                 onClick={onOpenSlidePresentation}
-                title={t.actions.slidePresentation}
+                data-tooltip={t.actions.slidePresentation}
+                aria-label={t.actions.slidePresentation}
               >
                 <Presentation size={15} />
               </button>
             )}
             <div className="dropdown-wrapper">
-              <button type="button" className="icon-btn" title={t.actions.exportHtml}>
+              <button
+                type="button"
+                className="icon-btn"
+                data-tooltip={t.actions.exportHtml}
+                aria-label={t.actions.exportHtml}
+              >
                 <Download size={16} />
               </button>
               <div className="dropdown-menu">
@@ -395,7 +544,9 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               className="icon-btn"
               onClick={onToggleZen}
-              title={`${t.actions.zenMode} (${formatShortcut('⌘⇧F')})`}
+              data-tooltip={t.actions.zenMode}
+              data-tooltip-shortcut={formatShortcut('⌘⇧F')}
+              aria-label={t.actions.zenMode}
             >
               <Maximize2 size={15} />
             </button>
@@ -403,30 +554,36 @@ export const TopBar: React.FC<TopBarProps> = ({
         )}
 
         <button
+          ref={themeBtnRef}
           type="button"
-          className="pill-btn"
+          className={`pill-btn topbar-theme-btn ${isRightLabelsHidden ? 'is-icon-only' : ''}`}
           onClick={() => onThemeChange(nextTheme())}
-          title={t.themes[theme]}
+          data-tooltip={themeTooltip}
+          aria-label={themeTooltip}
         >
           <ThemeIcon size={14} />
-          <span className="hide-md">{t.themes[theme]}</span>
+          <span className="topbar-btn-label">{t.themes[theme]}</span>
         </button>
 
         <button
+          ref={localeBtnRef}
           type="button"
-          className="pill-btn"
+          className={`pill-btn topbar-locale-btn ${isRightLabelsHidden ? 'is-icon-only' : ''}`}
           onClick={() => onLocaleChange(locale === 'ja' ? 'en' : 'ja')}
-          title="Switch Language (日本語 / English)"
+          data-tooltip={localeTooltip}
+          aria-label={localeTooltip}
         >
           <Languages size={14} />
-          <span>{locale === 'ja' ? '日本語' : 'EN'}</span>
+          <span className="topbar-btn-label">{locale === 'ja' ? '日本語' : 'EN'}</span>
         </button>
 
         <button
           type="button"
           className="icon-btn"
           onClick={onOpenSettings}
-          title={`${t.actions.settings} (${formatShortcut('⌘,')})`}
+          data-tooltip={t.actions.settings}
+          data-tooltip-shortcut={formatShortcut('⌘,')}
+          aria-label={t.actions.settings}
         >
           <Settings size={15} />
         </button>
@@ -436,7 +593,8 @@ export const TopBar: React.FC<TopBarProps> = ({
             type="button"
             className={`pill-btn options-toggle-btn ${showInspector ? 'is-active' : ''}`}
             onClick={onToggleInspector}
-            title={t.actions.optionsPanel}
+            data-tooltip={t.actions.optionsPanel}
+            aria-label={t.actions.optionsPanel}
           >
             <Bot size={14} />
             <PanelRight size={14} />

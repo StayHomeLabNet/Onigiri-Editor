@@ -1024,6 +1024,7 @@
 @media print {
   .topbar,
   .format-toolbar,
+  .format-toolbar-wrap,
   .tabbar,
   .sidebar,
   .inspector,

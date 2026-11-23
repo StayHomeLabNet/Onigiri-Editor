@@ -1,6 +1,15 @@
-Onigiri Editor `v1.3.6` brings **Apple Foundation Models (Apple Intelligence)** on-device AI support for macOS, **Long-Press / Right-Click Submenus** for Toolbar AI Custom Buttons, **All-Mode Status Bar Mode Switching** when the header bar is hidden, and a major **Keyboard Shortcuts Expansion (112 built-in commands + dynamic AI Custom & submenu shortcuts)**.
+Onigiri Editor `v1.3.6` brings **Apple Foundation Models (Apple Intelligence)** on-device AI support for macOS, **Long-Press / Right-Click Submenus** for Toolbar AI Custom Buttons, **All-Mode Status Bar Mode Switching** when the header bar is hidden, a major **Keyboard Shortcuts Expansion (112 built-in commands + dynamic AI Custom & submenu shortcuts)**, **Responsive Header & Toolbar Layout with Instant Custom Tooltips**, and **Optimized Default Prompts for AI Translate**.
 
 ### Highlights (`v1.3.6`)
+- **Responsive Header & Format Toolbar Polish (Anti-Wrapping & Measurement-Based Progressive Collapse)**:
+  - Button labels never wrap vertically onto multiple lines (`white-space: nowrap; flex-shrink: 0`).
+  - Progressively collapses labels based on real-time DOM measurements and hysteresis: TopBar relaxes center-balance to borrow left margin, then collapses Theme and Language labels (to 28×28px icon buttons), layout switch labels, and version badge; FormatToolbar collapses "Copy Rich Text" label first, then "AI Clean" (to 26×26px icon buttons).
+  - Automatically hides redundant New / Open / Save file buttons in the Format Toolbar when the top header bar is already visible (saving ~90px of space).
+  - Added gradient edge fade masks, smooth `<` / `>` scroll buttons, and horizontal mouse wheel scrolling support when the toolbar overflows in narrow windows.
+- **Instant Custom Tooltips (`0.15s` Quick Hover & Shortcut Badges)**:
+  - Replaced delayed native tooltips on header and toolbar controls with a lightweight, theme-aware Portal tooltip layer displaying within 0.15s, featuring `<kbd>` shortcut badges and zero edge clipping.
+- **Optimized Default Prompt for "AI Translate" Preset**:
+  - Upgraded the built-in AI Translate preset prompt with structured `# 命令` (automatic English ↔ Japanese language detection) and `# 制約事項` (strict prohibition of conversational filler and preservation of original markdown formatting).
 - **macOS Only: Apple Foundation Models (Apple Intelligence) On-Device AI Provider**:
   - Select **Apple Foundation Models** under **Local AI** in AI Chat (visible on macOS only) to run Apple's on-device Foundation Models completely offline and free with zero external API keys or servers (requires Apple Silicon Mac running macOS 26+ with Apple Intelligence enabled; weak-linked so older macOS versions still launch safely).
   - Supports both **Apple Intelligence (Default)** and **Apple Intelligence (Content Transformations / Permissive)** modes for smoother translation, proofreading, and rewriting across AI Chat, Inline AI Edit, and Toolbar AI Custom buttons.
@@ -25,9 +34,18 @@ Onigiri Editor `v1.3.6` brings **Apple Foundation Models (Apple Intelligence)** 
 
 ---
 
-Onigiri Editor `v1.3.6` では、Mac 版限定のオンデバイス AI **Apple Foundation Models（Apple Intelligence）対応**、ツールバー AIカスタムボタンの **長押し／右クリックによるサブメニュー展開**、上部ヘッダーバー非表示時の **全モード対応ステータスバー・モード移動ボタン**、および **全 112 コマンド＋AIカスタム（親ボタン＆サブメニュー）対応のキーボードショートカット大幅拡充** を実装しました。
+Onigiri Editor `v1.3.6` では、Mac 版限定のオンデバイス AI **Apple Foundation Models（Apple Intelligence）対応**、ツールバー AIカスタムボタンの **長押し／右クリックによるサブメニュー展開**、上部ヘッダーバー非表示時の **全モード対応ステータスバー・モード移動ボタン**、**全 112 コマンド＋AIカスタム（親ボタン＆サブメニュー）対応のキーボードショートカット大幅拡充**、**ヘッダー＆書式ツールバーのレスポンシブ刷新・即時カスタムツールチップ**、および **「AI翻訳」デフォルトプロンプトの最適化** を実装しました。
 
 ### 主な変更点（`v1.3.6`）
+- **ヘッダー＆書式ツールバーのレスポンシブ刷新（改行防止・実測ベース段階的折りたたみ・重複ボタン整理）**:
+  - ウィンドウ幅が狭くなってもボタン内のラベル文字が改行されないよう `white-space: nowrap` と `flex-shrink: 0` を徹底しました。
+  - 実測ベース（ResizeObserver）とチラつき防止ヒステリシスによる段階的なアイコン化を導入：書式ツールバーは「リッチテキストでコピー」→「AI出力を整形」の順で段階的に 26×26px のアイコンボタンへ移行し、ヘッダーバーは中央寄せを自動融通した上で「テーマ」「言語」→「レイアウト切替」→「バージョンバッジ」を順次コンパクト化します。
+  - 上部ヘッダーバーが表示されている時は書式ツールバー側の重複していたファイル操作ボタン（新規・開く・保存）を自動非表示にして約 90px の横幅を節約し、上部バー非表示時のみツールバー側に表示します。
+  - アイコン化しても入りきらない狭い幅では、左右にグラデーションのフェード影とスクロール矢印ボタン（`<` / `>`）を表示し、マウスホイールでの横スクロールにも対応しました。
+- **即座に出るカスタムツールチップ（0.15秒・ショートカットバッジ付き）**:
+  - ヘッダー・ツールバーのオンマウス表示を、待ち時間がなく（0.15 秒）テーマ色に馴染んだカスタムツールチップに刷新。ショートカットキーを `<kbd>` バッジで並べ、React Portal 描画で見切れを防止しました。
+- **「AI翻訳」初期プリセットプロンプトの最適化**:
+  - デフォルトの AI 翻訳プロンプトを構造化された命令（`# 命令`、英語⇔日本語の自動判定ルール）と制約事項（`# 制約事項`、前置き・解説の禁止、原文の改行構造維持）に刷新し、出力精度を高めました。
 - **Mac 版限定: Apple Foundation Models（Apple Intelligence）プロバイダー対応**:
   - macOS 版のみ AI チャットの「ローカル AI」一覧に **Apple Foundation Models** を追加。API キーや外部サーバー不要・完全オフラインかつ無料でオンデバイス推論を利用できます（Apple Silicon 搭載 Mac・macOS 26 以降・Apple Intelligence 有効環境で動作。フレームワークは弱リンクのため旧 macOS でも問題なく起動します）。
   - **Apple Intelligence（標準）** と翻訳・校正・リライト向けの **Apple Intelligence（文章変換向け）** の 2 モードを選択可能。AI チャット・選択範囲インライン編集・ツールバー AIカスタムボタンのすべてで利用でき、ストリーミング進捗表示・キャンセル・接続サポートからの「システム設定を開く」ボタンを備えています。

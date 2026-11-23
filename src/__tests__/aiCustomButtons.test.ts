@@ -20,9 +20,12 @@ describe('aiCustomButtons', () => {
     expect(preset.name).toBe('AI翻訳');
     expect(preset.icon).toBe('languages');
     expect(preset.prompt).toBe(DEFAULT_AI_TRANSLATE_PROMPT);
-    expect(preset.prompt).toContain('この文章が英文であれば、日本語に翻訳してください');
-    expect(preset.prompt).toContain('この文章が日本語であれば、英文に翻訳してください');
-    expect(preset.prompt).toContain('返答は、翻訳結果だけにしてください');
+    expect(preset.prompt).toContain('入力テキストの言語を自動判定し、以下のルールに従って翻訳を実行せよ。');
+    expect(preset.prompt).toContain('* 英語 → 日本語（自然で読みやすい日本語に翻訳）');
+    expect(preset.prompt).toContain('* 日本語 → 英語（自然で適切な英語に翻訳）');
+    expect(preset.prompt).toContain('* 翻訳結果のテキストのみを出力すること。');
+    expect(preset.prompt).toContain('* 「以下が翻訳結果です」などの前置き、挨拶、解説、注釈は一切禁止する。');
+    expect(preset.prompt).toContain('* 原文のニュアンスと改行構造を可能な限り維持すること。');
     expect(preset.replaceContent).toBe(true);
     expect(preset.copyToClipboard).toBe(false);
     expect(preset.submenuEnabled).toBe(false);

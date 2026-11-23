@@ -102,6 +102,15 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 
 ## What's New in v1.3.6
 
+- **Responsive Header & Format Toolbar Polish (Anti-Wrapping & Measurement-Based Progressive Collapse)**:
+  - Button labels never wrap vertically onto multiple lines (`white-space: nowrap; flex-shrink: 0`).
+  - Progressively collapses labels based on real-time DOM measurements and hysteresis: TopBar relaxes center-balance to borrow left margin, then collapses Theme and Language labels (to 28×28px icon buttons), layout switch labels, and version badge; FormatToolbar collapses "Copy Rich Text" label first, then "AI Clean" (to 26×26px icon buttons).
+  - Automatically hides redundant New / Open / Save file buttons in the Format Toolbar when the top header bar is already visible (saving ~90px of space).
+  - Added gradient edge fade masks, smooth `<` / `>` scroll buttons, and horizontal mouse wheel scrolling support when the toolbar overflows in narrow windows.
+- **Instant Custom Tooltips (`0.15s` Quick Hover & Shortcut Badges)**:
+  - Replaced delayed native tooltips on header and toolbar controls with a lightweight, theme-aware Portal tooltip layer displaying within 0.15s, featuring `<kbd>` shortcut badges and zero edge clipping.
+- **Optimized Default Prompt for "AI Translate" Preset**:
+  - Upgraded the built-in AI Translate preset prompt with structured `# 命令` (automatic English ↔ Japanese language detection) and `# 制約事項` (strict prohibition of conversational filler and preservation of original markdown formatting).
 - **macOS Only: Apple Foundation Models (Apple Intelligence) AI Provider**:
   - Select **Apple Foundation Models** under **Local AI** on macOS (Apple Silicon, macOS 26+ with Apple Intelligence enabled; weak-linked so older macOS versions continue running safely) to run private on-device inference offline for free.
   - Supports both **Default** and **Content Transformations (Permissive)** guardrails, live streaming progress, cancellation, and a 1-click **Open System Settings** button in Connection Support across AI Chat, Inline AI Edit, and AI Custom buttons.

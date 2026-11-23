@@ -197,6 +197,7 @@ import {
   type PersistedTabRecord,
 } from './utils/session';
 import { TopBar } from './components/TopBar';
+import { TooltipLayer } from './components/TooltipLayer';
 import { FormatToolbar } from './components/FormatToolbar';
 import { TabBar } from './components/TabBar';
 import { Sidebar } from './components/Sidebar';
@@ -6836,6 +6837,7 @@ export function App() {
             <FormatToolbar
               t={t}
               mode={mode}
+              showFileActions={!isTopBarVisible}
               onAction={handleToolbarAction}
               isDirty={activeTab.dirty}
               isEditorSplit={editorSplitVertical}
@@ -8149,6 +8151,8 @@ export function App() {
       )}
 
       {toast && <div className="toast-banner">{toast}</div>}
+
+      <TooltipLayer />
 
       {printMode === 'source' && (
         <div id="print-source-sheet" className="print-source-sheet" aria-hidden="true">
