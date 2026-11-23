@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.3.6',
+  versionLabel: 'v1.4.0',
   modes: {
     simple: 'Simple',
     basic: 'Basic',

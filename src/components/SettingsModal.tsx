@@ -34,6 +34,7 @@ import { formatUpdateCheckTime, isVersionSkipped } from './UpdateModal';
 import { AiCustomIcon } from './AiCustomIcon';
 import {
   AI_CUSTOM_ICON_OPTIONS,
+  AI_PROMPT_VARIABLE_TOKENS,
   MAX_AI_CUSTOM_BUTTONS,
   MAX_AI_CUSTOM_SUBMENU_ITEMS,
   cloneDefaultAiCustomButtons,
@@ -992,6 +993,94 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     )}
                 </div>
 
+                <div className="settings-card">
+                  <div className="settings-card-title">
+                    {locale === 'ja' ? 'ツール・ユーティリティの ON / OFF' : 'Tools & Utilities'}
+                  </div>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.customTooltipsEnabled ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({ ...settings, customTooltipsEnabled: e.target.checked })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? 'カスタムツールチップ（0.15秒表示・ショートカットバッジ付き）を有効にする'
+                        : 'Enable instant custom tooltips (0.15s hover with shortcut badges)'}
+                    </span>
+                  </label>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.scratchpadEnabled ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({ ...settings, scratchpadEnabled: e.target.checked })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? 'クイック・スクラッチパッド（保存不要メモ）をステータスバーに表示'
+                        : 'Enable Quick Scratchpad button in Status Bar'}
+                    </span>
+                  </label>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.integratedTerminalEnabled ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          integratedTerminalEnabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? '軽量統合ターミナル（拡張モード下部ドロワー）を有効にする'
+                        : 'Enable Lightweight Integrated Terminal drawer (Advanced Mode)'}
+                    </span>
+                  </label>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.globalHotkeyEnabled)}
+                      onChange={(e) =>
+                        onSettingsChange({ ...settings, globalHotkeyEnabled: e.target.checked })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? 'グローバル呼び出しショートカット（他アプリから最前面に表示）を有効にする'
+                        : 'Enable Global Hotkey to summon Onigiri Editor from any app'}
+                    </span>
+                  </label>
+
+                  {settings.globalHotkeyEnabled && (
+                    <div className="field-row" style={{ marginTop: 6 }}>
+                      <label>
+                        {locale === 'ja'
+                          ? 'グローバルショートカット（例: CommandOrControl+Shift+Space）'
+                          : 'Global Shortcut (e.g. CommandOrControl+Shift+Space)'}
+                      </label>
+                      <input
+                        type="text"
+                        className="text-input"
+                        value={settings.globalHotkeyShortcut ?? 'CommandOrControl+Shift+Space'}
+                        onChange={(e) =>
+                          onSettingsChange({ ...settings, globalHotkeyShortcut: e.target.value })
+                        }
+                        placeholder="CommandOrControl+Shift+Space"
+                      />
+                    </div>
+                  )}
+                </div>
+
                 <div className="field-row">
                   <label>{t.inspector.settingsLabels.customCss}</label>
                   <textarea
@@ -1440,6 +1529,91 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span>{t.inspector.settingsLabels.oeditLineCopyIncludeNewline}</span>
                   </label>
                 </div>
+
+                <div className="settings-card">
+                  <div className="settings-card-title">
+                    {locale === 'ja'
+                      ? '執筆アシスト・AI 補完・テーブル操作'
+                      : 'Writing Assist, AI Autocomplete & Table Bar'}
+                  </div>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.selectionBubbleMenuEnabled ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          selectionBubbleMenuEnabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? '選択範囲フローティングミニバー（太字・コード・リンク・AI編集）を表示'
+                        : 'Show Selection Floating Bubble Menu (Format & Quick AI)'}
+                    </span>
+                  </label>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={settings.markdownTableBarEnabled ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          markdownTableBarEnabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? 'Markdown テーブル GUI 編集バー（行・列操作＆ソート）を表示'
+                        : 'Show Markdown Table GUI Toolbar (Rows, Columns, Align & Sort)'}
+                    </span>
+                  </label>
+
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(settings.aiGhostTextEnabled)}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          aiGhostTextEnabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>
+                      {locale === 'ja'
+                        ? 'AI ゴーストテキスト補完（入力停止後に薄字表示・Tab で確定 / Esc で却下）'
+                        : 'Enable AI Ghost Text Autocomplete (Tab to accept, Esc to dismiss)'}
+                    </span>
+                  </label>
+
+                  {settings.aiGhostTextEnabled && (
+                    <div className="field-row" style={{ marginTop: 6 }}>
+                      <label>
+                        {locale === 'ja'
+                          ? `補完トリガー待ち時間: ${settings.aiGhostTextDelayMs ?? 900} ms`
+                          : `Autocomplete trigger delay: ${settings.aiGhostTextDelayMs ?? 900} ms`}
+                      </label>
+                      <input
+                        type="range"
+                        min={400}
+                        max={2500}
+                        step={100}
+                        value={settings.aiGhostTextDelayMs ?? 900}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            aiGhostTextDelayMs: Number(e.target.value),
+                          })
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1830,6 +2004,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               handlePatchAiCustomButton(btn.id, { prompt: e.target.value })
                             }
                           />
+                          <div className="ai-prompt-vars-row">
+                            <span className="ai-prompt-vars-label">
+                              {locale === 'ja' ? '変数挿入:' : 'Variables:'}
+                            </span>
+                            {AI_PROMPT_VARIABLE_TOKENS.map((v) => (
+                              <button
+                                key={v.token}
+                                type="button"
+                                className="ai-prompt-var-chip"
+                                onClick={() =>
+                                  handlePatchAiCustomButton(btn.id, {
+                                    prompt: `${btn.prompt}${btn.prompt && !btn.prompt.endsWith(' ') && !btn.prompt.endsWith('\n') ? ' ' : ''}${v.token}`,
+                                  })
+                                }
+                                title={locale === 'ja' ? `${v.labelJa} を挿入` : `Insert ${v.labelEn}`}
+                              >
+                                {v.token}
+                              </button>
+                            ))}
+                          </div>
                         </div>
 
                         <div className="field-row">
@@ -2121,6 +2315,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                             })
                                           }
                                         />
+                                        <div className="ai-prompt-vars-row">
+                                          <span className="ai-prompt-vars-label">
+                                            {locale === 'ja' ? '変数:' : 'Vars:'}
+                                          </span>
+                                          {AI_PROMPT_VARIABLE_TOKENS.map((v) => (
+                                            <button
+                                              key={v.token}
+                                              type="button"
+                                              className="ai-prompt-var-chip"
+                                              onClick={() =>
+                                                handlePatchAiCustomSubmenuItem(btn, sub.id, {
+                                                  prompt: `${sub.prompt}${sub.prompt && !sub.prompt.endsWith(' ') && !sub.prompt.endsWith('\n') ? ' ' : ''}${v.token}`,
+                                                })
+                                              }
+                                              title={
+                                                locale === 'ja'
+                                                  ? `${v.labelJa} を挿入`
+                                                  : `Insert ${v.labelEn}`
+                                              }
+                                            >
+                                              {v.token}
+                                            </button>
+                                          ))}
+                                        </div>
                                       </div>
 
                                       <div className="field-row">

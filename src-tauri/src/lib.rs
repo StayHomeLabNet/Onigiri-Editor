@@ -5,6 +5,7 @@ mod images;
 mod live_preview;
 mod menu;
 mod project;
+mod terminal;
 mod updates;
 mod window_state;
 
@@ -18,6 +19,45 @@ use tauri::{Emitter, Manager, State};
 use walkdir::WalkDir;
 
 struct OpenedFilesState(Mutex<Vec<String>>);
+
+struct GlobalHotkeyState(Mutex<Option<String>>);
+
+#[tauri::command]
+fn set_global_hotkey(
+    app: tauri::AppHandle,
+    state: State<'_, GlobalHotkeyState>,
+    enabled: bool,
+    shortcut: String,
+) -> Result<String, String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+    let gs = app.global_shortcut();
+    let mut guard = state.0.lock().map_err(|_| "Hotkey lock poisoned".to_string())?;
+
+    if let Some(prev) = guard.take() {
+        let _ = gs.unregister(prev.as_str());
+    }
+
+    let trimmed = shortcut.trim().to_string();
+    if !enabled || trimmed.is_empty() {
+        return Ok(String::new());
+    }
+
+    gs.on_shortcut(trimmed.as_str(), move |app_handle, _shortcut, event| {
+        if event.state == ShortcutState::Pressed {
+            if let Some(win) = app_handle.get_webview_window(window_state::MAIN_WINDOW_LABEL) {
+                let _ = win.unminimize();
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            let _ = app_handle.emit("global-hotkey-triggered", ());
+        }
+    })
+    .map_err(|e| format!("Failed to register global shortcut '{}': {}", trimmed, e))?;
+
+    *guard = Some(trimmed.clone());
+    Ok(trimmed)
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2660,11 +2700,14 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(OpenedFilesState(Mutex::new(initial_files)))
+        .manage(GlobalHotkeyState(Mutex::new(None)))
         .manage(live_preview::LivePreviewState::new())
         .manage(project::ProjectServerState::new())
         .manage(window_state::WindowStateManager::new())
         .manage(ai::AiChatState::new())
+        .manage(terminal::TerminalState::new())
         .manage(updates::UpdateManagerState::new())
         .setup(|app| {
             window_state::restore_main_window_state(app.handle());
@@ -2751,6 +2794,9 @@ pub fn run() {
             project::get_project_dev_server_status,
             project::find_free_project_port,
             project::assist_project_setup,
+            terminal::terminal_run_command,
+            terminal::terminal_kill_command,
+            set_global_hotkey,
             clear_app_caches,
             reset_window_state
         ])

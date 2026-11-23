@@ -117,10 +117,13 @@ import {
 import {
   cleanAiCustomResponse,
   cloneDefaultAiCustomButtons,
+  expandAiPromptVariables,
   getActiveSubmenuItems,
+  hasClipboardVariable,
   normalizeAiCustomButtons,
   resolveAiProviderCallOptions,
 } from './utils/aiCustomButtons';
+import { buildExportPageCss, DEFAULT_EXPORT_PAGE_SETTINGS } from './utils/exportPresets';
 import {
   browserClose,
   browserNavAction,
@@ -147,10 +150,12 @@ import {
   indexWorkspaceNotes,
   isMacOs,
   isTauri,
+  listenGlobalHotkey,
   migrateTempImagesOnSave,
   openFolderDialog,
   openInExternalBrowser,
   openMarkdownFileDialog,
+  readClipboardText,
   readFileByPath,
   readProjectConfigBundle,
   rebuildAppMenu,
@@ -158,6 +163,7 @@ import {
   replaceInWorkspace,
   resetWindowState,
   revealInFileManager,
+  setGlobalHotkey,
   saveBinaryExportFile,
   saveExportFile,
   saveImageAsset,
@@ -198,6 +204,9 @@ import {
 } from './utils/session';
 import { TopBar } from './components/TopBar';
 import { TooltipLayer } from './components/TooltipLayer';
+import { ExportOptionsModal } from './components/ExportOptionsModal';
+import { ScratchpadModal } from './components/ScratchpadModal';
+import { TerminalDrawer } from './components/TerminalDrawer';
 import { FormatToolbar } from './components/FormatToolbar';
 import { TabBar } from './components/TabBar';
 import { Sidebar } from './components/Sidebar';
@@ -364,6 +373,16 @@ const DEFAULT_SETTINGS: EditorSettings = {
   showFormatToolbar: true,
   showFormatToolbarInSimpleMode: false,
   aiCustomButtons: cloneDefaultAiCustomButtons(),
+  selectionBubbleMenuEnabled: true,
+  aiGhostTextEnabled: false,
+  aiGhostTextDelayMs: 900,
+  markdownTableBarEnabled: true,
+  exportPageSettings: DEFAULT_EXPORT_PAGE_SETTINGS,
+  scratchpadEnabled: true,
+  globalHotkeyEnabled: false,
+  globalHotkeyShortcut: 'CommandOrControl+Shift+Space',
+  integratedTerminalEnabled: true,
+  customTooltipsEnabled: true,
 };
 
 const DEFAULT_CLEAN_OPTS: AiCleanOptions = {
@@ -535,6 +554,52 @@ export function App() {
   const [showPalette, setShowPalette] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [exportOptionsModalMode, setExportOptionsModalMode] = useState<'html' | 'pdf' | null>(null);
+  const [showScratchpad, setShowScratchpad] = useState(false);
+  const [scratchpadContent, setScratchpadContent] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem('onigiri-editor.scratchpad') ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [showTerminal, setShowTerminal] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('onigiri-editor.scratchpad', scratchpadContent);
+    } catch {
+      // Ignore storage quota errors
+    }
+  }, [scratchpadContent]);
+
+  useEffect(() => {
+    if (settings.integratedTerminalEnabled === false && showTerminal) {
+      setShowTerminal(false);
+    }
+  }, [settings.integratedTerminalEnabled, showTerminal]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const enabled = Boolean(settings.globalHotkeyEnabled);
+    const shortcut = (settings.globalHotkeyShortcut || 'CommandOrControl+Shift+Space').trim();
+    void setGlobalHotkey(enabled, shortcut).catch(() => {
+      // Ignore unavailable shortcut registration errors (e.g. Wayland or conflict)
+    });
+  }, [settings.globalHotkeyEnabled, settings.globalHotkeyShortcut]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    void listenGlobalHotkey(() => {
+      editorRef.current?.focus();
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
   const [dataSummaryTick, setDataSummaryTick] = useState(0);
@@ -3666,31 +3731,43 @@ export function App() {
     }
   }, [notify, t.toasts.htmlPasted, t.toasts.noClipboardHtml]);
 
-  const handleExportHtml = useCallback(async () => {
-    const rawHtmlBody = await renderMarkdownToHtml(activeTab.content);
-    const docBaseDir = activeTab.filePath || workspaceRoot || undefined;
-    const htmlBody =
-      effectiveSettings.embedImagesOnHtmlExport !== false
-        ? await inlineLocalImagesInHtml(rawHtmlBody, docBaseDir)
-        : rawHtmlBody;
-    const full = exportStandaloneHtml(activeTab.title, htmlBody, theme, settings.customCss);
-    const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '');
-    const ok = await runWithHiddenNativeBrowser(() =>
-      saveExportFile(full, `${baseName}.html`, 'HTML', ['html'], 'text/html')
-    );
-    if (ok) notify(t.toasts.exportedSuccess);
-  }, [
-    activeTab.content,
-    activeTab.title,
-    activeTab.filePath,
-    workspaceRoot,
-    effectiveSettings.embedImagesOnHtmlExport,
-    theme,
-    settings.customCss,
-    runWithHiddenNativeBrowser,
-    notify,
-    t.toasts.exportedSuccess,
-  ]);
+  const handleExportHtml = useCallback(
+    async (overridePageSettings?: typeof DEFAULT_EXPORT_PAGE_SETTINGS) => {
+      const rawHtmlBody = await renderMarkdownToHtml(activeTab.content);
+      const docBaseDir = activeTab.filePath || workspaceRoot || undefined;
+      const htmlBody =
+        effectiveSettings.embedImagesOnHtmlExport !== false
+          ? await inlineLocalImagesInHtml(rawHtmlBody, docBaseDir)
+          : rawHtmlBody;
+      const pageOpts = {
+        ...DEFAULT_EXPORT_PAGE_SETTINGS,
+        ...(settings.exportPageSettings ?? {}),
+        ...(overridePageSettings ?? {}),
+      };
+      const pageCss = buildExportPageCss(pageOpts, activeTab.title);
+      const combinedCss = [pageCss, settings.customCss || ''].filter(Boolean).join('\n');
+      const themedBody = `<div class="export-theme-${pageOpts.designTheme}">${htmlBody}</div>`;
+      const full = exportStandaloneHtml(activeTab.title, themedBody, theme, combinedCss);
+      const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '');
+      const ok = await runWithHiddenNativeBrowser(() =>
+        saveExportFile(full, `${baseName}.html`, 'HTML', ['html'], 'text/html')
+      );
+      if (ok) notify(t.toasts.exportedSuccess);
+    },
+    [
+      activeTab.content,
+      activeTab.title,
+      activeTab.filePath,
+      workspaceRoot,
+      effectiveSettings.embedImagesOnHtmlExport,
+      theme,
+      settings.customCss,
+      settings.exportPageSettings,
+      runWithHiddenNativeBrowser,
+      notify,
+      t.toasts.exportedSuccess,
+    ]
+  );
 
   const handleExportDocx = useCallback(async () => {
     try {
@@ -4195,12 +4272,35 @@ export function App() {
     }
   }, [aiConfig, locale, notify, t.gitPanel.noAiProviderToast, t.toasts.errorPrefix]);
 
-  const handleExportPdf = useCallback(() => {
-    setPrintMode('preview');
-    requestAnimationFrame(() => {
-      window.print();
-    });
-  }, []);
+  const handleExportPdf = useCallback(
+    (overridePageSettings?: typeof DEFAULT_EXPORT_PAGE_SETTINGS) => {
+      const pageOpts = {
+        ...DEFAULT_EXPORT_PAGE_SETTINGS,
+        ...(settings.exportPageSettings ?? {}),
+        ...(overridePageSettings ?? {}),
+      };
+      const styleId = 'onigiri-export-page-style';
+      let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        document.head.appendChild(styleEl);
+      }
+      styleEl.textContent = `@media print {\n${buildExportPageCss(pageOpts, activeTab.title)}\n}`;
+      document.body.classList.remove(
+        'export-theme-modern',
+        'export-theme-business',
+        'export-theme-academic'
+      );
+      document.body.classList.add(`export-theme-${pageOpts.designTheme}`);
+
+      setPrintMode('preview');
+      requestAnimationFrame(() => {
+        window.print();
+      });
+    },
+    [settings.exportPageSettings, activeTab.title]
+  );
 
   const handlePrintSource = useCallback(() => {
     setPrintMode('source');
@@ -4210,6 +4310,54 @@ export function App() {
       });
     });
   }, []);
+
+  const handleRequestGhostText = useCallback(
+    async (prefix: string, suffix: string, signal: AbortSignal): Promise<string | null> => {
+      if (signal.aborted) return null;
+      const callOpts = resolveAiProviderCallOptions(aiConfig);
+      const requestId = `ghost-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const onAbort = () => {
+        void cancelAiChat(requestId);
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      try {
+        const res = await sendAiChat({
+          requestId,
+          provider: aiConfig.provider,
+          model: callOpts.model,
+          apiKey: callOpts.apiKey,
+          baseUrl: callOpts.baseUrl,
+          customCliCmd: callOpts.customCliCmd,
+          systemPrompt: [
+            'You are an inline autocomplete engine inside a Markdown/code editor.',
+            'Predict a short, natural continuation (at most 1 short sentence or 1 line) right after <CURSOR>.',
+            'Return ONLY the exact text to insert. No quotes, no markdown fences, no explanations.',
+          ].join('\n'),
+          messages: [
+            {
+              role: 'user',
+              content: `${prefix}<CURSOR>${suffix}`,
+            },
+          ],
+          workspaceDir: workspaceRootRef.current,
+          allowWorkspaceWrite: false,
+        });
+        if (signal.aborted) return null;
+        const cleaned = (res.content || '')
+          .replace(/^```[^\n]*\n?/, '')
+          .replace(/\n?```$/, '')
+          .replace(/<CURSOR>/g, '')
+          .split('\n')[0]
+          .slice(0, 140);
+        return cleaned.trim().length > 0 ? cleaned : null;
+      } catch {
+        return null;
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+      }
+    },
+    [aiConfig]
+  );
 
   const handleOpenInlineAiEdit = useCallback(() => {
     const ed = editorRef.current;
@@ -4647,8 +4795,8 @@ export function App() {
         ? t.settingsModal.aiCustom.submenuDefaultName
         : t.settingsModal.aiCustom.defaultButtonName;
       const buttonName = button.name.trim() || fallbackName;
-      const promptText = button.prompt.trim();
-      if (!promptText) {
+      const rawPromptText = button.prompt.trim();
+      if (!rawPromptText) {
         notify(t.toasts.aiCustomEmptyPrompt.replace('{name}', buttonName));
         return;
       }
@@ -4671,6 +4819,22 @@ export function App() {
       const inputText = hasSelection ? selectedText : targetTab.content;
       const captureFrom = hasSelection && range ? range.from : 0;
       const captureTo = hasSelection && range ? range.to : targetTab.content.length;
+
+      let clipboardText = '';
+      if (hasClipboardVariable(rawPromptText)) {
+        try {
+          clipboardText = (await readClipboardText()) || '';
+        } catch {
+          clipboardText = '';
+        }
+      }
+      const promptText = expandAiPromptVariables(rawPromptText, {
+        selection: selectedText,
+        clipboard: clipboardText,
+        fileName: targetTab.title,
+        filePath: targetTab.filePath ?? '',
+        language: targetTab.languageOverride ?? detectedLanguageId ?? 'markdown',
+      });
 
       const requestId = `ai-custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const reqState = {
@@ -6226,7 +6390,7 @@ export function App() {
         id: 'export-html',
         category: 'Export',
         label: t.actions.exportHtml,
-        action: handleExportHtml,
+        action: () => void handleExportHtml(),
       },
       {
         id: 'export-docx',
@@ -6239,7 +6403,30 @@ export function App() {
         id: 'export-pdf',
         category: 'Export',
         label: t.actions.exportPdf,
-        action: handleExportPdf,
+        action: () => handleExportPdf(),
+      },
+      {
+        id: 'export-page-setup',
+        category: 'Export',
+        label:
+          locale === 'ja'
+            ? 'ページ設定して書き出し (PDF / HTML)...'
+            : 'Page Setup & Export (PDF / HTML)...',
+        action: () => setExportOptionsModalMode('pdf'),
+      },
+      {
+        id: 'open-scratchpad',
+        category: 'Note',
+        label:
+          locale === 'ja' ? 'クイック・スクラッチパッドを開く' : 'Open Quick Scratchpad',
+        action: () => setShowScratchpad(true),
+      },
+      {
+        id: 'toggle-integrated-terminal',
+        category: 'View',
+        label:
+          locale === 'ja' ? '軽量統合ターミナルを開閉' : 'Toggle Integrated Terminal',
+        action: () => setShowTerminal((v) => !v),
       },
       {
         id: 'print-source',
@@ -6808,9 +6995,10 @@ export function App() {
               onOpenFile={handleOpenFile}
               onOpenFolder={handleOpenFolder}
               onSave={() => handleSave(false)}
-              onExportHtml={handleExportHtml}
-              onExportPdf={handleExportPdf}
+              onExportHtml={() => void handleExportHtml()}
+              onExportPdf={() => handleExportPdf()}
               onExportDocx={() => void handleExportDocx()}
+              onOpenExportOptions={(m) => setExportOptionsModalMode(m)}
               onOpenCommandPalette={() => setShowPalette(true)}
               onToggleZen={toggleZenMode}
               onOpenSettings={() => openSettingsModal('general')}
@@ -7304,6 +7492,10 @@ export function App() {
                         onBareUrlPasted={handleBareUrlPasted}
                         isRecordingMacro={isRecordingMacro && activeEditorSlot === 'top'}
                         onRecordMacroStep={handleRecordMacroStep}
+                        aiCustomButtons={aiCustomButtons}
+                        runningAiCustomId={runningAiCustom?.buttonId ?? null}
+                        onRunAiCustomButton={(btn) => void handleRunAiCustomButton(btn, btn.id)}
+                        onRequestGhostText={handleRequestGhostText}
                       />
                     </div>
                     <div
@@ -7391,6 +7583,10 @@ export function App() {
                         onBareUrlPasted={handleBareUrlPasted}
                         isRecordingMacro={isRecordingMacro && activeEditorSlot === 'bottom'}
                         onRecordMacroStep={handleRecordMacroStep}
+                        aiCustomButtons={aiCustomButtons}
+                        runningAiCustomId={runningAiCustom?.buttonId ?? null}
+                        onRunAiCustomButton={(btn) => void handleRunAiCustomButton(btn, btn.id)}
+                        onRequestGhostText={handleRequestGhostText}
                       />
                     </div>
                   </>
@@ -7462,6 +7658,10 @@ export function App() {
                     onBareUrlPasted={handleBareUrlPasted}
                     isRecordingMacro={isRecordingMacro}
                     onRecordMacroStep={handleRecordMacroStep}
+                    aiCustomButtons={aiCustomButtons}
+                    runningAiCustomId={runningAiCustom?.buttonId ?? null}
+                    onRunAiCustomButton={(btn) => void handleRunAiCustomButton(btn, btn.id)}
+                    onRequestGhostText={handleRequestGhostText}
                   />
                 )}
               </div>
@@ -7826,6 +8026,29 @@ export function App() {
         )}
       </div>
 
+      {!zenMode && mode === 'advanced' && (settings.integratedTerminalEnabled ?? true) && (
+        <TerminalDrawer
+          open={showTerminal}
+          locale={locale}
+          initialCwd={workspaceRoot}
+          onAskAi={(errSnippet) => {
+            setShowInspector(true);
+            setInspectorTab('chat');
+            const prompt =
+              locale === 'ja'
+                ? `以下のターミナル出力のエラー原因と修正方法を教えてください：\n\n\`\`\`\n${errSnippet}\n\`\`\``
+                : `Please diagnose the error in the following terminal output and suggest a fix:\n\n\`\`\`\n${errSnippet}\n\`\`\``;
+            void writeClipboardText(prompt);
+            notify(
+              locale === 'ja'
+                ? 'AI解析用プロンプトをクリップボードにコピーし、AIチャットを開きました'
+                : 'Copied AI diagnosis prompt to clipboard and opened AI Chat'
+            );
+          }}
+          onClose={() => setShowTerminal(false)}
+        />
+      )}
+
       {!zenMode && (settings.showStatusBar ?? true) && (
         <StatusBar
           t={t}
@@ -7870,6 +8093,11 @@ export function App() {
           onRestartProjectServer={(tr) => void handleRestartProjectServer(tr)}
           onStopProjectServer={handleStopProjectServer}
           onStopAllProjectTargets={() => void handleStopAllProjectTargets()}
+          showScratchpadButton={settings.scratchpadEnabled ?? true}
+          onOpenScratchpad={() => setShowScratchpad(true)}
+          showTerminalButton={mode === 'advanced' && (settings.integratedTerminalEnabled ?? true)}
+          terminalOpen={showTerminal}
+          onToggleTerminal={() => setShowTerminal((v) => !v)}
         />
       )}
 
@@ -8152,7 +8380,42 @@ export function App() {
 
       {toast && <div className="toast-banner">{toast}</div>}
 
-      <TooltipLayer />
+      <ExportOptionsModal
+        open={exportOptionsModalMode !== null}
+        locale={locale}
+        initialMode={exportOptionsModalMode ?? 'pdf'}
+        settings={settings.exportPageSettings ?? DEFAULT_EXPORT_PAGE_SETTINGS}
+        onSaveSettings={(next) =>
+          setSettings((s) => ({ ...s, exportPageSettings: next }))
+        }
+        onExportHtml={(opts) => void handleExportHtml(opts)}
+        onExportPdf={(opts) => handleExportPdf(opts)}
+        onClose={() => setExportOptionsModalMode(null)}
+      />
+
+      <ScratchpadModal
+        open={showScratchpad}
+        locale={locale}
+        content={scratchpadContent}
+        onChange={setScratchpadContent}
+        onCopy={(txt) => {
+          void writeClipboardText(txt);
+          notify(locale === 'ja' ? 'スクラッチパッドをコピーしました' : 'Scratchpad copied');
+        }}
+        onPromoteToTab={(txt) => {
+          const title = locale === 'ja' ? 'スクラッチメモ.md' : 'Scratchpad.md';
+          const created = makeTab(title, txt, undefined, undefined, {
+            encoding: effectiveSettings.defaultNewFileEncoding ?? 'utf-8',
+            eol: effectiveSettings.defaultNewFileEol ?? '\n',
+          });
+          created.dirty = true;
+          setTabs((prev) => [...prev, created]);
+          setActiveTabId(created.id);
+        }}
+        onClose={() => setShowScratchpad(false)}
+      />
+
+      <TooltipLayer enabled={settings.customTooltipsEnabled ?? true} />
 
       {printMode === 'source' && (
         <div id="print-source-sheet" className="print-source-sheet" aria-hidden="true">

@@ -1398,3 +1398,94 @@ export async function listenAppUpdateProgress(
     return () => {};
   }
 }
+
+export async function setGlobalHotkey(enabled: boolean, shortcut: string): Promise<string> {
+  if (!isTauri()) return '';
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('set_global_hotkey', { enabled, shortcut });
+}
+
+export async function listenGlobalHotkey(handler: () => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen('global-hotkey-triggered', () => {
+      handler();
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+export interface TerminalOutputEvent {
+  runId: string;
+  stream: 'stdout' | 'stderr';
+  chunk: string;
+}
+
+export interface TerminalExitEvent {
+  runId: string;
+  exitCode: number;
+  cwd: string;
+  cancelled: boolean;
+}
+
+export interface TerminalRunResult {
+  cwd: string;
+  immediateOutput?: string | null;
+  immediateExitCode?: number | null;
+}
+
+export async function terminalRunCommand(
+  runId: string,
+  command: string,
+  cwd?: string | null
+): Promise<TerminalRunResult> {
+  if (!isTauri()) {
+    throw new Error('Integrated terminal requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<TerminalRunResult>('terminal_run_command', {
+    runId,
+    command,
+    cwd: cwd || null,
+  });
+}
+
+export async function terminalKillCommand(runId: string): Promise<boolean> {
+  if (!isTauri() || !runId) return false;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<boolean>('terminal_kill_command', { runId });
+  } catch {
+    return false;
+  }
+}
+
+export async function listenTerminalOutput(
+  handler: (event: TerminalOutputEvent) => void
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<TerminalOutputEvent>('terminal-output', (ev) => {
+      handler(ev.payload);
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+export async function listenTerminalExit(
+  handler: (event: TerminalExitEvent) => void
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<TerminalExitEvent>('terminal-exit', (ev) => {
+      handler(ev.payload);
+    });
+  } catch {
+    return () => {};
+  }
+}

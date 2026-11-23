@@ -12,18 +12,62 @@ interface TooltipState {
 const SHOW_DELAY_MS = 150;
 const WARM_WINDOW_MS = 450;
 
+const SHORTCUT_SUFFIX_RE =
+  /^(.*?)\s*\(((?:(?:⌘|⌃|⌥|⇧|Ctrl\+|Alt\+|Shift\+|Cmd\+|Meta\+|Option\+|Win\+)+[^\s()]+|F[1-9]|F1[0-2]|Esc))\)$/;
+
 /**
- * Lightweight global instant tooltip layer driven by `data-tooltip` (and optional `data-tooltip-shortcut`) attributes.
- * Renders via React Portal into `document.body` so tooltips are never clipped by `overflow: hidden/auto` containers.
+ * Splits a tooltip string like "Save (⌘S)" into `{ text: "Save", shortcut: "⌘S" }`
+ * when no explicit `data-tooltip-shortcut` attribute is provided.
  */
-export const TooltipLayer: React.FC = () => {
+export function splitTooltipAndShortcut(
+  rawText: string,
+  explicitShortcut?: string | null
+): { text: string; shortcut?: string } {
+  const trimmed = rawText.trim();
+  const explicit = explicitShortcut?.trim();
+  if (explicit) {
+    return { text: trimmed, shortcut: explicit };
+  }
+  const m = trimmed.match(SHORTCUT_SUFFIX_RE);
+  if (m && m[1].trim()) {
+    return { text: m[1].trim(), shortcut: m[2].trim() };
+  }
+  return { text: trimmed };
+}
+
+/**
+ * Global instant custom tooltip layer.
+ * Handles both explicit `[data-tooltip]` elements and automatically upgrades native `[title]`
+ * attributes across the entire app (Sidebar, TabBar, StatusBar, Inspector, Modals) into
+ * instant 0.15s theme-aware tooltips with `<kbd>` shortcut badges—without double tooltips.
+ * When `enabled` is false, native browser tooltips are left untouched.
+ */
+export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const tooltipElRef = useRef<HTMLDivElement | null>(null);
   const activeTargetRef = useRef<HTMLElement | null>(null);
+  const stashedTitleElRef = useRef<HTMLElement | null>(null);
   const showTimerRef = useRef<number | null>(null);
   const lastHiddenAtRef = useRef<number>(0);
 
   useEffect(() => {
+    if (!enabled) {
+      setTooltip(null);
+      return;
+    }
+
+    const restoreStashedTitle = () => {
+      const el = stashedTitleElRef.current;
+      if (el) {
+        const orig = el.getAttribute('data-onigiri-orig-title');
+        if (orig !== null) {
+          el.setAttribute('title', orig);
+          el.removeAttribute('data-onigiri-orig-title');
+        }
+        stashedTitleElRef.current = null;
+      }
+    };
+
     const clearTimer = () => {
       if (showTimerRef.current !== null) {
         window.clearTimeout(showTimerRef.current);
@@ -33,6 +77,7 @@ export const TooltipLayer: React.FC = () => {
 
     const hide = (recordWarm = true) => {
       clearTimer();
+      restoreStashedTitle();
       activeTargetRef.current = null;
       setTooltip((prev) => {
         if (prev && recordWarm) {
@@ -42,10 +87,25 @@ export const TooltipLayer: React.FC = () => {
       });
     };
 
+    const resolveTooltipPayload = (target: HTMLElement): { text: string; shortcut?: string } | null => {
+      const dataTip = target.getAttribute('data-tooltip')?.trim();
+      if (dataTip) {
+        return splitTooltipAndShortcut(dataTip, target.getAttribute('data-tooltip-shortcut'));
+      }
+      const stashed = target.getAttribute('data-onigiri-orig-title')?.trim();
+      if (stashed) {
+        return splitTooltipAndShortcut(stashed);
+      }
+      const nativeTitle = target.getAttribute('title')?.trim();
+      if (nativeTitle) {
+        return splitTooltipAndShortcut(nativeTitle);
+      }
+      return null;
+    };
+
     const computeAndShow = (target: HTMLElement) => {
-      const text = target.getAttribute('data-tooltip')?.trim();
-      if (!text) return;
-      const shortcut = target.getAttribute('data-tooltip-shortcut')?.trim() || undefined;
+      const payload = resolveTooltipPayload(target);
+      if (!payload || !payload.text) return;
       const rect = target.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) return;
 
@@ -54,8 +114,8 @@ export const TooltipLayer: React.FC = () => {
       const y = preferTop ? rect.top - 7 : rect.bottom + 7;
 
       setTooltip({
-        text,
-        shortcut,
+        text: payload.text,
+        shortcut: payload.shortcut,
         x: centerX,
         y,
         placement: preferTop ? 'top' : 'bottom',
@@ -65,7 +125,16 @@ export const TooltipLayer: React.FC = () => {
     const scheduleShow = (target: HTMLElement) => {
       if (activeTargetRef.current === target) return;
       clearTimer();
+      restoreStashedTitle();
       activeTargetRef.current = target;
+
+      // Temporarily stash native `title` so the OS tooltip never doubles up
+      const nativeTitle = target.getAttribute('title');
+      if (nativeTitle && !target.hasAttribute('data-tooltip')) {
+        target.setAttribute('data-onigiri-orig-title', nativeTitle);
+        target.removeAttribute('title');
+        stashedTitleElRef.current = target;
+      }
 
       const isWarm =
         tooltipElRef.current !== null || Date.now() - lastHiddenAtRef.current < WARM_WINDOW_MS;
@@ -82,8 +151,14 @@ export const TooltipLayer: React.FC = () => {
       }
     };
 
+    const findTooltipHost = (node: EventTarget | null): HTMLElement | null => {
+      const el = node as HTMLElement | null;
+      if (!el?.closest) return null;
+      return el.closest('[data-tooltip], [title], [data-onigiri-orig-title]') as HTMLElement | null;
+    };
+
     const onMouseOver = (e: MouseEvent) => {
-      const el = (e.target as HTMLElement | null)?.closest?.('[data-tooltip]') as HTMLElement | null;
+      const el = findTooltipHost(e.target);
       if (el) {
         scheduleShow(el);
       } else if (activeTargetRef.current) {
@@ -93,9 +168,7 @@ export const TooltipLayer: React.FC = () => {
 
     const onMouseOut = (e: MouseEvent) => {
       if (!activeTargetRef.current) return;
-      const related = (e.relatedTarget as HTMLElement | null)?.closest?.(
-        '[data-tooltip]'
-      ) as HTMLElement | null;
+      const related = findTooltipHost(e.relatedTarget);
       if (!related) {
         hide(true);
       }
@@ -103,18 +176,15 @@ export const TooltipLayer: React.FC = () => {
 
     const onFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement | null;
-      if (target?.matches?.(':focus-visible[data-tooltip]')) {
+      if (
+        target?.matches?.(':focus-visible[data-tooltip], :focus-visible[title]')
+      ) {
         scheduleShow(target);
       }
     };
 
-    const onFocusOut = () => {
-      hide(false);
-    };
-
-    const onDismiss = () => {
-      hide(false);
-    };
+    const onFocusOut = () => hide(false);
+    const onDismiss = () => hide(false);
 
     document.addEventListener('mouseover', onMouseOver, true);
     document.addEventListener('mouseout', onMouseOut, true);
@@ -128,6 +198,7 @@ export const TooltipLayer: React.FC = () => {
 
     return () => {
       clearTimer();
+      restoreStashedTitle();
       document.removeEventListener('mouseover', onMouseOver, true);
       document.removeEventListener('mouseout', onMouseOut, true);
       document.removeEventListener('focusin', onFocusIn, true);
@@ -138,7 +209,7 @@ export const TooltipLayer: React.FC = () => {
       window.removeEventListener('resize', onDismiss);
       window.removeEventListener('blur', onDismiss);
     };
-  }, []);
+  }, [enabled]);
 
   // Clamp horizontal position within viewport after render
   useEffect(() => {
@@ -158,7 +229,7 @@ export const TooltipLayer: React.FC = () => {
     }
   }, [tooltip]);
 
-  if (!tooltip || typeof document === 'undefined') return null;
+  if (!enabled || !tooltip || typeof document === 'undefined') return null;
 
   return createPortal(
     <div

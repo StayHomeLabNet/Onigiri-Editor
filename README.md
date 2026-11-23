@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v136">What's New in v1.3.6</a> ・
+    <a href="#whats-new-in-v140">What's New in v1.4.0</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.3.6-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.4.0-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.3.6`
+Current version: `v1.4.0`
 
 ## Key Features
 
@@ -100,7 +100,19 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.3.6
+## What's New in v1.4.0
+
+- **Selection Floating Bubble Menu**: Selecting text in the editor reveals a mini toolbar right above the selection for **Bold**, **Italic**, **Inline Code**, **Link**, **Inline AI Edit (`⌘⇧E`)**, and up to **3 quick AI Custom buttons** (toggleable in **Settings → Editor**).
+- **AI Ghost Text Autocomplete (`Tab` to Accept / `Esc` to Dismiss)**: Displays muted inline continuation suggestions powered by your active AI provider (including offline free **Apple Foundation Models**, **Ollama**, or **LM Studio**) after a configurable typing pause (`400–2500ms`; opt-in via **Settings → Editor**).
+- **AI Custom Prompt Variables**: Supports dynamic `{{selection}}`, `{{clipboard}}`, `{{fileName}}`, `{{filePath}}`, `{{language}}`, `{{date}}`, and `{{time}}` expansion inside AI Custom buttons & submenus, with 1-click variable chips in **Settings → AI Custom**.
+- **Markdown Table GUI Toolbar**: Automatically appears above the editor when the cursor is inside a Markdown table to insert/delete rows & columns, align left/center/right, sort columns ascending/descending (numeric-aware), and format column widths (toggleable in **Settings → Editor**).
+- **PDF / HTML Export Page Setup & Design Presets**: Configure **Design Theme** (**Modern**, **Business**, **Academic**), **Paper Size** (`A4` / `Letter` / `B5`), **Orientation**, **Margins**, **Page Numbers (`1 / N`)**, and custom **Header / Footer** (`{{title}}` supported) from the Export menu or Command Palette.
+- **Quick Scratchpad & Global Summon Hotkey**: Auto-persisted save-free **Quick Scratchpad** (Copy, Clear, **Open in Tab**) in the Status Bar & Command Palette, plus an optional system-wide **Global Hotkey** (default `CommandOrControl+Shift+Space`) to summon Onigiri Editor from any app (toggleable in **Settings → General**).
+- **Lightweight Integrated Terminal Drawer (Advanced Mode)**: Bottom drawer terminal with streaming output, persistent `cd` directory, `↑`/`↓` command history, Stop control, and 1-click **Ask AI** diagnosis on errors (toggleable in **Settings → General**).
+- **App-Wide Instant Custom Tooltips**: Upgrades native `title` tooltips across the entire app (Header, Toolbar, Sidebar, Tab Bar, Status Bar, Inspector, Modals) into fast **0.15s** theme-aware Portal tooltips with automatic `<kbd>` shortcut badges (toggleable in **Settings → General**).
+
+<details>
+<summary>Previous release: v1.3.6</summary>
 
 - **Responsive Header & Format Toolbar Polish (Anti-Wrapping & Measurement-Based Progressive Collapse)**:
   - Button labels never wrap vertically onto multiple lines (`white-space: nowrap; flex-shrink: 0`).
@@ -121,6 +133,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - Displays a compact one-step mode switcher in the Status Bar whenever the top header bar is hidden: `Simple → Basic`, `Basic → Advanced`, and `Advanced → Basic`.
 - **Keyboard Shortcuts Expansion (112 Built-in Commands + AI Custom & Submenu Shortcuts)**:
   - Added direct mode shortcuts (`⌘⌥1` Simple / `⌘⌥2` Basic / `⌘⌥3` Advanced) and expanded **Settings → Keybindings** to **112 customizable commands** with **category filter chips**, plus **dynamic shortcuts for every AI Custom button and enabled submenu item** (editable in both **Settings → Keybindings** and **Settings → AI Custom**, displayed on toolbar tooltips, submenu badges, and Command Palette) and macOS `⌥` physical-code key matching.
+
+</details>
 
 <details>
 <summary>Previous release: v1.3.5</summary>

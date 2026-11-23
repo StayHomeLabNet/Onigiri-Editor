@@ -298,6 +298,31 @@ export interface EditorSettings {
   updateAvailableBehavior?: UpdateAvailableBehavior;
   skippedUpdateVersion?: string;
   aiCustomButtons?: AiCustomButton[];
+  selectionBubbleMenuEnabled?: boolean;
+  aiGhostTextEnabled?: boolean;
+  aiGhostTextDelayMs?: number;
+  markdownTableBarEnabled?: boolean;
+  exportPageSettings?: ExportPageSettings;
+  scratchpadEnabled?: boolean;
+  globalHotkeyEnabled?: boolean;
+  globalHotkeyShortcut?: string;
+  integratedTerminalEnabled?: boolean;
+  customTooltipsEnabled?: boolean;
+}
+
+export type ExportPaperSize = 'A4' | 'Letter' | 'B5';
+export type ExportOrientation = 'portrait' | 'landscape';
+export type ExportMarginPreset = 'narrow' | 'normal' | 'wide';
+export type ExportDesignTheme = 'modern' | 'business' | 'academic';
+
+export interface ExportPageSettings {
+  paperSize: ExportPaperSize;
+  orientation: ExportOrientation;
+  margin: ExportMarginPreset;
+  designTheme: ExportDesignTheme;
+  showPageNumbers: boolean;
+  headerText: string;
+  footerText: string;
 }
 
 export type AiCustomButtonIconId =

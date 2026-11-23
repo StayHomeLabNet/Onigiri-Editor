@@ -1,31 +1,23 @@
-Onigiri Editor `v1.3.6` brings **Apple Foundation Models (Apple Intelligence)** on-device AI support for macOS, **Long-Press / Right-Click Submenus** for Toolbar AI Custom Buttons, **All-Mode Status Bar Mode Switching** when the header bar is hidden, a major **Keyboard Shortcuts Expansion (112 built-in commands + dynamic AI Custom & submenu shortcuts)**, **Responsive Header & Toolbar Layout with Instant Custom Tooltips**, and **Optimized Default Prompts for AI Translate**.
+Onigiri Editor `v1.4.0` introduces 8 major productivity upgrades—all configurable with individual ON/OFF toggles in Settings: **Selection Floating Bubble Menu**, **AI Ghost Text Autocomplete (`Tab` to accept)**, **AI Custom Prompt Variables (`{{clipboard}}`, `{{fileName}}`, etc.)**, **Markdown Table GUI Toolbar**, **PDF / HTML Export Page Setup & Design Presets**, **Quick Scratchpad & Global Summon Hotkey**, **Lightweight Integrated Terminal Drawer**, and **App-Wide Instant Custom Tooltips**.
 
-### Highlights (`v1.3.6`)
-- **Responsive Header & Format Toolbar Polish (Anti-Wrapping & Measurement-Based Progressive Collapse)**:
-  - Button labels never wrap vertically onto multiple lines (`white-space: nowrap; flex-shrink: 0`).
-  - Progressively collapses labels based on real-time DOM measurements and hysteresis: TopBar relaxes center-balance to borrow left margin, then collapses Theme and Language labels (to 28×28px icon buttons), layout switch labels, and version badge; FormatToolbar collapses "Copy Rich Text" label first, then "AI Clean" (to 26×26px icon buttons).
-  - Automatically hides redundant New / Open / Save file buttons in the Format Toolbar when the top header bar is already visible (saving ~90px of space).
-  - Added gradient edge fade masks, smooth `<` / `>` scroll buttons, and horizontal mouse wheel scrolling support when the toolbar overflows in narrow windows.
-- **Instant Custom Tooltips (`0.15s` Quick Hover & Shortcut Badges)**:
-  - Replaced delayed native tooltips on header and toolbar controls with a lightweight, theme-aware Portal tooltip layer displaying within 0.15s, featuring `<kbd>` shortcut badges and zero edge clipping.
-- **Optimized Default Prompt for "AI Translate" Preset**:
-  - Upgraded the built-in AI Translate preset prompt with structured `# 命令` (automatic English ↔ Japanese language detection) and `# 制約事項` (strict prohibition of conversational filler and preservation of original markdown formatting).
-- **macOS Only: Apple Foundation Models (Apple Intelligence) On-Device AI Provider**:
-  - Select **Apple Foundation Models** under **Local AI** in AI Chat (visible on macOS only) to run Apple's on-device Foundation Models completely offline and free with zero external API keys or servers (requires Apple Silicon Mac running macOS 26+ with Apple Intelligence enabled; weak-linked so older macOS versions still launch safely).
-  - Supports both **Apple Intelligence (Default)** and **Apple Intelligence (Content Transformations / Permissive)** modes for smoother translation, proofreading, and rewriting across AI Chat, Inline AI Edit, and Toolbar AI Custom buttons.
-  - Features live streaming progress, request cancellation, automatic context-limit safety trimming (~4,096 tokens), and availability diagnostics with a 1-click **Open System Settings** button in Connection Support.
-- **Toolbar AI Custom Buttons: Long-Press / Right-Click Submenus (Up to 10 Items per Button)**:
-  - **Normal click** runs the primary AI button action as before; **long-press (~0.4s) or right-click** smoothly slides open a downward popover menu when submenus are enabled (indicated by a subtle bottom-right triangle indicator).
-  - Configure submenus in **Settings → AI Custom** (off by default): enable the submenu checkbox to automatically scaffold the first item, and add, reorder, edit, or delete up to **10 submenu items** per button—each with its own **24-icon picker**, **name**, **AI prompt**, and independent **Copy to clipboard** / **Replace document (or selection)** checkboxes.
-- **Status Bar One-Step Mode Switcher Across All Modes (When Header Bar Is Hidden)**:
-  - Whenever the top header bar is hidden, the Status Bar now shows a compact, clickable mode-transition button in every mode:
-    - **Simple Mode**: `Simple → Basic`
-    - **Basic Mode**: `Basic → Advanced`
-    - **Advanced Mode**: `Advanced → Basic`
-- **Massive Keyboard Shortcuts Expansion (112 Commands + AI Custom & Submenu Shortcuts)**:
-  - Added dedicated direct mode shortcuts (**Simple**: `⌘⌥1` / `Ctrl+Alt+1`, **Basic**: `⌘⌥2` / `Ctrl+Alt+2`, **Advanced**: `⌘⌥3` / `Ctrl+Alt+3`) and expanded **Settings → Keybindings** from 27 to **112 customizable commands** across Mode, File, View/Layout, Edit, Format, AI, Markdown, Note, Data, Browser, Workspace, Git, Macro, Export, Theme, and Settings—now with **category filter chips**.
-  - **AI Custom Button & Submenu Shortcuts**: Assign custom keyboard shortcuts to every registered AI Custom button and every enabled submenu item directly from either **Settings → Keybindings** or inline inside **Settings → AI Custom** (synchronized with conflict detection, reflected in toolbar tooltips, submenu badges, Command Palette, and JSON settings backups).
-  - **macOS `⌥` (Option) Shortcut Reliability**: Normalized `Alt`/`Option`-modified key events via physical key codes (`e.code`) so shortcuts such as `⌘⌥1` or `⌘⌥T` record and trigger reliably on macOS.
+### Highlights (`v1.4.0`)
+- **Selection Floating Bubble Menu (Configurable in Settings → Editor)**:
+  - Selecting text in the editor reveals a floating mini toolbar right above the selection for instant **Bold**, **Italic**, **Inline Code**, **Link**, **Inline AI Edit (`⌘⇧E`)**, and up to **3 quick AI Custom buttons**—eliminating trips to the top toolbar.
+- **AI Ghost Text Autocomplete (`Tab` to Accept / `Esc` to Dismiss, Opt-in in Settings → Editor)**:
+  - Pausing briefly while typing displays a muted inline continuation suggestion powered by your active AI provider (including free offline **Apple Foundation Models**, **Ollama**, or **LM Studio**). Press `Tab` to insert or `Esc` to dismiss; trigger delay is customizable (`400–2500ms`, off by default to avoid unintended API calls).
+- **AI Custom Prompt Variables (`{{selection}}`, `{{clipboard}}`, `{{fileName}}`, `{{filePath}}`, `{{language}}`, `{{date}}`, `{{time}}`)**:
+  - Dynamically expand context variables inside any AI Custom button or submenu prompt—complete with 1-click variable insertion chips in **Settings → AI Custom**.
+- **Markdown Table GUI Toolbar (Configurable in Settings → Editor)**:
+  - Placing the cursor inside any Markdown table reveals a compact GUI bar to **Insert Row Above/Below**, **Delete Row**, **Insert Column Left/Right**, **Delete Column**, **Align Left / Center / Right**, **Sort Column Ascending/Descending** (numeric-aware), and **Format Column Widths** in a single undoable step.
+- **PDF / HTML Export Page Setup & Design Presets**:
+  - Open **Page Setup & Export (PDF / HTML)...** from the TopBar Export menu or Command Palette to configure **Design Theme** (**Modern**, **Business**, **Academic**), **Paper Size** (`A4` / `Letter` / `B5`), **Orientation** (Portrait / Landscape), **Margins** (Narrow / Normal / Wide), **Page Numbers (`1 / N`)**, and custom **Header / Footer** text (`{{title}}` supported).
+- **Quick Scratchpad & Global Summon Hotkey (Configurable in Settings → General)**:
+  - Open an auto-persisted, save-free **Quick Scratchpad** from the Status Bar or Command Palette (with Copy, Clear, and **Open in Tab** promotion).
+  - Optionally enable a system-wide **Global Hotkey** (default `CommandOrControl+Shift+Space`) via `tauri-plugin-global-shortcut` to bring Onigiri Editor to the foreground from any application.
+- **Lightweight Integrated Terminal Drawer (Advanced Mode, Configurable in Settings → General)**:
+  - Toggle a bottom terminal drawer from the Status Bar or Command Palette with real-time streaming output, persistent `cd` working directory, `↑`/`↓` command history, Stop/Cancel control, and 1-click **Ask AI** diagnosis on errors.
+- **App-Wide Instant Custom Tooltips (Configurable in Settings → General)**:
+  - Automatically upgrades native `title` tooltips across the entire app (Header, Format Toolbar, Sidebar, Tab Bar, Status Bar, Inspector, and Modals) into fast **0.15s** theme-aware Portal tooltips with automatic `<kbd>` shortcut badges and zero edge clipping.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel, includes Apple Foundation Models support on macOS 26+)**: `.dmg` / `.app.tar.gz`
@@ -34,33 +26,26 @@ Onigiri Editor `v1.3.6` brings **Apple Foundation Models (Apple Intelligence)** 
 
 ---
 
-Onigiri Editor `v1.3.6` では、Mac 版限定のオンデバイス AI **Apple Foundation Models（Apple Intelligence）対応**、ツールバー AIカスタムボタンの **長押し／右クリックによるサブメニュー展開**、上部ヘッダーバー非表示時の **全モード対応ステータスバー・モード移動ボタン**、**全 112 コマンド＋AIカスタム（親ボタン＆サブメニュー）対応のキーボードショートカット大幅拡充**、**ヘッダー＆書式ツールバーのレスポンシブ刷新・即時カスタムツールチップ**、および **「AI翻訳」デフォルトプロンプトの最適化** を実装しました。
+Onigiri Editor `v1.4.0` では、執筆・AI・ビジネス文書・開発ワークフローを一気に強化する **8つの新機能** を搭載しました（各機能は設定画面から個別に ON / OFF 可能）。
 
-### 主な変更点（`v1.3.6`）
-- **ヘッダー＆書式ツールバーのレスポンシブ刷新（改行防止・実測ベース段階的折りたたみ・重複ボタン整理）**:
-  - ウィンドウ幅が狭くなってもボタン内のラベル文字が改行されないよう `white-space: nowrap` と `flex-shrink: 0` を徹底しました。
-  - 実測ベース（ResizeObserver）とチラつき防止ヒステリシスによる段階的なアイコン化を導入：書式ツールバーは「リッチテキストでコピー」→「AI出力を整形」の順で段階的に 26×26px のアイコンボタンへ移行し、ヘッダーバーは中央寄せを自動融通した上で「テーマ」「言語」→「レイアウト切替」→「バージョンバッジ」を順次コンパクト化します。
-  - 上部ヘッダーバーが表示されている時は書式ツールバー側の重複していたファイル操作ボタン（新規・開く・保存）を自動非表示にして約 90px の横幅を節約し、上部バー非表示時のみツールバー側に表示します。
-  - アイコン化しても入りきらない狭い幅では、左右にグラデーションのフェード影とスクロール矢印ボタン（`<` / `>`）を表示し、マウスホイールでの横スクロールにも対応しました。
-- **即座に出るカスタムツールチップ（0.15秒・ショートカットバッジ付き）**:
-  - ヘッダー・ツールバーのオンマウス表示を、待ち時間がなく（0.15 秒）テーマ色に馴染んだカスタムツールチップに刷新。ショートカットキーを `<kbd>` バッジで並べ、React Portal 描画で見切れを防止しました。
-- **「AI翻訳」初期プリセットプロンプトの最適化**:
-  - デフォルトの AI 翻訳プロンプトを構造化された命令（`# 命令`、英語⇔日本語の自動判定ルール）と制約事項（`# 制約事項`、前置き・解説の禁止、原文の改行構造維持）に刷新し、出力精度を高めました。
-- **Mac 版限定: Apple Foundation Models（Apple Intelligence）プロバイダー対応**:
-  - macOS 版のみ AI チャットの「ローカル AI」一覧に **Apple Foundation Models** を追加。API キーや外部サーバー不要・完全オフラインかつ無料でオンデバイス推論を利用できます（Apple Silicon 搭載 Mac・macOS 26 以降・Apple Intelligence 有効環境で動作。フレームワークは弱リンクのため旧 macOS でも問題なく起動します）。
-  - **Apple Intelligence（標準）** と翻訳・校正・リライト向けの **Apple Intelligence（文章変換向け）** の 2 モードを選択可能。AI チャット・選択範囲インライン編集・ツールバー AIカスタムボタンのすべてで利用でき、ストリーミング進捗表示・キャンセル・接続サポートからの「システム設定を開く」ボタンを備えています。
-- **AIカスタムボタンの長押し／右クリック＆サブメニュー機能（1 ボタンあたり最大 10 件）**:
-  - **通常クリック**で親ボタンを実行し、サブメニューが有効なボタンでは **長押し（約 0.4 秒）または右クリック** で下方向アニメーション付きポップオーバーが開き、登録済みサブメニュー項目を実行できます（サブメニュー付きボタンには右下に小さな三角マークを表示）。
-  - **設定 → AIカスタム** の各ボタンカードに「サブメニューを有効にする」チェックボックス（初期値 OFF）を追加。ON にすると自動で 1 件目が用意され、最大 10 件までアイコン（24 種類）・ボタン名・プロンプト・返事の取り扱い（`クリップボードに入れる` / `本文を置き換える`）を個別に設定できます。
-- **上部ヘッダーバー非表示時のステータスバー・モード移動ボタン（全モード対応）**:
-  - 上部ヘッダーバーを非表示にしている際、どのモードでも下部ステータスバーからワンクリックで 1 ステップ先のモードへ移動できるようになりました：
-    - **シンプルモード時**: `シンプル → 標準`
-    - **標準モード時**: `標準 → 拡張`
-    - **拡張モード時**: `拡張 → 標準`
-- **キーボードショートカット大幅拡充（112 コマンド＋AIカスタム＆サブメニュー対応）**:
-  - 各モードへのダイレクト切替ショートカット（**シンプル**: `⌘⌥1` / `Ctrl+Alt+1`、**標準**: `⌘⌥2` / `Ctrl+Alt+2`、**拡張**: `⌘⌥3` / `Ctrl+Alt+3`）を新設し、ファイル・表示/レイアウト・編集・書式・AI・Markdown・ノート・データ整形・ブラウザ・Git・マクロ・書き出し・テーマまで **計 112 コマンド** を割り当て可能にしました（**設定 → キーボード** にカテゴリ絞り込みチップを追加）。
-  - **AIカスタム（親ボタン＆サブメニュー）へのショートカット割り当て**: 登録した各 AIカスタムボタンおよび有効なサブメニュー項目ごとにショートカットを設定可能。「**設定 → キーボード**」と「**設定 → AIカスタム**」の各カード内のどちらからでも編集・解除・重複チェックでき、ツールバーのツールチップ・サブメニュー右端バッジ・コマンドパレット・JSON バックアップに自動反映されます。
-  - **macOS `⌥` (Option) キー併用の精度改善**: macOS で `⌥` 併用時に特殊文字へ変化するキー入力を物理キーコードで正規化し、`⌘⌥1` や `⌘⌥T` などが確実に録音・発火するよう改善しました。
+### 主な変更点（`v1.4.0`）
+- **選択範囲フローティングミニバー（Bubble Menu・設定 → エディタで ON/OFF）**:
+  - エディタ上でテキストを選択すると、選択箇所のすぐ上にミニバー（**太字・斜体・コード・リンク・インライン AI 編集・登録済み AIカスタムボタン最大 3 件**）を表示。上部ツールバーまでマウスを往復させずに素早く装飾・翻訳・編集できます。
+- **AI ゴーストテキスト補完（`Tab` で確定 / `Esc` で却下・設定 → エディタで ON/OFF）**:
+  - 入力を少し止めると、設定中の AI プロバイダー（完全無料＆オフラインの **Apple Foundation Models** / **Ollama** / **LM Studio** 等）で続きを予測し、カーソル位置に薄いグレー文字で表示します（意図しない課金防止のため初期値 OFF、待ち時間 `400〜2500ms` 調整可）。
+- **AIカスタムの「プロンプト変数」対応**:
+  - AIカスタム（親ボタン＆サブメニュー）のプロンプト内で `{{selection}}` / `{{clipboard}}` / `{{fileName}}` / `{{filePath}}` / `{{language}}` / `{{date}}` / `{{time}}` が自動展開されます。**設定 → AIカスタム** のプロンプト欄下にワンクリック変数挿入チップを追加しました。
+- **Markdown テーブル GUI 簡易編集バー（設定 → エディタで ON/OFF）**:
+  - Markdown の表内にカーソルがあるとき、エディタ上部に専用操作バーを表示。**行の上下追加・行削除・列の左右追加・列削除・左/中央/右揃え・昇順/降順ソート（数値対応）・列幅整形**をワンクリックで実行できます。
+- **PDF / HTML 書き出しのプリセット＆ページ設定**:
+  - 上部バーの書き出しメニューやコマンドパレットから **デザインテーマ（モダン / ビジネス / 学術）・用紙サイズ（A4 / Letter / B5）・向き（縦 / 横）・余白・ページ番号（`1 / N`）・ヘッダー / フッター（`{{title}}` 対応）** を指定して書き出しできます。
+- **クイック・スクラッチパッド＆グローバル呼び出しショートカット（設定 → 一般で ON/OFF）**:
+  - 保存不要で自動永続化される常駐メモ（全文コピー・クリア・**新規タブへ昇格**対応）をステータスバー＆コマンドパレットに追加。
+  - 他アプリで作業中でも指定ショートカット（既定 `CommandOrControl+Shift+Space`）で Onigiri Editor を最前面へ呼び出せるグローバルホットキーに対応しました。
+- **下部ドロワー「軽量統合ターミナル」（拡張モード・設定 → 一般で ON/OFF）**:
+  - ステータスバーまたはコマンドパレットから開閉できる軽量ターミナルを追加。リアルタイム出力、`cd` によるディレクトリ維持、`↑`/`↓` コマンド履歴、停止ボタン、エラー時のワンクリック **「AIで解析」** に対応します。
+- **カスタムツールチップのアプリ全体への展開（設定 → 一般で ON/OFF）**:
+  - ヘッダー・書式ツールバーに加え、サイドバー・タブバー・ステータスバー・インスペクター・モーダルを含むアプリ全体のオンマウス表示を **0.15秒カスタムツールチップ（`<kbd>` ショートカットバッジ自動分離付き）** に統一しました。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応・macOS 26+ Apple Foundation Models 対応）**: `.dmg` / `.app.tar.gz`

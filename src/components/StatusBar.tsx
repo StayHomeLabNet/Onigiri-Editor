@@ -13,6 +13,8 @@ import {
   Server,
   Settings,
   Square,
+  StickyNote,
+  Terminal,
 } from 'lucide-react';
 import type {
   AppMode,
@@ -82,6 +84,11 @@ interface StatusBarProps {
   onRestartProjectServer?: (targetRoot?: string) => void;
   onStopProjectServer?: (targetRoot?: string) => void;
   onStopAllProjectTargets?: () => void;
+  showScratchpadButton?: boolean;
+  onOpenScratchpad?: () => void;
+  showTerminalButton?: boolean;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -125,6 +132,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onRestartProjectServer,
   onStopProjectServer,
   onStopAllProjectTargets,
+  showScratchpadButton,
+  onOpenScratchpad,
+  showTerminalButton,
+  terminalOpen,
+  onToggleTerminal,
 }) => {
   const goalPct = wordGoal > 0 ? Math.min(100, Math.round((stats.words / wordGoal) * 100)) : 0;
   const [encMenuOpen, setEncMenuOpen] = useState(false);
@@ -772,6 +784,32 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             </div>
           )}
         </div>
+
+        {showScratchpadButton && onOpenScratchpad && (
+          <button
+            type="button"
+            className="status-btn"
+            onClick={onOpenScratchpad}
+            title={locale === 'ja' ? 'クイック・スクラッチパッドを開く' : 'Open Quick Scratchpad'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            <StickyNote size={12} />
+            <span>{locale === 'ja' ? 'メモ' : 'Scratchpad'}</span>
+          </button>
+        )}
+
+        {showTerminalButton && onToggleTerminal && (
+          <button
+            type="button"
+            className={`status-btn ${terminalOpen ? 'is-active' : ''}`}
+            onClick={onToggleTerminal}
+            title={locale === 'ja' ? '統合ターミナルを開閉' : 'Toggle Integrated Terminal'}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+          >
+            <Terminal size={12} />
+            <span>{locale === 'ja' ? 'ターミナル' : 'Terminal'}</span>
+          </button>
+        )}
 
         {topBarHidden && (
           <>

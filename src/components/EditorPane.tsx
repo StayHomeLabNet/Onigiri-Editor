@@ -116,7 +116,17 @@ import {
   createHighlightStyle,
   getEffectiveEditorFontSize,
 } from './editor/cmTheme';
-import type { EditorSettings, Locale, ThemeId } from '../types';
+import type { AiCustomButton, EditorSettings, Locale, ThemeId } from '../types';
+import { createGhostTextExtension, setGhostTextEffect } from './editor/cmGhostText';
+import { SelectionBubbleMenu } from './editor/SelectionBubbleMenu';
+import { MarkdownTableBar } from './editor/MarkdownTableBar';
+import {
+  applyMarkdownTableOperation,
+  detectMarkdownTableAtLine,
+  serializeMarkdownTable,
+  type TableCursorLocation,
+  type TableEditOperation,
+} from '../utils/markdownTable';
 import type { Translations } from '../i18n/types';
 import type { FindMatch, TextRange } from '../utils/findReplace';
 import type { CmMacroCommandId, MacroStep } from '../utils/macro';
@@ -308,6 +318,10 @@ interface EditorPaneProps {
   onRecordMacroStep?: (step: MacroStep) => void;
   tabSize?: number;
   indentWithTabs?: boolean;
+  aiCustomButtons?: AiCustomButton[];
+  runningAiCustomId?: string | null;
+  onRunAiCustomButton?: (btn: AiCustomButton) => void;
+  onRequestGhostText?: (prefix: string, suffix: string, signal: AbortSignal) => Promise<string | null>;
   theme: ThemeId;
   settings: EditorSettings;
 }
@@ -1157,6 +1171,10 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onRecordMacroStep,
       tabSize = 2,
       indentWithTabs = false,
+      aiCustomButtons = [],
+      runningAiCustomId = null,
+      onRunAiCustomButton,
+      onRequestGhostText,
       theme,
       settings,
     },
@@ -1235,6 +1253,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onOpenWikiLink,
       isRecordingMacro,
       onRecordMacroStep,
+      onRequestGhostText,
       settings,
     });
     callbacksRef.current = {
@@ -1268,8 +1287,46 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       onOpenWikiLink,
       isRecordingMacro,
       onRecordMacroStep,
+      onRequestGhostText,
       settings,
     };
+
+    const [selectionBubble, setSelectionBubble] = useState<{ top: number; left: number } | null>(null);
+    const [activeTableLoc, setActiveTableLoc] = useState<TableCursorLocation | null>(null);
+    const ghostTimerRef = useRef<number | null>(null);
+    const ghostAbortRef = useRef<AbortController | null>(null);
+
+    const cancelPendingGhostText = useCallback(() => {
+      if (ghostTimerRef.current !== null) {
+        window.clearTimeout(ghostTimerRef.current);
+        ghostTimerRef.current = null;
+      }
+      if (ghostAbortRef.current) {
+        ghostAbortRef.current.abort();
+        ghostAbortRef.current = null;
+      }
+    }, []);
+
+    useEffect(() => () => cancelPendingGhostText(), [cancelPendingGhostText]);
+
+    useEffect(() => {
+      if (!settings.selectionBubbleMenuEnabled && selectionBubble) {
+        setSelectionBubble(null);
+      }
+    }, [settings.selectionBubbleMenuEnabled, selectionBubble]);
+
+    useEffect(() => {
+      if (!settings.markdownTableBarEnabled && activeTableLoc) {
+        setActiveTableLoc(null);
+      }
+    }, [settings.markdownTableBarEnabled, activeTableLoc]);
+
+    useEffect(() => {
+      if (!settings.aiGhostTextEnabled) {
+        cancelPendingGhostText();
+        viewRef.current?.dispatch({ effects: setGhostTextEffect.of(null) });
+      }
+    }, [settings.aiGhostTextEnabled, cancelPendingGhostText]);
 
     const suppressingExternalRef = useRef(false);
     const suppressingSelectionNotifyRef = useRef(false);
@@ -1427,6 +1484,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             syncLineHighlightField,
             findScopeField,
             findHighlightField,
+            createGhostTextExtension(),
             langComp.current.of(markdown({ base: markdownLanguage, codeLanguages: languages })),
             Prec.highest(
               keymap.of([
@@ -1943,6 +2001,92 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
 
                 // Inline Slash Commands (/) & Wiki-links ([[) in Markdown
                 const sel = update.state.selection.main;
+
+                // Selection Bubble Menu positioning
+                if (
+                  (callbacksRef.current.settings.selectionBubbleMenuEnabled ?? true) &&
+                  !sel.empty &&
+                  update.view.hasFocus
+                ) {
+                  const fromCoords = update.view.coordsAtPos(sel.from);
+                  const toCoords = update.view.coordsAtPos(sel.to);
+                  if (fromCoords && toCoords) {
+                    const top = Math.max(48, Math.min(fromCoords.top, toCoords.top) - 40);
+                    const rawLeft = (fromCoords.left + toCoords.right) / 2;
+                    const left = Math.max(120, Math.min(window.innerWidth - 120, rawLeft));
+                    setSelectionBubble({ top, left });
+                  } else {
+                    setSelectionBubble(null);
+                  }
+                } else {
+                  setSelectionBubble(null);
+                }
+
+                // Markdown Table GUI Bar detection
+                const effectiveFile = resolveEffectiveFilename(
+                  callbacksRef.current.fileName,
+                  callbacksRef.current.languageOverride
+                );
+                if (
+                  (callbacksRef.current.settings.markdownTableBarEnabled ?? true) &&
+                  isMarkdownFilename(effectiveFile)
+                ) {
+                  const tableLoc = detectMarkdownTableAtLine(
+                    update.state.doc.toString(),
+                    lineObj.number,
+                    head - lineObj.from
+                  );
+                  setActiveTableLoc(tableLoc);
+                } else {
+                  setActiveTableLoc(null);
+                }
+
+                // AI Ghost Text debounced autocomplete
+                cancelPendingGhostText();
+                if (
+                  update.docChanged &&
+                  sel.empty &&
+                  callbacksRef.current.settings.aiGhostTextEnabled &&
+                  callbacksRef.current.onRequestGhostText &&
+                  !update.view.composing
+                ) {
+                  const delayMs = Math.max(
+                    300,
+                    Math.min(3000, callbacksRef.current.settings.aiGhostTextDelayMs ?? 900)
+                  );
+                  const capturedPos = head;
+                  const capturedDocId = currentDocIdRef.current;
+                  ghostTimerRef.current = window.setTimeout(() => {
+                    ghostTimerRef.current = null;
+                    const curView = viewRef.current;
+                    const requester = callbacksRef.current.onRequestGhostText;
+                    if (!curView || !requester || currentDocIdRef.current !== capturedDocId) return;
+                    const curSel = curView.state.selection.main;
+                    if (!curSel.empty || curSel.head !== capturedPos) return;
+
+                    const fullText = curView.state.doc.toString();
+                    const prefix = fullText.slice(Math.max(0, capturedPos - 1500), capturedPos);
+                    const suffix = fullText.slice(capturedPos, Math.min(fullText.length, capturedPos + 400));
+                    if (prefix.trim().length < 8) return;
+
+                    const controller = new AbortController();
+                    ghostAbortRef.current = controller;
+                    void requester(prefix, suffix, controller.signal)
+                      .then((suggestion) => {
+                        if (controller.signal.aborted || !suggestion) return;
+                        const activeView = viewRef.current;
+                        if (!activeView || currentDocIdRef.current !== capturedDocId) return;
+                        const nowSel = activeView.state.selection.main;
+                        if (!nowSel.empty || nowSel.head !== capturedPos) return;
+                        activeView.dispatch({
+                          effects: setGhostTextEffect.of({ pos: capturedPos, text: suggestion }),
+                        });
+                      })
+                      .catch(() => {
+                        // Ignore aborted or transient ghost text errors
+                      });
+                  }, delayMs);
+                }
                 const isMd = isMarkdownFilename(
                   callbacksRef.current.fileName,
                   callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
@@ -2902,6 +3046,67 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
 
     const effectiveWrapMode = settings.wrapMode ?? (settings.wordWrap ? 'window' : 'none');
 
+    const handleBubbleFormat = useCallback((action: 'bold' | 'italic' | 'code' | 'link') => {
+      const view = viewRef.current;
+      if (!view) return;
+      const sel = view.state.selection.main;
+      if (sel.empty) return;
+      const selected = view.state.sliceDoc(sel.from, sel.to);
+      let replacement = selected;
+      let cursorStart = sel.from;
+      let cursorEnd = sel.to;
+      if (action === 'bold') {
+        replacement = `**${selected}**`;
+        cursorStart = sel.from + 2;
+        cursorEnd = sel.from + 2 + selected.length;
+      } else if (action === 'italic') {
+        replacement = `*${selected}*`;
+        cursorStart = sel.from + 1;
+        cursorEnd = sel.from + 1 + selected.length;
+      } else if (action === 'code') {
+        replacement = `\`${selected}\``;
+        cursorStart = sel.from + 1;
+        cursorEnd = sel.from + 1 + selected.length;
+      } else if (action === 'link') {
+        replacement = `[${selected}](https://)`;
+        cursorStart = sel.from + selected.length + 3;
+        cursorEnd = replacement.length - 1 + sel.from;
+      }
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to, insert: replacement },
+        selection: { anchor: cursorStart, head: cursorEnd },
+      });
+      view.focus();
+      setSelectionBubble(null);
+    }, []);
+
+    const handleTableOp = useCallback(
+      (op: TableEditOperation) => {
+        const view = viewRef.current;
+        if (!view || !activeTableLoc) return;
+        const doc = view.state.doc;
+        if (
+          activeTableLoc.table.startLine < 1 ||
+          activeTableLoc.table.endLine > doc.lines
+        ) {
+          return;
+        }
+        const from = doc.line(activeTableLoc.table.startLine).from;
+        const to = doc.line(activeTableLoc.table.endLine).to;
+        const updated = applyMarkdownTableOperation(activeTableLoc, op);
+        const serialized = serializeMarkdownTable(updated);
+        view.dispatch({
+          changes: { from, to, insert: serialized },
+        });
+        view.focus();
+      },
+      [activeTableLoc]
+    );
+
+    const isCurrentDocMarkdown = isMarkdownFilename(
+      resolveEffectiveFilename(fileName, languageOverride)
+    );
+
     return (
       <div className={`editor-host-wrap ${rectMode ? 'is-rect-mode' : ''}`}>
         {settings.showRuler && (
@@ -2916,7 +3121,31 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             rulerVersion={rulerVersion}
           />
         )}
+        {(settings.markdownTableBarEnabled ?? true) && activeTableLoc && (
+          <MarkdownTableBar
+            locale={locale}
+            currentAlignment={activeTableLoc.table.alignments[activeTableLoc.colIndex] ?? 'left'}
+            rowCount={activeTableLoc.table.rows.length + 1}
+            colCount={activeTableLoc.table.headers.length}
+            canDeleteRow={activeTableLoc.rowIndex >= 0}
+            canDeleteCol={activeTableLoc.table.headers.length > 1}
+            onOp={handleTableOp}
+          />
+        )}
         <div ref={hostRef} className="editor-codemirror-host" />
+        {(settings.selectionBubbleMenuEnabled ?? true) && selectionBubble && (
+          <SelectionBubbleMenu
+            top={selectionBubble.top}
+            left={selectionBubble.left}
+            locale={locale}
+            isMarkdown={isCurrentDocMarkdown}
+            aiCustomButtons={aiCustomButtons}
+            runningAiCustomId={runningAiCustomId}
+            onFormat={handleBubbleFormat}
+            onInlineAiEdit={onAiEditSelection}
+            onRunAiCustomButton={onRunAiCustomButton}
+          />
+        )}
         {inlinePopup && popupItems.length > 0 && (
           <div
             ref={popupRef}

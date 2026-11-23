@@ -47,6 +47,59 @@ const VALID_ICON_IDS = new Set<AiCustomButtonIconId>(
   AI_CUSTOM_ICON_OPTIONS.map((opt) => opt.id)
 );
 
+export interface AiPromptVariableContext {
+  selection?: string;
+  clipboard?: string;
+  fileName?: string;
+  filePath?: string;
+  language?: string;
+  date?: string;
+  time?: string;
+}
+
+export const AI_PROMPT_VARIABLE_TOKENS = [
+  { token: '{{selection}}', labelJa: '選択テキスト', labelEn: 'Selection' },
+  { token: '{{clipboard}}', labelJa: 'クリップボード', labelEn: 'Clipboard' },
+  { token: '{{fileName}}', labelJa: 'ファイル名', labelEn: 'File Name' },
+  { token: '{{filePath}}', labelJa: 'ファイルパス', labelEn: 'File Path' },
+  { token: '{{language}}', labelJa: '言語', labelEn: 'Language' },
+  { token: '{{date}}', labelJa: '今日の日付', labelEn: 'Today Date' },
+  { token: '{{time}}', labelJa: '現在時刻', labelEn: 'Current Time' },
+] as const;
+
+export function hasClipboardVariable(prompt: string): boolean {
+  return /\{\{\s*clipboard\s*\}\}/i.test(prompt);
+}
+
+/**
+ * Expands `{{variable}}` placeholders inside an AI Custom prompt.
+ */
+export function expandAiPromptVariables(
+  prompt: string,
+  ctx: AiPromptVariableContext
+): string {
+  if (!prompt || !prompt.includes('{{')) return prompt;
+  const now = new Date();
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const defaultDate = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  const defaultTime = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+
+  const map: Record<string, string> = {
+    selection: ctx.selection ?? '',
+    clipboard: ctx.clipboard ?? '',
+    filename: ctx.fileName ?? '',
+    filepath: ctx.filePath ?? '',
+    language: ctx.language ?? '',
+    date: ctx.date ?? defaultDate,
+    time: ctx.time ?? defaultTime,
+  };
+
+  return prompt.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (full, rawKey: string) => {
+    const key = rawKey.toLowerCase();
+    return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : full;
+  });
+}
+
 export const DEFAULT_AI_TRANSLATE_PROMPT = [
   '# 命令',
   '',

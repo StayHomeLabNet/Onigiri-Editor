@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.3.6)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.4.0)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -88,7 +88,16 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 ### Format Toolbar, Clipboard Image Auto-Save & Extended Blocks
 
 - **Edit, AI Custom Buttons, Display Zoom & Responsive Layout**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus up to **5 customizable Toolbar AI Custom Buttons** (displayed to the right of the formatting group across all modes, preloaded with an **AI Translate** preset) and a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
-  - **Responsive Progressive Collapsing & Instant Custom Tooltips**: Buttons strictly prevent text wrapping. Labels ("Copy Rich Text" and "AI Clean") progressively collapse into compact icon buttons based on real container metrics. Hovering displays **instant theme-aware custom tooltips (0.15s)** with `<kbd>` shortcut badges. When space is constrained, edge gradient fade masks, scroll buttons, and mouse wheel horizontal scrolling become active, and redundant New / Open / Save file buttons are hidden when the top header bar is active.
+  - **Responsive Progressive Collapsing & App-Wide Instant Custom Tooltips**: Buttons strictly prevent text wrapping. Labels ("Copy Rich Text" and "AI Clean") progressively collapse into compact icon buttons based on real container metrics. Hovering anywhere across the app (Header, Toolbar, Sidebar, Tab Bar, Status Bar, Inspector, Modals) displays **instant theme-aware custom tooltips (0.15s)** with automatic `<kbd>` shortcut badges (toggleable in **Settings → General**). When space is constrained, edge gradient fade masks, scroll buttons, and mouse wheel horizontal scrolling become active, and redundant New / Open / Save file buttons are hidden when the top header bar is active.
+- **Selection Bubble Menu, AI Ghost Text Autocomplete & Markdown Table GUI Toolbar (`v1.4.0`, toggleable in Settings → Editor)**:
+  - **Selection Floating Bubble Menu**: Selecting text displays a floating mini bar right above the selection for Bold, Italic, Inline Code, Link, Inline AI Edit (`⌘⇧E`), and up to 3 quick AI Custom buttons.
+  - **AI Ghost Text Autocomplete**: Pausing while typing displays a muted inline AI continuation suggestion (`Tab` to accept, `Esc` to dismiss; opt-in with configurable `400–2500ms` delay).
+  - **Markdown Table GUI Toolbar**: Automatically appears when the cursor is inside a Markdown table for 1-click row/column insertion & deletion, alignment, numeric-aware ascending/descending sort, and column width formatting.
+- **AI Prompt Variables, Export Page Setup, Quick Scratchpad & Global Hotkey, Integrated Terminal (`v1.4.0`)**:
+  - **AI Custom Prompt Variables**: Use `{{selection}}`, `{{clipboard}}`, `{{fileName}}`, `{{filePath}}`, `{{language}}`, `{{date}}`, and `{{time}}` inside any AI Custom button or submenu prompt (1-click variable insertion chips in **Settings → AI Custom**).
+  - **PDF / HTML Export Page Setup**: Open **Page Setup & Export (PDF / HTML)...** from the Export menu or Command Palette to pick Design Theme (Modern / Business / Academic), Paper Size (A4 / Letter / B5), Orientation, Margins, Page Numbers (`1 / N`), and Header / Footer (`{{title}}`).
+  - **Quick Scratchpad & Global Summon Hotkey**: Auto-persisted save-free scratchpad (Copy, Clear, Open in Tab) accessible from the Status Bar, plus an optional global hotkey (`CommandOrControl+Shift+Space`) in **Settings → General** to summon Onigiri Editor from any app.
+  - **Lightweight Integrated Terminal Drawer (Advanced Mode)**: Toggle from the Status Bar or Command Palette for streaming command execution, persistent `cd`, `↑`/`↓` history, Stop control, and 1-click **Ask AI** error diagnosis (toggleable in **Settings → General**).
 - **Images & Clipboard Auto-Save**:
   - Paste screenshots (`⌘V` / `Ctrl+V`) or drag & drop image files directly onto the editor or visual preview to auto-save PNG/image assets to your configured **Image Asset Folder** (default `assets`, falls back to workspace root for unsaved tabs) and insert `![image](assets/...)`.
   - When pasting images into an unsaved tab without an open workspace folder, images are staged safely in a temporary cache (`onigiri-markdown-images`) and **automatically moved into `./assets/`** (with Markdown links rewritten) the first time you save or Save As the document.

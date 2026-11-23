@@ -1152,3 +1152,426 @@
   }
 }
 
+/* Selection Floating Bubble Menu */
+.selection-bubble-menu {
+  position: fixed;
+  z-index: 9200;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 5px;
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+  animation: app-tooltip-in 0.1s ease-out;
+}
+
+.bubble-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bubble-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.bubble-btn.is-accent {
+  color: var(--accent);
+}
+
+.bubble-btn.is-running {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.bubble-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bubble-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+/* AI Ghost Text Autocomplete */
+.cm-ai-ghost-text {
+  color: var(--fg-muted);
+  opacity: 0.58;
+  font-style: italic;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Markdown Table GUI Toolbar */
+.md-table-bar {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 10px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+
+.md-table-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.md-table-bar-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  white-space: nowrap;
+}
+
+.md-table-bar-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+.md-table-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.md-table-bar-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.md-table-bar-btn.is-active {
+  background: var(--bg-active);
+  color: var(--accent);
+  border-color: var(--border);
+}
+
+.md-table-bar-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Prompt Variable Chips in Settings -> AI Custom */
+.ai-prompt-vars-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.ai-prompt-vars-label {
+  font-size: 11px;
+  color: var(--fg-muted);
+  margin-right: 2px;
+}
+
+.ai-prompt-var-chip {
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.ai-prompt-var-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Export Options Modal */
+.export-options-modal {
+  width: min(520px, 92vw);
+}
+
+.export-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.export-opt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.export-opt-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--fg-secondary);
+}
+
+.export-opt-field select,
+.export-opt-field input[type='text'] {
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg-primary);
+  font-size: 12.5px;
+}
+
+.export-opt-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg-primary);
+  cursor: pointer;
+}
+
+/* Quick Scratchpad Modal */
+.scratchpad-modal {
+  width: min(640px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.scratchpad-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.scratchpad-body {
+  padding: 12px 16px;
+  flex: 1;
+  display: flex;
+}
+
+.scratchpad-textarea {
+  width: 100%;
+  min-height: 280px;
+  resize: vertical;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--fg-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.65;
+  outline: none;
+}
+
+.scratchpad-textarea:focus {
+  border-color: var(--accent);
+}
+
+.scratchpad-stats {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+/* Integrated Terminal Drawer */
+.terminal-drawer {
+  height: 210px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.terminal-drawer-header {
+  height: 30px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.terminal-drawer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  min-width: 0;
+}
+
+.terminal-cwd {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+.terminal-drawer-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.terminal-mini-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.terminal-mini-btn.is-accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.terminal-mini-btn.is-danger {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.terminal-empty {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.terminal-line.is-cmd {
+  color: var(--accent);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.terminal-line.is-stdout {
+  color: var(--fg-primary);
+}
+
+.terminal-line.is-stderr {
+  color: #ef4444;
+}
+
+.terminal-line.is-meta {
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.terminal-prompt {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.terminal-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  outline: none;
+}
+
+.terminal-run-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+.terminal-run-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.terminal-run-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+

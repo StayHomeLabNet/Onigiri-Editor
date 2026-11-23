@@ -63,6 +63,7 @@ interface TopBarProps {
   onExportHtml: () => void;
   onExportPdf: () => void;
   onExportDocx?: () => void;
+  onOpenExportOptions?: (initialMode: 'html' | 'pdf') => void;
   onOpenCommandPalette: () => void;
   onToggleZen: () => void;
   onOpenSettings: () => void;
@@ -106,6 +107,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onExportHtml,
   onExportPdf,
   onExportDocx,
+  onOpenExportOptions,
   onOpenCommandPalette,
   onToggleZen,
   onOpenSettings,
@@ -536,6 +538,11 @@ export const TopBar: React.FC<TopBarProps> = ({
                 {onExportDocx && (
                   <button type="button" onClick={onExportDocx}>
                     {t.actions.exportDocx}
+                  </button>
+                )}
+                {onOpenExportOptions && (
+                  <button type="button" onClick={() => onOpenExportOptions('pdf')}>
+                    {locale === 'ja' ? 'ページ設定して書き出し (PDF / HTML)...' : 'Page Setup & Export (PDF / HTML)...'}
                   </button>
                 )}
               </div>
