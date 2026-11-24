@@ -940,17 +940,46 @@
 .mf-tiptap-editor.ProseMirror > .mf-sync-target-block {
   position: relative;
   border-radius: 6px;
-  background: rgba(99, 102, 241, 0.08);
-  box-shadow: -4px 0 0 0 var(--accent);
+  background: rgba(99, 102, 241, 0.11);
+  box-shadow: 6px 0 0 0 rgba(99, 102, 241, 0.11), -6px 0 0 0 rgba(99, 102, 241, 0.11), -9px 0 0 0 var(--accent);
   transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
+[data-theme='dark'] .mf-tiptap-editor.ProseMirror > .mf-sync-target-block {
+  background: rgba(129, 140, 248, 0.16);
+  box-shadow: 6px 0 0 0 rgba(129, 140, 248, 0.16), -6px 0 0 0 rgba(129, 140, 248, 0.16), -9px 0 0 0 var(--accent);
+}
+
 [data-theme='sepia'] .mf-tiptap-editor.ProseMirror > .mf-sync-target-block {
-  background: rgba(180, 83, 9, 0.08);
+  background: rgba(180, 83, 9, 0.11);
+  box-shadow: 6px 0 0 0 rgba(180, 83, 9, 0.11), -6px 0 0 0 rgba(180, 83, 9, 0.11), -9px 0 0 0 var(--accent);
 }
 
 [data-theme='midnight'] .mf-tiptap-editor.ProseMirror > .mf-sync-target-block {
-  background: rgba(56, 189, 248, 0.1);
+  background: rgba(56, 189, 248, 0.15);
+  box-shadow: 6px 0 0 0 rgba(56, 189, 248, 0.15), -6px 0 0 0 rgba(56, 189, 248, 0.15), -9px 0 0 0 var(--accent);
+}
+
+/* Inline character-level editor selection sync highlight in preview */
+.mf-sync-selection-highlight {
+  background: rgba(250, 204, 21, 0.38);
+  border-radius: 3px;
+  box-shadow: 0 1px 0 0 rgba(234, 179, 8, 0.7);
+}
+
+[data-theme='dark'] .mf-sync-selection-highlight {
+  background: rgba(250, 204, 21, 0.28);
+  box-shadow: 0 1px 0 0 rgba(250, 204, 21, 0.55);
+}
+
+[data-theme='sepia'] .mf-sync-selection-highlight {
+  background: rgba(245, 158, 11, 0.28);
+  box-shadow: 0 1px 0 0 rgba(217, 119, 6, 0.55);
+}
+
+[data-theme='midnight'] .mf-sync-selection-highlight {
+  background: rgba(56, 189, 248, 0.3);
+  box-shadow: 0 1px 0 0 rgba(56, 189, 248, 0.65);
 }
 
 /* Right Pane Embedded Browser */
@@ -1614,6 +1643,18 @@
   flex-wrap: wrap;
   gap: 14px;
   margin-top: 2px;
+}
+
+.ai-custom-model-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px;
+}
+
+.ai-custom-model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .ai-custom-warn {

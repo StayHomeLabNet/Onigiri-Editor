@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.4.1)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.4.2)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -89,6 +89,10 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 
 - **Edit, AI Custom Buttons, Display Zoom & Responsive Layout**: **Select All**, **Copy**, **Paste**, **Zoom Out**, and **Zoom In** buttons on the Format Toolbar, plus up to **5 customizable Toolbar AI Custom Buttons** (displayed to the right of the formatting group across all modes, preloaded with an **AI Translate** preset) and a clickable **`100%`** zoom readout in the Status Bar (`25%`–`400%` numeric input, `−`/`+` steppers, presets, or `⌘+` / `⌘-` / `⌘0`).
   - **Responsive Progressive Collapsing & App-Wide Instant Custom Tooltips**: Buttons strictly prevent text wrapping. Labels ("Copy Rich Text" and "AI Clean") progressively collapse into compact icon buttons based on real container metrics. Hovering anywhere across the app (Header, Toolbar, Sidebar, Tab Bar, Status Bar, Inspector, Modals) displays **instant theme-aware custom tooltips (0.15s)** with automatic `<kbd>` shortcut badges (toggleable in **Settings → General**). When space is constrained, edge gradient fade masks, scroll buttons, and mouse wheel horizontal scrolling become active, and redundant New / Open / Save file buttons are hidden when the top header bar is active.
+- **Inline Selection Sync, Per-Button AI Model Selection, Local AI Reliability & UI Polish (`v1.4.2`)**:
+  - **Character-Level Editor Selection Sync & Enhanced Cursor Block Highlight**: Highlights exact inline text selected in CodeMirror inside the live TipTap preview in real time (toggleable in **Settings → Editor**), and improves cursor-line / block highlight contrast across all 4 themes (`activeLineSyncHighlight`).
+  - **Per-Button AI Model Override (`Settings → AI Custom`)**: Select a dedicated **Subscription CLI**, **Cloud API**, or **Local AI / On-Device** provider and model per AI Custom button or submenu item (or follow the AI Chat panel), with explicit `<input_text>` delimiters, `<think>` stripping, and empty-response protection for compact local models like Gemma 4.
+  - **Simple Mode Defaults, Built-in Browser Close (`✕`) & Production UI Hardening**: Defaults Simple mode to hidden top header bar + visible format toolbar, adds a `✕` close button next to the **Web Browser** tab in the right-pane header, removes the redundant header version badge, and disables browser context menus / main-window Inspect in release builds.
 - **Auto Snapshot Timeline, Markdown Compatibility Check, Image Optimization, AI Privacy Redaction & Feature Finder (`v1.4.1`)**:
   - **Auto Snapshot Timeline & Partial Chunk Restore**: Automatically records snapshots on save and at configurable intervals (**Settings → General**), allowing full or **chunk-by-chunk partial restore** in **Inspector → Snapshots**.
   - **Markdown Compatibility Check**: Inspect dialect differences for **GitHub / Zenn / Qiita / Notion / Obsidian** in **Inspector → Compat** and jump directly to flagged lines.

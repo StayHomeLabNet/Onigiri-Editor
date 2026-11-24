@@ -242,6 +242,28 @@
   box-shadow: var(--shadow-sm);
 }
 
+.seg-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 2px;
+  margin-right: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.seg-close-btn:hover {
+  background: rgba(239, 68, 68, 0.14);
+  color: #ef4444;
+}
+
 .mode-switch .seg-btn.is-active {
   color: var(--accent);
   font-weight: 600;

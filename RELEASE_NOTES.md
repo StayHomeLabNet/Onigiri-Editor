@@ -1,28 +1,16 @@
-Onigiri Editor `v1.4.1` delivers 6 major writing & reliability upgrades—**Auto Snapshot Timeline & Partial Chunk Restore**, **Markdown Compatibility Check**, **Image Auto-Optimization & Size Inventory**, **AI Send Content Preview & Secret Redaction**, **Feature Finder Guide (`?`)**, and **Built-in Browser UX enhancements**—alongside cross-platform fixes for macOS/Windows/Linux and a comprehensive **security hardening** pass.
+Onigiri Editor `v1.4.2` refines the writing and AI workflow with **Inline Character-Level Preview Selection Sync**, **Enhanced Cursor Block Highlights**, **Per-Button AI Model Selection (Subscription CLI / Cloud API / Local AI)**, **Local AI Empty-Response & Delimiter Fixes**, **Simple Mode Defaults**, a **One-Click Built-in Browser Close Button**, and **Production UI Hardening**.
 
-### Highlights (`v1.4.1`)
-- **Auto Snapshot Timeline & Partial Chunk Restore (Configurable in Settings → General)**:
-  - Automatically captures document snapshots on save and at configurable intervals. Review the timeline in **Inspector → Snapshots** and restore either the entire document or individual changed chunks.
-- **Markdown Compatibility Check (GitHub / Zenn / Qiita / Notion / Obsidian)**:
-  - Open **Inspector → Compat** to diagnose dialect-specific syntax warnings (Callouts, WikiLinks, KaTeX, Footnotes, Mermaid, HTML) with 1-click jump to line.
-- **Image Auto-Optimization & Workspace Image Size Inventory (Configurable in Settings → Editor)**:
-  - Automatically resizes and compresses pasted raster images (WebP on Windows WebView2; JPEG/PNG fallback on macOS WKWebView & Linux WebKitGTK), supports organized filenames and optional `originals/` backups, and adds an **All Images Size Inventory** tab inside the Unused Images modal.
-- **AI Send Content Preview & Secret Redaction (Configurable in Settings → AI)**:
-  - Inspect exact outgoing text before sending to external AI providers, with automatic detection and 1-click redaction of API keys, Bearer tokens, private keys, emails, and secrets.
-- **Feature Finder Guide (`?`)**:
-  - Click `?` in the TopBar or open **Feature Finder** from the Command Palette to search any Onigiri Editor capability in English or Japanese and launch it directly.
-- **Built-in Browser UX & Cross-Platform Fixes (macOS / Windows / Linux)**:
-  - Adds custom viewport width (`px` input), 1-click **Clip Page to Markdown**, an inline `⋮` action strip & upward toolbar tooltips immune to native child WebView occlusion across all 3 OSes, and **Resync Browser Bounds**.
-  - **Built-in Browser Toolbar & macOS Y-Offset Fix**: Keeps main browser toolbar icons visible in normal Split widths, ensures DevTools and custom width controls remain accessible in the `⋮` action strip, and corrects macOS child WebView Y-coordinate offset (`contentView` vs DOM viewport height) so the embedded webpage never covers the browser navigation bar.
-  - **macOS Multi-Monitor / Mixed-DPI Startup Fix**: Positions the window on the target display before sizing and flushes the AppKit/WKWebView backing scale factor right after show, preventing 1/4-size rendering when launching or auto-restarting after an update across Retina (2x) and external (1x) monitors.
-  - **Windows Integrated Terminal**: Adds Shift_JIS / CP932 output decoding fallback so Japanese `cmd /C` output never truncates, `cd ~\` support, and `taskkill /T /F` process-tree cancellation.
-  - **Global Hotkey**: Displays a toast notification when shortcut registration fails (e.g., Linux Wayland or shortcut conflict).
-- **Comprehensive Security Hardening**:
-  - Enforces Mermaid `securityLevel: 'strict'` + defense-in-depth SVG sanitization in Preview and Live Preview to eliminate Stored XSS risk.
-  - Restricts `apply_downloaded_app_update` / `schedule_app_update_on_exit` to canonical installer files inside the official Downloads directory, and validates every redirect hop in `download_app_update` against the official GitHub Releases allowlist.
-  - Enforces URL scheme allowlists on built-in browser navigation and external browser launch (`http`/`https` only).
-  - Hardens Web Clipper (`fetch_url_content`) against link-local / cloud metadata SSRF across initial requests and redirects.
-  - Neutralizes `</style>` breakout in Live Preview custom CSS, adds `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, and tightens Tauri CSP (`object-src 'none'; base-uri 'self'; form-action 'self'`).
+### Highlights (`v1.4.2`)
+- **Inline Selection Sync & Enhanced Cursor Block Highlight (Settings → Editor, on by default)**:
+  - **Character-Level Selection Sync (`previewSelectionSyncHighlight`)**: Selecting text in the CodeMirror editor highlights the exact corresponding inline text in the live TipTap preview in real time using non-destructive ProseMirror decorations.
+  - **Enhanced Cursor Block Highlight (`activeLineSyncHighlight`)**: Improves background contrast and left accent bar visibility across Light, Dark, Sepia, and Midnight themes when placing the cursor on headings (`H1`, `H2`, etc.) or plain text lines.
+- **Per-Button AI Model Selection & Local AI Reliability (`AI Custom`)**:
+  - **Per-Button / Submenu Provider & Model Override (`Settings → AI Custom`)**: Assign a specific **Subscription CLI** (`Codex CLI`, `Claude Code CLI`, `Gemini CLI`, `Antigravity CLI`, `Custom CLI`), **Cloud API** (`OpenAI`, `Anthropic`, `Gemini`), or **Local AI / On-Device** (`Ollama`, `LM Studio`, `OpenAI-Compat`, `Apple Foundation Models`) and model to each AI Custom button or submenu item (or follow the AI Chat panel by default), with automatic local/CLI model detection and custom model input.
+  - **Local AI Reliability Fixes (LM Studio / Ollama / Apple Foundation Models)**: Reads live editor text directly (`getText()`), wraps appended input text in explicit `# 入力テキスト (Input Text)` + `<input_text>...</input_text>` delimiters so compact local models (such as Gemma 4) do not confuse short inputs with prompt instructions, strips `<think>...</think>` blocks, surfaces clear errors on reasoning-only empty responses, and prevents empty outputs from overwriting document content.
+- **Simple Mode Defaults, Built-in Browser Close & Production UI Hardening**:
+  - **Simple Mode Defaults**: Defaults **Hide top header bar in Simple mode** and **Show format toolbar in Simple mode** to ON for a distraction-free editor with immediate file & formatting controls.
+  - **One-Click Built-in Browser Close (`✕`)**: Adds a close button right next to the **Web Browser** tab in the right-pane header to close the embedded WebView and switch back to Markdown preview.
+  - **Header & Release UI Hardening**: Removes the redundant version badge from the top-left brand header, suppresses the browser default context menu (`Back`, `Refresh`, `Save as`, `Print`, `Inspect`) on non-editable app chrome in production builds, and disables DevTools/Inspect on the main application window in release builds (while keeping DevTools available inside the built-in Web Browser).
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel, includes Apple Foundation Models support on macOS 26+)**: `.dmg` / `.app.tar.gz`
@@ -31,31 +19,19 @@ Onigiri Editor `v1.4.1` delivers 6 major writing & reliability upgrades—**Auto
 
 ---
 
-Onigiri Editor `v1.4.1` では、**自動スナップショット＆部分復元**・**Markdown 互換性チェック**・**画像自動最適化＆全画像サイズ一覧**・**AI 送信内容プレビュー＆機密情報マスキング**・**機能検索ガイド（`?`）**・**内蔵ブラウザ UX 強化** に加え、macOS / Windows / Linux 向けのクロスプラットフォーム不具合修正と **包括的なセキュリティ強化** を行いました。
+Onigiri Editor `v1.4.2` では、**プレビューの文字単位（インライン）選択同期**・**カーソル行ハイライト強化**・**AIカスタムごとの AI モデル個別選択（サブスク / API / ローカル）**・**ローカル AI 空応答対策**・**シンプルモード既定値変更**・**内蔵 Web ブラウザ閉じるボタン**・**本番 UI 保護** を行いました。
 
-### 主な変更点（`v1.4.1`）
-- **自動スナップショット・タイムライン＆部分チャンク復元（設定 → 一般で ON/OFF 可）**:
-  - 保存時および一定間隔でスナップショットを自動保存。**インスペクター → スナップショット** から全体復元だけでなく **変更チャンク単位の部分復元** が可能になりました。
-- **Markdown 互換性チェック（GitHub / Zenn / Qiita / Notion / Obsidian）**:
-  - **インスペクター → 互換性** タブで各プラットフォーム固有の構文差異・注意箇所を診断し、ワンクリックで該当行へジャンプできます。
-- **画像の自動最適化＆ワークスペース全画像サイズ一覧（設定 → エディタで ON/OFF 可）**:
-  - 貼り付け画像を自動リサイズ・圧縮（Windows は WebP、macOS WKWebView / Linux WebKitGTK は JPEG・PNG フォールバック対応）。整理ファイル名生成や任意での `originals/` 元画像保存に対応し、未使用画像モーダルに **全画像サイズ一覧** タブを追加しました。
-- **AI 送信内容プレビュー＆機密情報（シークレット）自動マスキング（設定 → AI で ON/OFF 可）**:
-  - 外部 AI 送信前に送信テキストを確認でき、API キー・Bearer トークン・秘密鍵・メールアドレス等を自動検出してワンクリックで伏せ字化できます。
-- **機能検索ガイド（`?`）**:
-  - ヘッダー右上の `?` ボタンまたはコマンドパレットから、やりたいことを日本語／英語で検索して該当機能を直接起動できます。
-- **内蔵ブラウザ UX 強化＆macOS / Windows / Linux クロスプラットフォーム修正**:
-  - 数値指定のカスタム幅 (`px`)、ワンクリック **Markdown クリップ**、全 OS でネイティブ子 WebView に隠れないインライン `⋮` 操作帯＆上方向ツールチップ、**表示位置再同期（修復）** を追加しました。
-  - **内蔵ブラウザツールバー表示＆macOS 子 WebView Y 座標ズレ補正**: 分割表示の通常幅でも主要アイコン群を常時表示（狭い幅では `⋮` 帯に DevTools・カスタム幅を含め全機能を集約）し、macOS での `contentView` と DOM ビューポート高さの差分を自動補正することで、Web ページがツールバーを覆い隠す不具合を解消しました。
-  - **macOS マルチディスプレイ・混在 DPI 起動時の描画修正**: ウィンドウ復元時に位置移動（対象ディスプレイ確定）をサイズ設定より先に行い、表示直後に AppKit / WKWebView のスケール再同期を実行することで、Retina（2x）と外部モニター（1x）併用時の起動・アップデート再起動後に 1/4 サイズで縮小描画される不具合を解消しました。
-  - **Windows 統合ターミナル**: Shift_JIS / CP932 デコードフォールバックにより日本語 `cmd /C` 出力の途中打ち切りを解消し、`cd ~\` 対応および `taskkill /T /F` によるプロセスツリー強制停止を実装しました。
-  - **グローバルホットキー**: Linux Wayland やキー競合等で登録に失敗した際、トースト通知で理由を表示するようにしました。
-- **包括的なセキュリティ強化**:
-  - Mermaid プレビューを `securityLevel: 'strict'` へ変更し、多層防御の SVG サニタイザを追加して Stored XSS リスクを解消しました。
-  - アップデータ適用時に公式ダウンロードフォルダ配下の正規インストーラファイルであることを検証し、ダウンロード時のリダイレクト先も毎回公式 GitHub 許可リストで検証するようにしました。
-  - 内蔵ブラウザのナビゲーションおよび外部ブラウザ起動の許可 URL スキームを厳格化（外部起動は `http`/`https` 限定）しました。
-  - Web クリッパー（`fetch_url_content`）でリンクローカル／クラウドメタデータ IP への SSRF を初回・リダイレクト先ともに遮断しました。
-  - 外部ライブプレビューのカスタム CSS での `</style>` ブレイクアウト防止、`X-Content-Type-Options: nosniff`・`Referrer-Policy: no-referrer` 付与、および Tauri CSP 強化（`object-src 'none'; base-uri 'self'; form-action 'self'`）を実施しました。
+### 主な変更点（`v1.4.2`）
+- **文字単位（インライン）選択同期＆カーソル行ハイライト強化（設定 → エディタで ON/OFF 可・既定 ON）**:
+  - **文字単位の選択同期（`previewSelectionSyncHighlight`）**: エディタ上で選択した文字列に対応するプレビュー側のテキスト箇所を非破壊な ProseMirror Decoration としてリアルタイムにマーカーハイライトします。
+  - **カーソル行・対応ブロックのハイライト視認性改善（`activeLineSyncHighlight`）**: `H1` / `H2` や通常テキスト行にカーソルを置いた際のプレビュー側背景ハイライトと左アクセント線を、ライト・ダーク・セピア・ミッドナイトの全テーマで見やすく調整しました。
+- **AIカスタムごとの AI モデル個別選択＆ローカル AI 安定化（設定 → AIカスタム）**:
+  - **ボタン／サブメニュー毎のモデル個別指定**: サブスクリプション CLI（Codex / Claude Code / Gemini / Antigravity / Custom CLI）・クラウド API（OpenAI / Anthropic / Gemini）・ローカル AI（Ollama / LM Studio / OpenAI-Compat / Apple Foundation Models）からボタンごとに使用するモデルを個別に選択可能になりました（未指定時は AIチャット選択に追従）。
+  - **ローカル AI（LM Studio / Ollama / Apple Foundation Models）対策**: エディタ本文を直接取得した上で `# 入力テキスト (Input Text)` + `<input_text>...</input_text>` の区切りを付与し、Gemma 4 等の小規模モデルでも短い文を指示文と誤認しないよう修正。`<think>...</think>` の自動除去、思考のみ・空応答のエラー検出、および空結果による本文上書き防止ガードを追加しました。
+- **シンプルモード既定値変更・内蔵 Web ブラウザ閉じるボタン・本番 UI 保護**:
+  - **シンプルモード既定値**: 初期設定を「上部ヘッダーバーを非表示」「書式ツールバーを表示」に変更しました。
+  - **内蔵 Web ブラウザの閉じる（`✕`）ボタン**: 右ペインヘッダーの「Webブラウザ」タブ横に `✕` ボタンを追加し、ワンクリックで内蔵 Web ブラウザを閉じてプレビュー表示に戻れるようにしました。
+  - **ヘッダー＆リリースビルド UI 保護**: 左上ブランド横のバージョン表記を削除し、本番ビルドにおける UI 上のブラウザ標準右クリックメニュー（戻る／更新／名前を付けて保存／印刷／Inspect）および本体ウィンドウの DevTools（Inspect）を無効化しました（内蔵 Web ブラウザ内の DevTools は引き続き利用可能）。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応・macOS 26+ Apple Foundation Models 対応）**: `.dmg` / `.app.tar.gz`

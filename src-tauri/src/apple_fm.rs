@@ -324,6 +324,9 @@ pub async fn generate(
     cancel_watcher.abort();
 
     let content = blocking_result?;
+    if content.trim().is_empty() {
+        return Err("Apple Foundation Models returned an empty response.".to_string());
+    }
     Ok(AiChatResponse {
         content,
         model_used,

@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.4.1',
+  versionLabel: 'v1.4.2',
   modes: {
     simple: 'Simple',
     basic: 'Basic',
@@ -293,7 +293,8 @@ export const en: Translations = {
       wordGoal: 'Writing Goal (words/chars, 0 = off)',
       customCss: 'Custom Preview CSS',
       customCssPlaceholder: '.markdown-body h1 { color: #6366f1; }',
-      activeLineSyncHighlight: 'Highlight matching line/block in opposite pane while editing',
+      activeLineSyncHighlight: 'Highlight cursor line / matching block in opposite pane while editing',
+      previewSelectionSyncHighlight: 'Highlight editor text selection in preview',
       oeditLineCopyEnabled: 'Smart Line Copy (copy full line on ⌘+C / Ctrl+C without selection)',
       oeditLineCopyTrigger: 'Line Copy Trigger',
       triggerEolOnly: 'End of line only',
@@ -431,6 +432,17 @@ export const en: Translations = {
       submenuDefaultName: 'Submenu',
       submenuTooltipHint: ' (Hold or right-click for submenu)',
       shortcutLabel: 'Shortcut Key',
+      aiModelOverrideLabel: 'AI Model (Subscription / API / Local)',
+      followAiChatOption: 'Follow AI Chat selection',
+      providerGroupSubscription: 'Subscription CLI',
+      providerGroupApi: 'Cloud API',
+      providerGroupLocal: 'Local AI / On-Device',
+      modelSelectLabel: 'Model',
+      customModelOption: 'Enter custom model...',
+      customModelPlaceholder: 'e.g. qwen2.5:14b / gpt-5.4 / local-model',
+      apiKeyMissingHint: 'Note: API key for this provider is not set in the AI Chat panel yet.',
+      localServerOfflineHint: 'Note: Local server is offline or no models detected (manual entry allowed).',
+      refreshModelsBtn: 'Refresh Models',
     },
     keybindings: {
       title: 'Keyboard Shortcuts',
@@ -693,6 +705,7 @@ export const en: Translations = {
   browser: {
     modePreview: 'Preview',
     modeBrowser: 'Web Browser',
+    closeBrowser: 'Close Web Browser',
     back: 'Back',
     forward: 'Forward',
     reload: 'Reload',
@@ -1062,6 +1075,7 @@ export const en: Translations = {
     aiCustomReplacedAndCopied: 'Replaced text & copied "{name}" result to clipboard',
     aiCustomCancelled: 'Cancelled "{name}"',
     aiCustomEmptyPrompt: 'Prompt for "{name}" is empty. Configure it in Settings → AI Custom.',
+    aiCustomEmptyResponse: '"{name}" returned an empty response (check local AI model or thinking mode).',
     aiCustomNoOutputTarget: 'No output action selected for "{name}". Check at least one option in Settings → AI Custom.',
     htmlPasted: 'Converted HTML clipboard to Markdown',
     noClipboardHtml: 'No HTML content found in clipboard',

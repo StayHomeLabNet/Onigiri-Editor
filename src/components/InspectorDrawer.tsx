@@ -1223,6 +1223,19 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
               <label className="check-row">
                 <input
                   type="checkbox"
+                  checked={settings.previewSelectionSyncHighlight ?? true}
+                  onChange={(e) =>
+                    onSettingsChange({
+                      ...settings,
+                      previewSelectionSyncHighlight: e.target.checked,
+                    })
+                  }
+                />
+                <span>{t.inspector.settingsLabels.previewSelectionSyncHighlight}</span>
+              </label>
+              <label className="check-row">
+                <input
+                  type="checkbox"
                   checked={settings.oeditLineCopyEnabled}
                   onChange={(e) =>
                     onSettingsChange({

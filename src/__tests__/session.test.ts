@@ -65,4 +65,34 @@ describe('session persistence helpers', () => {
     expect(restored.tabs[0].title).toBe('restored.md');
     expect(restored.activeTabId).toBe(tab.id);
   });
+
+  it('computes topBar and formatToolbar visibility correctly for simple mode defaults', () => {
+    const defaultSettings = {
+      showTopBar: true,
+      hideTopBarInSimpleMode: true,
+      showFormatToolbar: true,
+      showFormatToolbarInSimpleMode: true,
+    };
+
+    const getVisibility = (mode: 'simple' | 'basic' | 'advanced', s: typeof defaultSettings) => ({
+      topBar: mode === 'simple' ? !s.hideTopBarInSimpleMode && (s.showTopBar ?? true) : (s.showTopBar ?? true),
+      formatToolbar: mode === 'simple' ? Boolean(s.showFormatToolbarInSimpleMode) : (s.showFormatToolbar ?? true),
+    });
+
+    // Simple mode: topBar hidden, formatToolbar visible
+    expect(getVisibility('simple', defaultSettings)).toEqual({
+      topBar: false,
+      formatToolbar: true,
+    });
+
+    // Basic / Advanced mode: topBar visible, formatToolbar visible
+    expect(getVisibility('basic', defaultSettings)).toEqual({
+      topBar: true,
+      formatToolbar: true,
+    });
+    expect(getVisibility('advanced', defaultSettings)).toEqual({
+      topBar: true,
+      formatToolbar: true,
+    });
+  });
 });

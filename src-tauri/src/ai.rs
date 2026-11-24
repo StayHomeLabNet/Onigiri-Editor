@@ -2713,13 +2713,45 @@ pub async fn ai_chat(
             if !status.is_success() {
                 return Err(format!("API error ({}): {}", status, body));
             }
-            let content = body["choices"][0]["message"]["content"]
-                .as_str()
-                .ok_or_else(|| format!("Unexpected API response: {}", body))?
-                .to_string();
+            let raw_content = if let Some(s) = body["choices"][0]["message"]["content"].as_str() {
+                s.to_string()
+            } else if let Some(arr) = body["choices"][0]["message"]["content"].as_array() {
+                arr.iter()
+                    .filter_map(|part| {
+                        part["text"]
+                            .as_str()
+                            .or_else(|| part["content"].as_str())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("")
+            } else if let Some(s) = body["choices"][0]["text"].as_str() {
+                s.to_string()
+            } else {
+                String::new()
+            };
+
+            if raw_content.trim().is_empty() {
+                let reasoning = body["choices"][0]["message"]["reasoning_content"]
+                    .as_str()
+                    .or_else(|| body["choices"][0]["message"]["reasoning"].as_str())
+                    .unwrap_or("");
+                if !reasoning.trim().is_empty() {
+                    let finish_reason = body["choices"][0]["finish_reason"]
+                        .as_str()
+                        .unwrap_or("unknown");
+                    return Err(format!(
+                        "Model returned reasoning output only with empty content (finish_reason: {}). Try increasing max tokens or using a non-thinking model.",
+                        finish_reason
+                    ));
+                }
+                if body["choices"][0]["message"]["content"].is_null() {
+                    return Err(format!("Unexpected API response: {}", body));
+                }
+                return Err("API returned an empty response.".to_string());
+            }
 
             Ok(AiChatResponse {
-                content,
+                content: raw_content,
                 model_used: model.to_string(),
             })
         }
@@ -2887,13 +2919,29 @@ pub async fn ai_chat(
             if !status.is_success() {
                 return Err(format!("Ollama error ({}): {}", status, body));
             }
-            let content = body["message"]["content"]
+            let raw_content = body["message"]["content"]
                 .as_str()
-                .ok_or_else(|| format!("Unexpected Ollama response: {}", body))?
-                .to_string();
+                .or_else(|| body["response"].as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+
+            if raw_content.trim().is_empty() {
+                let thinking = body["message"]["thinking"].as_str().unwrap_or("");
+                if !thinking.trim().is_empty() {
+                    let done_reason = body["done_reason"].as_str().unwrap_or("unknown");
+                    return Err(format!(
+                        "Ollama returned thinking output only with empty content (done_reason: {}). Try a non-thinking model or disable thinking.",
+                        done_reason
+                    ));
+                }
+                if body["message"]["content"].is_null() && body["response"].is_null() {
+                    return Err(format!("Unexpected Ollama response: {}", body));
+                }
+                return Err("Ollama returned an empty response.".to_string());
+            }
 
             Ok(AiChatResponse {
-                content,
+                content: raw_content,
                 model_used: model.to_string(),
             })
         }

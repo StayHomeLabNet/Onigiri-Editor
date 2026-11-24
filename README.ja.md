@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v141-の更新内容">v1.4.1 の更新内容</a> ・
+    <a href="#v142-の更新内容">v1.4.2 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.4.1-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.4.2-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、日本語環境では日本語 UI・日本語ネイティブメニューで起動し、その他の言語環境では英語 UI・英語メニューで起動します。
 
-現在のバージョン: `v1.4.1`
+現在のバージョン: `v1.4.2`
 
 ## 主な機能
 
@@ -100,7 +100,21 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.4.1 の更新内容
+## v1.4.2 の更新内容
+
+- **プレビューの文字単位（インライン）選択同期＆カーソル行ハイライト強化**:
+  - **エディタ選択範囲のインラインハイライト同期（`設定 → エディタ` で ON/OFF 可・既定 ON）**: エディタ上で選択した文字や語句に対応するプレビュー側のテキスト箇所をリアルタイムでマーカー表示します（ProseMirror Decoration による非破壊描画）。
+  - **カーソル行・対応ブロックのハイライト視認性改善（`設定 → エディタ` で ON/OFF 可・既定 ON）**: `H1` / `H2` や通常テキスト行にカーソルを置いた際のプレビュー側背景ハイライトと左アクセント線を、ライト・ダーク・セピア・ミッドナイトの全テーマで見やすく調整しました。
+- **AIカスタムごとの AI モデル個別選択＆ローカル AI 安定化**:
+  - **ボタン／サブメニュー毎の AI プロバイダー・モデル指定（`設定 → AIカスタム`）**: サブスクリプション CLI（Codex / Claude Code / Gemini / Antigravity / Custom CLI）・クラウド API（OpenAI / Anthropic / Gemini）・ローカル AI（Ollama / LM Studio / OpenAI-Compat / Apple Foundation Models）からボタンごとに使用するモデルを個別に選択できるようになりました（未指定時は右パネル「AIチャット」の選択に追従）。
+  - **ローカル AI（LM Studio / Ollama / Apple Foundation Models）空応答対策**: 入力テキストを `# 入力テキスト (Input Text)` + `<input_text>...</input_text>` で明示的に区切り、Gemma 4 等の小規模モデルでも短い文を指示文と誤認しないよう改善。さらに `<think>...</think>` の自動除去、思考のみ・空応答のエラー検出、および空結果による本文上書き防止ガードを追加しました。
+- **シンプルモード既定値変更・内蔵 Web ブラウザ閉じるボタン・本番 UI 保護**:
+  - **シンプルモードのデフォルト調整**: シンプルモード時の初期設定を「上部ヘッダーバーを非表示」「書式ツールバーを表示」に変更しました。
+  - **内蔵 Web ブラウザの閉じる（`✕`）ボタン**: 右ペインヘッダーの「Webブラウザ」タブ横に `✕` ボタンを追加し、ワンクリックで内蔵 Web ブラウザを閉じてプレビュー表示に戻れるようにしました。
+  - **ヘッダー＆リリースビルド UI 保護**: 左上ブランド横のバージョン表記を削除し、本番ビルドにおける UI 上のブラウザ標準右クリックメニュー（戻る／更新／名前を付けて保存／印刷／Inspect）および本体ウィンドウの DevTools（Inspect）を無効化しました（内蔵 Web ブラウザ内の DevTools は引き続き利用可能）。
+
+<details>
+<summary>以前のリリース: v1.4.1</summary>
 
 - **自動スナップショット・タイムライン＆部分チャンク復元**: 保存時および一定間隔での自動スナップショット（`設定 → 一般` で ON/OFF・間隔調整可）に対応し、**インスペクター → スナップショット** から全体復元だけでなく **変更チャンク単位の部分復元** が可能になりました。
 - **Markdown 互換性チェック（GitHub / Zenn / Qiita / Notion / Obsidian）**: **インスペクター → 互換性** タブで各プラットフォーム固有の構文差異・注意箇所を診断し、ワンクリックで該当行へジャンプできます。
@@ -109,6 +123,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **機能検索ガイド（`?`）**: ヘッダー右上の `?` ボタンまたはコマンドパレットから、やりたいことを日本語／英語で検索して該当機能を直接起動できます。
 - **内蔵ブラウザ UX 強化＆macOS / Windows / Linux クロスプラットフォーム修正**: 数値指定のカスタム幅 (`px`)、ワンクリック **Markdown クリップ**、ネイティブ子 WebView に隠れないインライン `⋮` 操作帯＆上方向ツールチップ、**表示位置再同期（修復）** を追加。さらに macOS 内蔵ブラウザの子 WebView Y 座標ズレ補正（ツールバー覆い隠し解消）、macOS マルチディスプレイ混在 DPI 環境での起動・アップデート再起動時の 1/4 サイズ縮小描画不具合修正、Windows 統合ターミナルの Shift_JIS/CP932 デコード対応・`cd ~\`・プロセスツリー強制停止（`taskkill /T /F`）、およびグローバルホットキー登録失敗時のトースト通知を実装しました。
 - **包括的なセキュリティ強化**: Mermaid プレビューの `securityLevel: 'strict'` 化＋SVG サニタイザによる Stored XSS 対策、アップデータ適用パスのダウンロードフォルダ限定＆リダイレクト先検証、内蔵・外部ブラウザの URL スキーム制限、Web クリッパーの SSRF（クラウドメタデータ／リンクローカル遮断）対策、ライブプレビューの `<style>` ブレイクアウト防止・`nosniff` / `no-referrer` ヘッダ付与、および Tauri CSP の強化を実施しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.4.0</summary>

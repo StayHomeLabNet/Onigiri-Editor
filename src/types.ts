@@ -274,6 +274,7 @@ export interface EditorSettings {
   wordGoal: number;
   customCss: string;
   activeLineSyncHighlight: boolean;
+  previewSelectionSyncHighlight?: boolean;
   oeditLineCopyEnabled: boolean;
   oeditLineCopyTrigger: OeditLineCopyTrigger;
   oeditLineCopyIncludeNewline: boolean;
@@ -375,6 +376,8 @@ export interface AiCustomSubmenuItem {
   prompt: string;
   copyToClipboard: boolean;
   replaceContent: boolean;
+  aiProvider?: AiProviderId;
+  aiModel?: string;
 }
 
 export interface AiCustomButton {
@@ -384,6 +387,8 @@ export interface AiCustomButton {
   prompt: string;
   copyToClipboard: boolean;
   replaceContent: boolean;
+  aiProvider?: AiProviderId;
+  aiModel?: string;
   submenuEnabled?: boolean;
   submenuItems?: AiCustomSubmenuItem[];
 }

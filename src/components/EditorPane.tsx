@@ -255,6 +255,7 @@ export interface EditorHandle {
   getCursorOffset: () => number;
   getCursorPosition: () => { line: number; col: number };
   getSelectedText: () => string;
+  getText: () => string;
   setFindScope: (scope: TextRange | null) => void;
   setFindHighlights: (payload: { matches: FindMatch[]; activeIndex: number } | null) => void;
   foldAllLines: () => void;
@@ -2860,6 +2861,10 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         if (!view) return '';
         const { from, to } = view.state.selection.main;
         return from < to ? view.state.sliceDoc(from, to) : '';
+      },
+      getText: () => {
+        const view = viewRef.current;
+        return view ? view.state.doc.toString() : '';
       },
       setFindScope: (scope: TextRange | null) => {
         const view = viewRef.current;

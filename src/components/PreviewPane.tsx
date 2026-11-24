@@ -11,6 +11,7 @@ import React, {
 } from 'react';
 import {
   EditorContent,
+  Extension,
   Node,
   NodeViewContent,
   NodeViewWrapper,
@@ -30,6 +31,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import katex from 'katex';
 import type { EditorSettings, ThemeId } from '../types';
+import { computePreviewSelectionDecorations } from '../utils/previewSelectionSync';
 import {
   editableHtmlToMarkdown,
   extractFrontmatter,
@@ -123,6 +125,7 @@ interface PreviewPaneProps {
   onImagePasteOrDrop?: (file: File) => Promise<void>;
   activePane?: 'code' | 'visual';
   editorSyncLine?: number | null;
+  editorSelectionRange?: { from: number; to: number } | null;
   onActiveBlockLinesChange?: (range: { start: number; end: number } | null) => void;
   placeholderText?: string;
 }
@@ -1032,6 +1035,34 @@ const CalloutBlock = Node.create({
   },
 });
 
+const previewSelectionSyncPluginKey = new PluginKey<DecorationSet>(
+  'onigiriPreviewSelectionSync'
+);
+
+const PreviewSelectionSyncExtension = Extension.create({
+  name: 'onigiriPreviewSelectionSync',
+  addProseMirrorPlugins() {
+    return [
+      new Plugin<DecorationSet>({
+        key: previewSelectionSyncPluginKey,
+        state: {
+          init: () => DecorationSet.empty,
+          apply: (tr, old) => {
+            const next = tr.getMeta(previewSelectionSyncPluginKey) as DecorationSet | undefined;
+            if (next) return next;
+            return tr.docChanged ? old.map(tr.mapping, tr.doc) : old;
+          },
+        },
+        props: {
+          decorations(state) {
+            return previewSelectionSyncPluginKey.getState(state) ?? DecorationSet.empty;
+          },
+        },
+      }),
+    ];
+  },
+});
+
 /* ------------------------------ PreviewPane -------------------------------- */
 
 export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
@@ -1052,6 +1083,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       onImagePasteOrDrop,
       activePane,
       editorSyncLine,
+      editorSelectionRange,
       onActiveBlockLinesChange,
       placeholderText,
     },
@@ -1085,11 +1117,17 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       activePane,
       editorSyncLine,
       enabled: settings.activeLineSyncHighlight,
+      selectionEnabled: settings.previewSelectionSyncHighlight ?? true,
+      editorSelectionRange,
+      markdown,
     });
     syncHighlightPropsRef.current = {
       activePane,
       editorSyncLine,
       enabled: settings.activeLineSyncHighlight,
+      selectionEnabled: settings.previewSelectionSyncHighlight ?? true,
+      editorSelectionRange,
+      markdown,
     };
 
     const callbacksRef = useRef({
@@ -1186,6 +1224,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
         MathBlock,
         MathInline,
         CalloutBlock,
+        PreviewSelectionSyncExtension,
         Placeholder.configure({
           placeholder: placeholderText || 'Write or edit directly here...',
         }),
@@ -1311,10 +1350,59 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       },
     });
 
+    const applyPreviewSelectionHighlight = useCallback(
+      (edInstance: ReturnType<typeof useEditor>) => {
+        if (!edInstance || edInstance.isDestroyed) return;
+        const {
+          activePane: pane,
+          selectionEnabled,
+          editorSelectionRange: selRange,
+          markdown: md,
+        } = syncHighlightPropsRef.current;
+
+        let decoSet = DecorationSet.empty;
+        if (pane === 'code' && selectionEnabled && selRange && selRange.from < selRange.to) {
+          const ranges = computePreviewSelectionDecorations(
+            md,
+            selRange,
+            blockRangesRef.current,
+            edInstance.state.doc
+          );
+          if (ranges.length > 0) {
+            const decos = ranges.map((r) =>
+              Decoration.inline(r.from, r.to, { class: 'mf-sync-selection-highlight' })
+            );
+            decoSet = DecorationSet.create(edInstance.state.doc, decos);
+          }
+        }
+        try {
+          edInstance.view.dispatch(
+            edInstance.state.tr.setMeta(previewSelectionSyncPluginKey, decoSet)
+          );
+        } catch {
+          // ignore if view is not yet mounted
+        }
+      },
+      []
+    );
+
     // Apply preview active-block highlight whenever code editor line or markdown changes
     useEffect(() => {
       applyPreviewBlockHighlight();
-    }, [activePane, editorSyncLine, blockRanges, settings.activeLineSyncHighlight, applyPreviewBlockHighlight]);
+    }, [editor, activePane, editorSyncLine, blockRanges, settings.activeLineSyncHighlight, applyPreviewBlockHighlight]);
+
+    // Apply preview inline selection highlight whenever editor selection or markdown changes
+    useEffect(() => {
+      applyPreviewSelectionHighlight(editor);
+    }, [
+      editor,
+      activePane,
+      editorSelectionRange,
+      markdown,
+      blockRanges,
+      settings.previewSelectionSyncHighlight,
+      applyPreviewSelectionHighlight,
+    ]);
 
     // Clear pending visual update timer on unmount
     useEffect(() => {
@@ -1376,6 +1464,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
             if (targetDocId === currentDocIdRef.current) {
               suppressingUpdateRef.current = false;
               applyPreviewBlockHighlight();
+              applyPreviewSelectionHighlight(editor);
             }
           }, 0);
         } catch (err) {

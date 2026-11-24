@@ -140,7 +140,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   const themeBtnRef = useRef<HTMLButtonElement>(null);
   const localeBtnRef = useRef<HTMLButtonElement>(null);
   const layoutSwitchRef = useRef<HTMLDivElement>(null);
-  const versionPillRef = useRef<HTMLSpanElement>(null);
 
   const [collapseLevel, setCollapseLevel] = useState<TopBarCollapseLevel>(0);
   const savedWidthsRef = useRef<TopBarSavedWidths>({ ...DEFAULT_TOPBAR_SAVED_WIDTHS });
@@ -185,10 +184,6 @@ export const TopBar: React.FC<TopBarProps> = ({
             if (w > 0) labelDelta += w + 5;
           });
           if (labelDelta > 16) savedWidthsRef.current[3] = Math.ceil(labelDelta);
-        }
-        if (prev < 4 && next >= 4 && versionPillRef.current) {
-          const pillW = versionPillRef.current.getBoundingClientRect().width;
-          if (pillW > 10) savedWidthsRef.current[4] = Math.ceil(pillW + 7);
         }
       }
 
@@ -265,9 +260,6 @@ export const TopBar: React.FC<TopBarProps> = ({
         >
           <img src="/icon.png" alt="Onigiri Editor" className="brand-icon" />
           <span className="brand-name">{t.appName}</span>
-          <span className="version-pill" ref={versionPillRef}>
-            {t.versionLabel}
-          </span>
         </button>
 
         {updateAvailableVersion && onOpenUpdateModal && (

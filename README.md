@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v141">What's New in v1.4.1</a> ・
+    <a href="#whats-new-in-v142">What's New in v1.4.2</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.4.1-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.4.2-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.4.1`
+Current version: `v1.4.2`
 
 ## Key Features
 
@@ -100,7 +100,21 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.4.1
+## What's New in v1.4.2
+
+- **Inline Selection Sync & Enhanced Cursor Block Highlight in Preview**:
+  - **Character-Level Selection Sync (`Settings → Editor`, on by default)**: Selecting text in the CodeMirror editor highlights the exact corresponding inline text in the live TipTap preview in real time using non-destructive ProseMirror decorations.
+  - **Enhanced Cursor Block Highlight (`Settings → Editor`, on by default)**: Improves background contrast and accent bar visibility across Light, Dark, Sepia, and Midnight themes when placing the cursor on headings (`H1`, `H2`, etc.) or plain text lines.
+- **Per-Button AI Model Selection & Local AI Reliability (`AI Custom`)**:
+  - **Per-Button / Submenu Provider & Model Override (`Settings → AI Custom`)**: Choose a specific **Subscription CLI** (`Codex CLI`, `Claude Code CLI`, `Gemini CLI`, `Antigravity CLI`, `Custom CLI`), **Cloud API** (`OpenAI`, `Anthropic`, `Gemini`), or **Local AI / On-Device** (`Ollama`, `LM Studio`, `OpenAI-Compat`, `Apple Foundation Models`) and model per custom button or submenu item (or follow the AI Chat panel by default).
+  - **Local AI Fixes (LM Studio / Ollama / Apple Foundation Models)**: Reads live editor text directly, wraps appended input text in explicit `# 入力テキスト (Input Text) / <input_text>` delimiters so compact local models (such as Gemma 4) never mistake short phrases for prompt instructions, strips `<think>...</think>` reasoning blocks, detects reasoning-only empty responses, and blocks empty outputs from overwriting editor content.
+- **Simple Mode Defaults, Built-in Browser Close Button & UI Polish**:
+  - **Simple Mode Defaults**: Sets **Hide top header bar in Simple mode** and **Show format toolbar in Simple mode** to ON by default for a cleaner writing experience with immediate access to file and formatting tools.
+  - **One-Click Built-in Browser Close (`✕`)**: Adds a close button directly next to the **Web Browser** tab in the right-pane header to close the embedded WebView and return to Markdown preview.
+  - **Header & Release UI Hardening**: Removes the redundant version pill from the top-left brand header, suppresses the browser default context menu (`Back`, `Refresh`, `Save as`, `Print`, `Inspect`) on non-editable app UI chrome in production builds, and disables DevTools/Inspect on the main application window in release builds (while keeping DevTools available for the built-in Web Browser).
+
+<details>
+<summary>Previous release: v1.4.1</summary>
 
 - **Auto Snapshot Timeline & Partial Chunk Restore**: Automatically saves snapshots on file save and at configurable intervals (**Settings → General**), with a visual timeline in **Inspector → Snapshots** supporting both full restore and **partial chunk-by-chunk restore**.
 - **Markdown Compatibility Check (GitHub / Zenn / Qiita / Notion / Obsidian)**: Inspects dialect-specific syntax (Callouts, WikiLinks, KaTeX, Footnotes, Mermaid, HTML tags) in **Inspector → Compat** with 1-click jump to line.
@@ -109,6 +123,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **Feature Finder Guide (`?`)**: Search any Onigiri Editor feature in Japanese or English from the TopBar `?` button or Command Palette and launch it immediately.
 - **Built-in Browser UX & Cross-Platform Fixes**: Adds custom viewport width (`px`), 1-click **Clip Page to Markdown**, an inline `⋮` action strip & upward tooltips immune to native child WebView occlusion on macOS/Windows/Linux, **Resync Browser Bounds**, macOS child WebView Y-offset alignment fix (prevents the embedded page from covering the browser toolbar), macOS mixed-DPI multi-monitor startup window scaling fix (prevents 1/4-size rendering after update/relaunch), Windows Shift_JIS/CP932 terminal decoding + `cd ~\` + process-tree cancel (`taskkill /T /F`), and Global Hotkey error notifications.
 - **Comprehensive Security Hardening**: Enforces Mermaid `securityLevel: 'strict'` + SVG sanitization, restricts updater execution to canonical files inside Downloads with redirect allowlist validation, enforces URL scheme allowlists on built-in/external browsers, blocks cloud metadata / link-local SSRF in Web Clipper, hardens Live Preview (`</style>` breakout protection, `nosniff`, `no-referrer`), and tightens Tauri CSP.
+
+</details>
 
 <details>
 <summary>Previous release: v1.4.0</summary>

@@ -1,4 +1,5 @@
 import type {
+  AiCapabilities,
   AiCustomButton,
   AiCustomButtonIconId,
   AiCustomSubmenuItem,
@@ -46,6 +47,47 @@ export const AI_CUSTOM_ICON_OPTIONS: AiCustomIconOption[] = [
 const VALID_ICON_IDS = new Set<AiCustomButtonIconId>(
   AI_CUSTOM_ICON_OPTIONS.map((opt) => opt.id)
 );
+
+export const AI_PROVIDER_LABELS: Record<AiProviderId, string> = {
+  'codex-cli': 'Codex CLI',
+  'claude-cli': 'Claude Code CLI',
+  'gemini-cli': 'Gemini CLI',
+  'antigravity-cli': 'Antigravity CLI',
+  'custom-cli': 'Custom CLI',
+  'openai-api': 'OpenAI API',
+  'anthropic-api': 'Anthropic API',
+  'gemini-api': 'Gemini API',
+  'apple-foundation-models': 'Apple Foundation Models',
+  ollama: 'Ollama',
+  lmstudio: 'LM Studio',
+  'openai-compat': 'OpenAI-Compat',
+};
+
+export const AI_CUSTOM_PROVIDER_GROUPS: Array<{
+  group: 'subscription' | 'api' | 'local';
+  providers: AiProviderId[];
+}> = [
+  {
+    group: 'subscription',
+    providers: ['codex-cli', 'claude-cli', 'gemini-cli', 'antigravity-cli', 'custom-cli'],
+  },
+  {
+    group: 'api',
+    providers: ['openai-api', 'anthropic-api', 'gemini-api'],
+  },
+  {
+    group: 'local',
+    providers: ['ollama', 'lmstudio', 'openai-compat', 'apple-foundation-models'],
+  },
+];
+
+const VALID_PROVIDER_IDS = new Set<AiProviderId>(
+  Object.keys(AI_PROVIDER_LABELS) as AiProviderId[]
+);
+
+export function isValidAiProviderId(val: unknown): val is AiProviderId {
+  return typeof val === 'string' && VALID_PROVIDER_IDS.has(val as AiProviderId);
+}
 
 export interface AiPromptVariableContext {
   selection?: string;
@@ -153,6 +195,9 @@ export function normalizeAiCustomSubmenuItems(raw: unknown): AiCustomSubmenuItem
         : `ai-custom-sub-${i + 1}`;
     const id = seen.has(baseId) ? `${baseId}-${i + 1}` : baseId;
     seen.add(id);
+    const aiProvider = isValidAiProviderId(obj.aiProvider) ? obj.aiProvider : undefined;
+    const aiModel =
+      typeof obj.aiModel === 'string' && obj.aiModel.trim() ? obj.aiModel.trim() : undefined;
     result.push({
       id,
       name: typeof obj.name === 'string' ? obj.name : '',
@@ -161,6 +206,8 @@ export function normalizeAiCustomSubmenuItems(raw: unknown): AiCustomSubmenuItem
       copyToClipboard: Boolean(obj.copyToClipboard),
       replaceContent:
         typeof obj.replaceContent === 'boolean' ? obj.replaceContent : false,
+      ...(aiProvider ? { aiProvider } : {}),
+      ...(aiModel ? { aiModel } : {}),
     });
   }
   return result;
@@ -188,6 +235,9 @@ export function normalizeAiCustomButtons(raw: unknown): AiCustomButton[] {
         : `ai-custom-${i + 1}`;
     const id = seen.has(baseId) ? `${baseId}-${i + 1}` : baseId;
     seen.add(id);
+    const aiProvider = isValidAiProviderId(obj.aiProvider) ? obj.aiProvider : undefined;
+    const aiModel =
+      typeof obj.aiModel === 'string' && obj.aiModel.trim() ? obj.aiModel.trim() : undefined;
     result.push({
       id,
       name: typeof obj.name === 'string' ? obj.name : '',
@@ -196,6 +246,8 @@ export function normalizeAiCustomButtons(raw: unknown): AiCustomButton[] {
       copyToClipboard: Boolean(obj.copyToClipboard),
       replaceContent:
         typeof obj.replaceContent === 'boolean' ? obj.replaceContent : false,
+      ...(aiProvider ? { aiProvider } : {}),
+      ...(aiModel ? { aiModel } : {}),
       submenuEnabled: Boolean(obj.submenuEnabled),
       submenuItems: normalizeAiCustomSubmenuItems(obj.submenuItems),
     });
@@ -258,20 +310,122 @@ const DEFAULT_MODELS: Partial<Record<AiProviderId, string>> = {
   'openai-compat': 'gpt-4.1-mini',
 };
 
-export function resolveAiProviderCallOptions(aiConfig: AiProviderConfig): {
+const CURATED_PROVIDER_MODELS: Partial<Record<AiProviderId, string[]>> = {
+  'codex-cli': ['gpt-5.4', 'gpt-5.3-codex', 'gpt-5.2-codex', 'o4-mini', 'o3'],
+  'claude-cli': [
+    'sonnet',
+    'opus',
+    'haiku',
+    'claude-sonnet-4-5',
+    'claude-opus-4-1',
+    'claude-haiku-4-5',
+  ],
+  'gemini-cli': [
+    'auto',
+    'gemini-3.8-flash',
+    'gemini-3.5-flash',
+    'gemini-3.1-pro-preview',
+    'gemini-3-flash-preview',
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-2.5-pro',
+  ],
+  'antigravity-cli': [
+    'gemini-4-hydrogen-high',
+    'gemini-4-hydrogen-medium',
+    'gemini-4-argon-high',
+    'gemini-4-argon-medium',
+    'gemini-3.8-flash-high',
+    'gemini-3.8-flash-medium',
+    'claude-opus-5-5-high',
+    'claude-sonnet-5-5-medium',
+    'gpt-oss-120b-medium',
+  ],
+  'openai-api': ['gpt-4.1', 'gpt-4.1-mini', 'o4-mini', 'gpt-4o'],
+  'anthropic-api': ['claude-sonnet-4-5', 'claude-opus-4-1', 'claude-haiku-4-5'],
+  'gemini-api': [
+    'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'gemini-3.1-pro-preview',
+    'gemini-3-flash-preview',
+    'gemini-2.5-flash-lite',
+  ],
+  'apple-foundation-models': ['default', 'permissive'],
+};
+
+export function getModelsForAiProvider(
+  provider: AiProviderId,
+  caps?: AiCapabilities | null,
+  aiConfig?: AiProviderConfig | null
+): string[] {
+  const detected: string[] = [];
+  if (caps) {
+    switch (provider) {
+      case 'codex-cli':
+        detected.push(...caps.codexModels);
+        if (caps.codexDefaultModel) detected.unshift(caps.codexDefaultModel);
+        break;
+      case 'claude-cli':
+        detected.push(...caps.claudeModels);
+        break;
+      case 'gemini-cli':
+        detected.push(...caps.geminiModels);
+        break;
+      case 'antigravity-cli':
+        detected.push(...caps.antigravityModels);
+        if (caps.antigravityDefaultModel) detected.unshift(caps.antigravityDefaultModel);
+        break;
+      case 'ollama':
+        detected.push(...caps.ollamaModels);
+        break;
+      case 'lmstudio':
+        detected.push(...caps.lmstudioModels);
+        break;
+      default:
+        break;
+    }
+  }
+  const curated = CURATED_PROVIDER_MODELS[provider] ?? [];
+  const savedForProvider = aiConfig?.models?.[provider]?.trim();
+  const activeIfSame =
+    aiConfig && aiConfig.provider === provider ? aiConfig.model.trim() : '';
+  const def = DEFAULT_MODELS[provider];
+
+  const merged = [...detected, ...curated, savedForProvider, activeIfSame, def]
+    .map((m) => (m ?? '').trim())
+    .filter(Boolean);
+  return Array.from(new Set(merged));
+}
+
+export function resolveAiProviderCallOptions(
+  aiConfig: AiProviderConfig,
+  overrideProvider?: AiProviderId,
+  overrideModel?: string
+): {
+  provider: AiProviderId;
   model: string | undefined;
   apiKey: string | undefined;
   baseUrl: string | undefined;
   customCliCmd: string;
 } {
-  const providerModel = aiConfig.models?.[aiConfig.provider]?.trim();
+  const effectiveProvider: AiProviderId = overrideProvider ?? aiConfig.provider;
+  const providerModel = aiConfig.models?.[effectiveProvider]?.trim();
+  const activeModel =
+    effectiveProvider === aiConfig.provider ? aiConfig.model.trim() : '';
   const effectiveModel =
-    aiConfig.model.trim() || providerModel || DEFAULT_MODELS[aiConfig.provider] || '';
+    overrideModel?.trim() ||
+    activeModel ||
+    providerModel ||
+    DEFAULT_MODELS[effectiveProvider] ||
+    '';
   return {
+    provider: effectiveProvider,
     model: effectiveModel || undefined,
-    apiKey: aiConfig.apiKeys[aiConfig.provider] || undefined,
+    apiKey: aiConfig.apiKeys[effectiveProvider] || undefined,
     baseUrl:
-      aiConfig.baseUrls[aiConfig.provider] || DEFAULT_BASE_URLS[aiConfig.provider] || undefined,
+      aiConfig.baseUrls[effectiveProvider] ||
+      DEFAULT_BASE_URLS[effectiveProvider] ||
+      undefined,
     customCliCmd: aiConfig.customCliCmd,
   };
 }
@@ -286,14 +440,22 @@ export function cleanAiCustomResponse(
   original: string,
   prompt: string
 ): string {
-  const trimmed = output.trim();
+  let cleaned = output;
+  // Strip <think>...</think> reasoning blocks emitted by local thinking models (Qwen3, DeepSeek-R1, etc.)
+  if (!/<think>/i.test(original) && !/<think>/i.test(prompt)) {
+    cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>\s*/gi, '');
+  }
+  // Strip accidental <input_text>...</input_text> wrapper tags if echoed by small local models
+  cleaned = cleaned.replace(/<\/?input_text>\s*/gi, '');
+
+  const trimmed = cleaned.trim();
   if (!trimmed.startsWith('```') || original.trim().startsWith('```')) {
-    return output;
+    return cleaned;
   }
   if (/```|コードブロック|code\s*block|fenced/i.test(prompt)) {
-    return output;
+    return cleaned;
   }
   const match = trimmed.match(/^```[^\n]*\n([\s\S]*?)\n```$/);
-  if (!match) return output;
+  if (!match) return cleaned;
   return match[1];
 }

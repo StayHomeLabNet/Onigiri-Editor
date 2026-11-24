@@ -292,6 +292,7 @@ export interface Translations {
       customCss: string;
       customCssPlaceholder: string;
       activeLineSyncHighlight: string;
+      previewSelectionSyncHighlight: string;
       oeditLineCopyEnabled: string;
       oeditLineCopyTrigger: string;
       triggerEolOnly: string;
@@ -423,6 +424,17 @@ export interface Translations {
       submenuDefaultName: string;
       submenuTooltipHint: string;
       shortcutLabel: string;
+      aiModelOverrideLabel: string;
+      followAiChatOption: string;
+      providerGroupSubscription: string;
+      providerGroupApi: string;
+      providerGroupLocal: string;
+      modelSelectLabel: string;
+      customModelOption: string;
+      customModelPlaceholder: string;
+      apiKeyMissingHint: string;
+      localServerOfflineHint: string;
+      refreshModelsBtn: string;
     };
     keybindings: {
       title: string;
@@ -524,6 +536,7 @@ export interface Translations {
   browser: {
     modePreview: string;
     modeBrowser: string;
+    closeBrowser: string;
     back: string;
     forward: string;
     reload: string;
@@ -864,6 +877,7 @@ export interface Translations {
     aiCustomReplacedAndCopied: string;
     aiCustomCancelled: string;
     aiCustomEmptyPrompt: string;
+    aiCustomEmptyResponse: string;
     aiCustomNoOutputTarget: string;
     htmlPasted: string;
     noClipboardHtml: string;

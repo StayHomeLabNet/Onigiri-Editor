@@ -2751,6 +2751,37 @@ pub fn run() {
         .manage(updates::UpdateManagerState::new())
         .setup(|app| {
             window_state::restore_main_window_state(app.handle());
+            #[cfg(all(target_os = "windows", not(debug_assertions)))]
+            if let Some(main_win) = app.get_webview_window("main") {
+                let _ = main_win.with_webview(|pwv| unsafe {
+                    if let Ok(core) = pwv.controller().CoreWebView2() {
+                        if let Ok(settings) = core.Settings() {
+                            let _ = settings.SetAreDevToolsEnabled(false);
+                        }
+                    }
+                });
+            }
+            #[cfg(all(target_os = "macos", not(debug_assertions)))]
+            if let Some(main_win) = app.get_webview_window("main") {
+                let _ = main_win.with_webview(|pwv| unsafe {
+                    use objc2::msg_send;
+                    use objc2::runtime::AnyObject;
+                    use objc2_foundation::NSString;
+                    let wk = pwv.inner() as *mut AnyObject;
+                    if !wk.is_null() {
+                        let config: *mut AnyObject = msg_send![wk, configuration];
+                        if !config.is_null() {
+                            let prefs: *mut AnyObject = msg_send![config, preferences];
+                            if !prefs.is_null() {
+                                let key = NSString::from_str("developerExtrasEnabled");
+                                let no_val: *mut AnyObject =
+                                    msg_send![objc2::class!(NSNumber), numberWithBool: false];
+                                let () = msg_send![prefs, setValue: no_val, forKey: &*key];
+                            }
+                        }
+                    }
+                });
+            }
             let initial_locale = detect_os_locale_impl();
             let menu = menu::build_app_menu(app.handle(), initial_locale)?;
             app.set_menu(menu)?;

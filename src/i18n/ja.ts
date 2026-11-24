@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const ja: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.4.1',
+  versionLabel: 'v1.4.2',
   modes: {
     simple: 'シンプル',
     basic: '標準',
@@ -293,7 +293,8 @@ export const ja: Translations = {
       wordGoal: '目標文字数（0で非表示）',
       customCss: 'カスタムCSS（プレビュー用）',
       customCssPlaceholder: '.markdown-body h1 { color: #6366f1; }',
-      activeLineSyncHighlight: '編集中ペインの対応行・ブロックを相手側にマーク表示',
+      activeLineSyncHighlight: '編集中ペインの対応行・ブロックを相手側にマーク表示（カーソル行の背景ハイライト）',
+      previewSelectionSyncHighlight: 'エディタ上の文字選択範囲をプレビュー側にもハイライト表示',
       oeditLineCopyEnabled: 'スマート行コピー（選択なしで ⌘+C / Ctrl+C 時に行全体コピー）',
       oeditLineCopyTrigger: '行コピーの発動条件',
       triggerEolOnly: '行末にカーソルがある時のみ',
@@ -431,6 +432,17 @@ export const ja: Translations = {
       submenuDefaultName: 'サブメニュー',
       submenuTooltipHint: '（長押し / 右クリックでサブメニュー）',
       shortcutLabel: 'ショートカットキー',
+      aiModelOverrideLabel: '使用するAIモデル（サブスク / API / ローカル）',
+      followAiChatOption: 'AIチャットの選択に従う',
+      providerGroupSubscription: 'サブスクリプション CLI',
+      providerGroupApi: 'クラウド API',
+      providerGroupLocal: 'ローカル AI / オンデバイス',
+      modelSelectLabel: 'モデル',
+      customModelOption: 'カスタムモデル名を入力...',
+      customModelPlaceholder: '例: qwen2.5:14b / gpt-5.4 / local-model',
+      apiKeyMissingHint: '※ 右パネルの「AIチャット」でこのAPIキーが未設定です。',
+      localServerOfflineHint: '※ ローカルサーバーが未起動かモデル未検出です（直接入力も可能）。',
+      refreshModelsBtn: 'モデル再検出',
     },
     keybindings: {
       title: 'キーボードショートカット設定',
@@ -693,6 +705,7 @@ export const ja: Translations = {
   browser: {
     modePreview: 'プレビュー',
     modeBrowser: 'Webブラウザ',
+    closeBrowser: 'Webブラウザを閉じる',
     back: '戻る',
     forward: '進む',
     reload: '再読み込み',
@@ -1062,6 +1075,7 @@ export const ja: Translations = {
     aiCustomReplacedAndCopied: '「{name}」の結果で置き換え、クリップボードにもコピーしました',
     aiCustomCancelled: '「{name}」をキャンセルしました',
     aiCustomEmptyPrompt: '「{name}」のプロンプトが未設定です。設定 → AIカスタムから入力してください',
+    aiCustomEmptyResponse: '「{name}」の実行結果が空でした（ローカルAIの思考モードやモデル応答を確認してください）',
     aiCustomNoOutputTarget: '「{name}」の出力先が未選択です。設定 → AIカスタムでチェックを入れてください',
     htmlPasted: 'HTMLをMarkdownに変換して貼り付けました',
     noClipboardHtml: 'クリップボードにHTMLデータが見つかりませんでした',

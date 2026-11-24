@@ -34,19 +34,25 @@ import { formatUpdateCheckTime, isVersionSkipped } from './UpdateModal';
 import { AiCustomIcon } from './AiCustomIcon';
 import {
   AI_CUSTOM_ICON_OPTIONS,
+  AI_CUSTOM_PROVIDER_GROUPS,
   AI_PROMPT_VARIABLE_TOKENS,
+  AI_PROVIDER_LABELS,
   MAX_AI_CUSTOM_BUTTONS,
   MAX_AI_CUSTOM_SUBMENU_ITEMS,
   cloneDefaultAiCustomButtons,
   createNewAiCustomButton,
   createNewAiCustomSubmenuItem,
+  getModelsForAiProvider,
   normalizeAiCustomButtons,
 } from '../utils/aiCustomButtons';
 import type {
+  AiCapabilities,
   AiCustomButton,
   AiCustomButtonIconId,
   AiCustomSubmenuItem,
   AiFolderMode,
+  AiProviderConfig,
+  AiProviderId,
   AppUpdateInfo,
   ClearAppCacheResult,
   EditorSettings,
@@ -66,7 +72,7 @@ import type {
   WrapMode,
 } from '../types';
 import type { Translations } from '../i18n/types';
-import { formatShortcut, getHostOs, isTauri } from '../utils/platform';
+import { detectAiCapabilities, formatShortcut, getHostOs, isTauri } from '../utils/platform';
 import { TEXT_ENCODINGS } from '../utils/encodings';
 import { getAutoPresetForTheme, resolveSyntaxColors, SYNTAX_PRESETS } from '../utils/syntaxThemes';
 import {
@@ -141,6 +147,7 @@ interface SettingsModalProps {
   onThemeChange: (theme: ThemeId) => void;
   settings: EditorSettings;
   onSettingsChange: (next: EditorSettings) => void;
+  aiConfig?: AiProviderConfig;
   externalPreviewUrl: string | null;
   externalPreviewLanUrls?: string[];
   onToggleExternalPreview: () => void;
@@ -203,6 +210,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onThemeChange,
   settings,
   onSettingsChange,
+  aiConfig,
   externalPreviewUrl,
   externalPreviewLanUrls = [],
   onToggleExternalPreview,
@@ -257,6 +265,143 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [recordingCmdId, setRecordingCmdId] = useState<string | null>(null);
   const [activeLanQrUrl, setActiveLanQrUrl] = useState<string | null>(null);
   const [openIconPickerId, setOpenIconPickerId] = useState<string | null>(null);
+  const [aiCapabilities, setAiCapabilities] = useState<AiCapabilities | null>(null);
+  const [detectingAiModels, setDetectingAiModels] = useState(false);
+
+  const refreshAiCapabilities = React.useCallback(async () => {
+    if (!isTauri()) return;
+    setDetectingAiModels(true);
+    try {
+      const caps = await detectAiCapabilities();
+      setAiCapabilities(caps);
+    } catch {
+      // ignore
+    } finally {
+      setDetectingAiModels(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (open && activeTab === 'aiCustom' && !aiCapabilities && isTauri()) {
+      void refreshAiCapabilities();
+    }
+  }, [open, activeTab, aiCapabilities, refreshAiCapabilities]);
+
+  const renderAiModelOverrideRow = (
+    currentProvider: AiProviderId | undefined,
+    currentModel: string | undefined,
+    onPatch: (patch: { aiProvider?: AiProviderId; aiModel?: string }) => void
+  ) => {
+    const models = currentProvider
+      ? getModelsForAiProvider(currentProvider, aiCapabilities, aiConfig)
+      : [];
+    const curModel = currentModel ?? '';
+    const isCustomVal = curModel !== '' && !models.includes(curModel);
+    return (
+      <div className="field-row">
+        <label>{t.settingsModal.aiCustom.aiModelOverrideLabel}</label>
+        <div className="ai-custom-model-grid">
+          <select
+            className="select-input"
+            value={currentProvider ?? ''}
+            onChange={(e) => {
+              const nextProv = (e.target.value || undefined) as AiProviderId | undefined;
+              if (!nextProv) {
+                onPatch({ aiProvider: undefined, aiModel: undefined });
+              } else {
+                const candidates = getModelsForAiProvider(nextProv, aiCapabilities, aiConfig);
+                onPatch({ aiProvider: nextProv, aiModel: candidates[0] || '' });
+              }
+            }}
+          >
+            <option value="">
+              {t.settingsModal.aiCustom.followAiChatOption}
+              {aiConfig
+                ? ` (${AI_PROVIDER_LABELS[aiConfig.provider] || aiConfig.provider}${
+                    aiConfig.model ? ` / ${aiConfig.model}` : ''
+                  })`
+                : ''}
+            </option>
+            {AI_CUSTOM_PROVIDER_GROUPS.map((grp) => {
+              const groupLabel =
+                grp.group === 'subscription'
+                  ? t.settingsModal.aiCustom.providerGroupSubscription
+                  : grp.group === 'api'
+                    ? t.settingsModal.aiCustom.providerGroupApi
+                    : t.settingsModal.aiCustom.providerGroupLocal;
+              return (
+                <optgroup key={grp.group} label={groupLabel}>
+                  {grp.providers.map((pid) => (
+                    <option key={pid} value={pid}>
+                      {AI_PROVIDER_LABELS[pid]}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
+          </select>
+
+          {currentProvider && (
+            <div className="ai-custom-model-picker">
+              {models.length > 0 && (
+                <select
+                  className="select-input"
+                  value={isCustomVal ? '__custom__' : curModel || models[0] || ''}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      onPatch({ aiModel: curModel || '' });
+                    } else {
+                      onPatch({ aiModel: e.target.value });
+                    }
+                  }}
+                  aria-label={t.settingsModal.aiCustom.modelSelectLabel}
+                >
+                  {models.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                  <option value="__custom__">
+                    {t.settingsModal.aiCustom.customModelOption}
+                  </option>
+                </select>
+              )}
+              {(models.length === 0 || isCustomVal) && (
+                <input
+                  type="text"
+                  className="text-input"
+                  value={curModel}
+                  placeholder={t.settingsModal.aiCustom.customModelPlaceholder}
+                  onChange={(e) => onPatch({ aiModel: e.target.value })}
+                />
+              )}
+            </div>
+          )}
+        </div>
+        {currentProvider &&
+          ['openai-api', 'anthropic-api', 'gemini-api'].includes(currentProvider) &&
+          !aiConfig?.apiKeys?.[currentProvider] && (
+            <div className="ai-hint-text" style={{ marginTop: 4 }}>
+              {t.settingsModal.aiCustom.apiKeyMissingHint}
+            </div>
+          )}
+        {currentProvider === 'ollama' &&
+          aiCapabilities &&
+          (!aiCapabilities.ollamaRunning || aiCapabilities.ollamaModels.length === 0) && (
+            <div className="ai-hint-text" style={{ marginTop: 4 }}>
+              {t.settingsModal.aiCustom.localServerOfflineHint}
+            </div>
+          )}
+        {currentProvider === 'lmstudio' &&
+          aiCapabilities &&
+          (!aiCapabilities.lmstudioRunning || aiCapabilities.lmstudioModels.length === 0) && (
+            <div className="ai-hint-text" style={{ marginTop: 4 }}>
+              {t.settingsModal.aiCustom.localServerOfflineHint}
+            </div>
+          )}
+      </div>
+    );
+  };
 
   const aiCustomButtons = useMemo(
     () => normalizeAiCustomButtons(settings.aiCustomButtons),
@@ -1339,6 +1484,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <label className="check-row">
                     <input
                       type="checkbox"
+                      checked={settings.previewSelectionSyncHighlight ?? true}
+                      onChange={(e) =>
+                        onSettingsChange({
+                          ...settings,
+                          previewSelectionSyncHighlight: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>{t.inspector.settingsLabels.previewSelectionSyncHighlight}</span>
+                  </label>
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
                       checked={settings.syncScroll}
                       onChange={(e) =>
                         onSettingsChange({ ...settings, syncScroll: e.target.checked })
@@ -2068,6 +2226,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <button
                         type="button"
                         className="secondary-btn compact-btn"
+                        disabled={detectingAiModels}
+                        onClick={() => void refreshAiCapabilities()}
+                      >
+                        <RefreshCw size={12} className={detectingAiModels ? 'spin' : ''} />
+                        <span>{t.settingsModal.aiCustom.refreshModelsBtn}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary-btn compact-btn"
                         onClick={handleResetAiCustomButtons}
                       >
                         <RotateCcw size={12} />
@@ -2274,6 +2441,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </div>
                           )}
                         </div>
+
+                        {renderAiModelOverrideRow(btn.aiProvider, btn.aiModel, (patch) =>
+                          handlePatchAiCustomButton(btn.id, patch)
+                        )}
 
                         {onCustomKeybindingsChange && (() => {
                           const kbId = getAiCustomButtonKeybindingId(btn.id);
@@ -2594,7 +2765,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                         )}
                                       </div>
 
-                                      {onCustomKeybindingsChange && (() => {
+                                      {renderAiModelOverrideRow(sub.aiProvider, sub.aiModel, (patch) =>
+                                        handlePatchAiCustomSubmenuItem(btn, sub.id, patch)
+                                      )}
+
+                        {onCustomKeybindingsChange && (() => {
                                         const subKbId = getAiCustomSubmenuKeybindingId(btn.id, sub.id);
                                         const currentBinding = effectiveKeybindings[subKbId] || '';
                                         const isRecording = recordingCmdId === subKbId;

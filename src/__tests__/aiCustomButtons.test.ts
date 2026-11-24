@@ -7,6 +7,7 @@ import {
   DEFAULT_AI_CUSTOM_BUTTONS,
   DEFAULT_AI_TRANSLATE_PROMPT,
   getActiveSubmenuItems,
+  getModelsForAiProvider,
   MAX_AI_CUSTOM_BUTTONS,
   MAX_AI_CUSTOM_SUBMENU_ITEMS,
   normalizeAiCustomButtons,
@@ -88,6 +89,18 @@ describe('aiCustomButtons', () => {
     ).toBe('```ts\nconst x = 1;\n```');
   });
 
+  it('strips <think>...</think> reasoning tags and <input_text> wrapper tags from local LLM outputs', () => {
+    expect(
+      cleanAiCustomResponse('<think>\nreasoning...\n</think>\n\nこんにちは', 'Hello', '翻訳して')
+    ).toBe('こんにちは');
+    expect(
+      cleanAiCustomResponse('<input_text>\nPlease feel free to contact us.\n</input_text>', '遠慮なくお問い合わせください。', '翻訳して').trim()
+    ).toBe('Please feel free to contact us.');
+    expect(
+      cleanAiCustomResponse('<think>only thinking</think>', 'Hello', '翻訳して').trim()
+    ).toBe('');
+  });
+
   it('normalizes submenu items, clamps to MAX_AI_CUSTOM_SUBMENU_ITEMS (10), and respects submenuEnabled', () => {
     const rawSubmenus = Array.from({ length: 14 }, (_, idx) => ({
       id: `sub-${idx}`,
@@ -144,5 +157,80 @@ describe('aiCustomButtons', () => {
     expect(opts.model).toBe('default');
     expect(opts.apiKey).toBeUndefined();
     expect(opts.baseUrl).toBeUndefined();
+  });
+
+  it('persists valid per-button and per-submenu aiProvider/aiModel overrides and resolves them', () => {
+    const [btn] = normalizeAiCustomButtons([
+      {
+        id: 'btn-local',
+        name: 'Local Translate',
+        icon: 'languages',
+        prompt: 'Translate',
+        copyToClipboard: false,
+        replaceContent: true,
+        aiProvider: 'ollama',
+        aiModel: 'qwen2.5:14b',
+        submenuEnabled: true,
+        submenuItems: [
+          {
+            id: 'sub-api',
+            name: 'Claude Review',
+            icon: 'sparkles',
+            prompt: 'Review',
+            copyToClipboard: true,
+            replaceContent: false,
+            aiProvider: 'anthropic-api',
+            aiModel: 'claude-sonnet-4-5',
+          },
+          {
+            id: 'sub-invalid',
+            name: 'Invalid',
+            icon: 'zap',
+            prompt: 'Test',
+            copyToClipboard: true,
+            replaceContent: false,
+            aiProvider: 'unknown-provider',
+          },
+        ],
+      },
+    ]);
+
+    expect(btn.aiProvider).toBe('ollama');
+    expect(btn.aiModel).toBe('qwen2.5:14b');
+    expect(btn.submenuItems?.[0].aiProvider).toBe('anthropic-api');
+    expect(btn.submenuItems?.[0].aiModel).toBe('claude-sonnet-4-5');
+    expect(btn.submenuItems?.[1].aiProvider).toBeUndefined();
+
+    const baseConfig = {
+      provider: 'codex-cli' as const,
+      model: 'gpt-5.4',
+      models: { ollama: 'llama3.2' },
+      apiKeys: { 'anthropic-api': 'sk-ant-test' },
+      baseUrls: { ollama: 'http://127.0.0.1:11434' },
+      customCliCmd: '',
+      includeDocContext: false,
+      includeFolderContext: false,
+    };
+
+    const localOpts = resolveAiProviderCallOptions(baseConfig, btn.aiProvider, btn.aiModel);
+    expect(localOpts.provider).toBe('ollama');
+    expect(localOpts.model).toBe('qwen2.5:14b');
+    expect(localOpts.baseUrl).toBe('http://127.0.0.1:11434');
+
+    const apiOpts = resolveAiProviderCallOptions(
+      baseConfig,
+      btn.submenuItems?.[0].aiProvider,
+      btn.submenuItems?.[0].aiModel
+    );
+    expect(apiOpts.provider).toBe('anthropic-api');
+    expect(apiOpts.model).toBe('claude-sonnet-4-5');
+    expect(apiOpts.apiKey).toBe('sk-ant-test');
+
+    const fallbackOpts = resolveAiProviderCallOptions(baseConfig);
+    expect(fallbackOpts.provider).toBe('codex-cli');
+    expect(fallbackOpts.model).toBe('gpt-5.4');
+
+    expect(getModelsForAiProvider('ollama', null, baseConfig)).toContain('llama3.2');
+    expect(getModelsForAiProvider('openai-api')).toContain('gpt-4.1');
   });
 });

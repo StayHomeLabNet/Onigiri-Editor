@@ -359,6 +359,7 @@ const DEFAULT_SETTINGS: EditorSettings = {
   wordGoal: 0,
   customCss: '',
   activeLineSyncHighlight: true,
+  previewSelectionSyncHighlight: true,
   oeditLineCopyEnabled: true,
   oeditLineCopyTrigger: 'eol-only',
   oeditLineCopyIncludeNewline: true,
@@ -374,9 +375,9 @@ const DEFAULT_SETTINGS: EditorSettings = {
   restoreSessionEnabled: true,
   autoSaveEnabled: false,
   showTopBar: true,
-  hideTopBarInSimpleMode: false,
+  hideTopBarInSimpleMode: true,
   showFormatToolbar: true,
-  showFormatToolbarInSimpleMode: false,
+  showFormatToolbarInSimpleMode: true,
   aiCustomButtons: cloneDefaultAiCustomButtons(),
   selectionBubbleMenuEnabled: true,
   aiGhostTextEnabled: false,
@@ -456,6 +457,15 @@ export function App() {
           loaded.aiCustomButtons = normalizeAiCustomButtons(parsed.aiCustomButtons);
         } else {
           loaded.aiCustomButtons = cloneDefaultAiCustomButtons();
+        }
+        if (localStorage.getItem('onigiri-markdown.simpleModeDefaultsV1_4_2') !== '1') {
+          try {
+            localStorage.setItem('onigiri-markdown.simpleModeDefaultsV1_4_2', '1');
+            loaded.hideTopBarInSimpleMode = true;
+            loaded.showFormatToolbarInSimpleMode = true;
+          } catch {
+            // ignore
+          }
         }
       } else {
         loaded.aiCustomButtons = cloneDefaultAiCustomButtons();
@@ -637,6 +647,47 @@ export function App() {
 
   const [activePane, setActivePane] = useState<'code' | 'visual'>('code');
   const [previewSyncLineRange, setPreviewSyncLineRange] = useState<LineRange | null>(null);
+  const [editorSelectionRange, setEditorSelectionRange] = useState<{ from: number; to: number } | null>(null);
+
+  const handleEditorSelectionUpdate = useCallback((range: { from: number; to: number }) => {
+    findBarRef.current?.onEditorSelection(range);
+    setEditorSelectionRange((prev) => {
+      if (range.from >= range.to) {
+        return prev === null ? null : null;
+      }
+      if (prev && prev.from === range.from && prev.to === range.to) {
+        return prev;
+      }
+      return { from: range.from, to: range.to };
+    });
+  }, []);
+
+  useEffect(() => {
+    setEditorSelectionRange(null);
+  }, [activeTabId]);
+
+  // Suppress browser default context menu (Back, Refresh, Save as, Print, Inspect)
+  // on non-editable app chrome in production builds.
+  useEffect(() => {
+    if (import.meta.env.DEV) return;
+    const handleGlobalContextMenu = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) {
+        e.preventDefault();
+        return;
+      }
+      if (
+        target.closest(
+          '.cm-editor, input, textarea, [contenteditable="true"], .ProseMirror'
+        )
+      ) {
+        return;
+      }
+      e.preventDefault();
+    };
+    document.addEventListener('contextmenu', handleGlobalContextMenu);
+    return () => document.removeEventListener('contextmenu', handleGlobalContextMenu);
+  }, []);
 
   const [rightPaneMode, setRightPaneMode] = useState<RightPaneMode>('markdown');
   const [browserUrl, setBrowserUrl] = useState<string>(
@@ -1507,6 +1558,11 @@ export function App() {
       browserClose();
     }
   }, [settings.builtinBrowserEnabled]);
+
+  const handleCloseBuiltinBrowser = useCallback(() => {
+    setRightPaneMode('markdown');
+    setSettings((s) => (s.builtinBrowserEnabled ? { ...s, builtinBrowserEnabled: false } : s));
+  }, []);
 
   // Update native window title
   useEffect(() => {
@@ -4398,7 +4454,7 @@ export function App() {
       try {
         const res = await sendAiChat({
           requestId,
-          provider: aiConfig.provider,
+          provider: callOpts.provider,
           model: callOpts.model,
           apiKey: callOpts.apiKey,
           baseUrl: callOpts.baseUrl,
@@ -4890,10 +4946,11 @@ export function App() {
 
       const range = targetEditor?.getSelectionRange() ?? null;
       const selectedText = targetEditor?.getSelectedText() ?? '';
+      const liveDocText = targetEditor ? targetEditor.getText() : targetTab.content;
       const hasSelection = Boolean(range && range.from < range.to && selectedText.length > 0);
-      const inputText = hasSelection ? selectedText : targetTab.content;
+      const inputText = hasSelection ? selectedText : liveDocText;
       const captureFrom = hasSelection && range ? range.from : 0;
-      const captureTo = hasSelection && range ? range.to : targetTab.content.length;
+      const captureTo = hasSelection && range ? range.to : liveDocText.length;
 
       let clipboardText = '';
       if (hasClipboardVariable(rawPromptText)) {
@@ -4911,27 +4968,36 @@ export function App() {
         language: targetTab.languageOverride ?? detectedLanguageId ?? 'markdown',
       });
 
-      const callOpts = resolveAiProviderCallOptions(aiConfig);
+      const callOpts = resolveAiProviderCallOptions(
+        aiConfig,
+        button.aiProvider,
+        button.aiModel
+      );
       const systemPrompt = [
         'You are an AI assistant invoked from a custom toolbar button inside a Markdown editor.',
         'Follow the user instruction faithfully and return ONLY the resulting text.',
-        'Do not add explanations, greetings, or surrounding Markdown code fences unless explicitly asked.',
+        'Do not add explanations, greetings, <input_text> tags, or surrounding Markdown code fences unless explicitly asked.',
       ].join('\n');
-      let userPrompt = inputText.length > 0 ? `${promptText}\n\n${inputText}` : promptText;
+      const hasSelectionPlaceholder = /\{\{\s*selection\s*\}\}/i.test(rawPromptText);
+      const shouldAppendInputBlock =
+        inputText.length > 0 && !(hasSelection && hasSelectionPlaceholder);
+      let userPrompt = shouldAppendInputBlock
+        ? `${promptText}\n\n# 入力テキスト (Input Text)\n<input_text>\n${inputText}\n</input_text>`
+        : promptText;
 
       if (settingsRef.current.aiSendPreviewEnabled) {
         const confirmedPayload = await new Promise<string | null>((resolve) => {
           setAiSendPreviewRequest({
             title: buttonName,
-            providerLabel: aiConfig.provider,
+            providerLabel: callOpts.provider,
             modelLabel: callOpts.model || 'default',
             scopeLabel: hasSelection
               ? locale === 'ja'
                 ? `選択範囲 (${selectedText.length} 文字)`
                 : `Selection (${selectedText.length} chars)`
               : locale === 'ja'
-                ? `文書全体 (${targetTab.content.length} 文字)`
-                : `Full Document (${targetTab.content.length} chars)`,
+                ? `文書全体 (${liveDocText.length} 文字)`
+                : `Full Document (${liveDocText.length} chars)`,
             payloadText: userPrompt,
             onConfirm: (finalText) => resolve(finalText),
             onCancel: () => resolve(null),
@@ -4957,7 +5023,7 @@ export function App() {
       try {
         const res = await sendAiChat({
           requestId,
-          provider: aiConfig.provider,
+          provider: callOpts.provider,
           model: callOpts.model,
           apiKey: callOpts.apiKey,
           baseUrl: callOpts.baseUrl,
@@ -4970,6 +5036,10 @@ export function App() {
 
         if (reqState.cancelled) return;
         const resultText = cleanAiCustomResponse(res.content, inputText, promptText);
+        if (!resultText.trim()) {
+          notify(t.toasts.aiCustomEmptyResponse.replace('{name}', buttonName));
+          return;
+        }
 
         if (button.copyToClipboard) {
           await writeClipboardText(resultText);
@@ -5027,8 +5097,8 @@ export function App() {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg === 'CLI_CANCELLED') return;
         if (
-          !aiConfig.apiKeys[aiConfig.provider] &&
-          ['openai-api', 'anthropic-api', 'gemini-api'].includes(aiConfig.provider)
+          !aiConfig.apiKeys[callOpts.provider] &&
+          ['openai-api', 'anthropic-api', 'gemini-api'].includes(callOpts.provider)
         ) {
           notify(t.gitPanel.noAiProviderToast);
         } else {
@@ -5051,6 +5121,7 @@ export function App() {
       t.settingsModal.aiCustom.submenuDefaultName,
       t.toasts.aiCustomCopied,
       t.toasts.aiCustomEmptyPrompt,
+      t.toasts.aiCustomEmptyResponse,
       t.toasts.aiCustomNoOutputTarget,
       t.toasts.aiCustomReplaced,
       t.toasts.aiCustomReplacedAndCopied,
@@ -7609,9 +7680,7 @@ export function App() {
                         workspaceNotes={workspaceNotes}
                         onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                         onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
-                        onEditorSelectionChange={(range) =>
-                          findBarRef.current?.onEditorSelection(range)
-                        }
+                        onEditorSelectionChange={handleEditorSelectionUpdate}
                         syncHighlightRange={
                           activePane === 'visual' && activeEditorSlot === 'top'
                             ? previewSyncLineRange
@@ -7700,9 +7769,7 @@ export function App() {
                         workspaceNotes={workspaceNotes}
                         onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                         onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
-                        onEditorSelectionChange={(range) =>
-                          findBarRef.current?.onEditorSelection(range)
-                        }
+                        onEditorSelectionChange={handleEditorSelectionUpdate}
                         syncHighlightRange={
                           activePane === 'visual' && activeEditorSlot === 'bottom'
                             ? previewSyncLineRange
@@ -7779,9 +7846,7 @@ export function App() {
                     workspaceNotes={workspaceNotes}
                     onOpenWikiLink={(target) => void handleOpenWikiLink(target)}
                     onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
-                    onEditorSelectionChange={(range) =>
-                      findBarRef.current?.onEditorSelection(range)
-                    }
+                    onEditorSelectionChange={handleEditorSelectionUpdate}
                     syncHighlightRange={activePane === 'visual' ? previewSyncLineRange : null}
                     theme={theme}
                     settings={effectiveSettings}
@@ -7836,6 +7901,15 @@ export function App() {
                         >
                           <Globe size={13} />
                           <span>{t.browser.modeBrowser}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="seg-close-btn"
+                          onClick={handleCloseBuiltinBrowser}
+                          data-tooltip={t.browser.closeBrowser}
+                          aria-label={t.browser.closeBrowser}
+                        >
+                          <X size={12} />
                         </button>
                       </div>
                     ) : (
@@ -8033,6 +8107,7 @@ export function App() {
                       onImagePasteOrDrop={handleImageFileInput}
                       activePane={activePane}
                       editorSyncLine={activeTab.cursorLine}
+                      editorSelectionRange={editorSelectionRange}
                       onActiveBlockLinesChange={setPreviewSyncLineRange}
                     />
                   )}
@@ -8344,6 +8419,7 @@ export function App() {
           onThemeChange={setTheme}
           settings={settings}
           onSettingsChange={setSettings}
+          aiConfig={aiConfig}
           externalPreviewUrl={externalPreviewUrl}
           externalPreviewLanUrls={externalPreviewLanUrls}
           onToggleExternalPreview={handleToggleExternalPreview}
