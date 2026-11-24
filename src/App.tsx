@@ -97,6 +97,13 @@ import {
   resolveProjectConfigBundle,
   type ResolvedProjectEditorConfig,
 } from './utils/projectConfig';
+import { useAiCustomRunner } from './hooks/useAiCustomRunner';
+import { useBackupAndReset } from './hooks/useBackupAndReset';
+import { useExportActions } from './hooks/useExportActions';
+import { useExternalPreview } from './hooks/useExternalPreview';
+import { useGitPanelActions } from './hooks/useGitPanelActions';
+import { useMacroRecorder } from './hooks/useMacroRecorder';
+import { useWorkspaceActions } from './hooks/useWorkspaceActions';
 import {
   buildSettingsBackupPayload,
   type BackupExportOptions,
@@ -561,15 +568,6 @@ export function App() {
     [effectiveKeybindings]
   );
 
-  const [gitStatusEntries, setGitStatusEntries] = useState<Record<string, string>>({});
-  const [gitBranch, setGitBranch] = useState<string | null>(null);
-  const [gitPanelState, setGitPanelState] = useState<GitPanelState | null>(null);
-  const [gitPanelBusy, setGitPanelBusy] = useState(false);
-  const [gitDiffTarget, setGitDiffTarget] = useState<{
-    path: string;
-    staged: boolean;
-    content: string;
-  } | null>(null);
   const [projectConfigBundle, setProjectConfigBundle] = useState<ProjectConfigBundle>({
     onigiriJson: null,
     onigiriJsonPath: null,
@@ -703,8 +701,6 @@ export function App() {
   const [browserUrl, setBrowserUrl] = useState<string>(
     () => settings.builtinBrowserDefaultUrl || 'https://www.google.com'
   );
-  const [externalPreviewUrl, setExternalPreviewUrl] = useState<string | null>(null);
-  const [externalPreviewLanUrls, setExternalPreviewLanUrls] = useState<string[]>([]);
 
   const [workspaceRoot, setWorkspaceRoot] = useState<string | null>(
     () => initialSession.workspaceRoot
@@ -756,22 +752,6 @@ export function App() {
   const splitContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollSyncLock = useRef<'editor' | 'preview' | null>(null);
   const activePaneRef = useRef<'code' | 'visual'>('code');
-
-  const [macroSteps, setMacroSteps] = useState<MacroStep[]>(() => loadSavedMacroSteps());
-  const [recordingMacroSteps, setRecordingMacroSteps] = useState<MacroStep[]>([]);
-  const [isRecordingMacro, setIsRecordingMacro] = useState(false);
-  const [isPlayingMacro, setIsPlayingMacro] = useState(false);
-
-  const isRecordingMacroRef = useRef(false);
-  isRecordingMacroRef.current = isRecordingMacro;
-  const isPlayingMacroRef = useRef(false);
-  isPlayingMacroRef.current = isPlayingMacro;
-  const recordingMacroStepsRef = useRef<MacroStep[]>([]);
-  const macroStepsRef = useRef<MacroStep[]>(macroSteps);
-  macroStepsRef.current = macroSteps;
-  const executeToolbarActionRef = useRef<(action: string, fromMacro?: boolean) => Promise<void>>(
-    async () => {}
-  );
 
   const tabsRef = useRef<DocumentTab[]>(tabs);
   tabsRef.current = tabs;
@@ -950,6 +930,65 @@ export function App() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2600);
   }, []);
+
+  const syncOpenTabsWithDiskRef = useRef<() => Promise<void>>(async () => {});
+  const refreshWorkspaceRef = useRef<(root: string) => Promise<void>>(async () => {});
+
+  const {
+    gitStatusEntries,
+    setGitStatusEntries,
+    gitBranch,
+    setGitBranch,
+    gitPanelState,
+    setGitPanelState,
+    gitPanelBusy,
+    gitDiffTarget,
+    setGitDiffTarget,
+    resetGitState,
+    refreshGitPanel,
+    refreshGitStatus,
+    handleGitStageFiles,
+    handleGitUnstageFiles,
+    handleGitDiscardFiles,
+    handleGitViewDiff,
+    handleGitCommit,
+    handleGitPush,
+    handleGitPull,
+    handleGitAiCommitMessage,
+  } = useGitPanelActions({
+    t,
+    locale,
+    aiConfig,
+    sidebarTab,
+    workspaceRoot,
+    workspaceRootRef,
+    refreshWorkspaceRef,
+    syncOpenTabsWithDiskRef,
+    notify,
+    formatErrorMessage,
+  });
+
+  const {
+    macroSteps,
+    recordingMacroSteps,
+    isRecordingMacro,
+    isPlayingMacro,
+    isRecordingMacroRef,
+    executeToolbarActionRef,
+    resetMacroState,
+    handleRecordMacroStep,
+    handleToggleMacroRecording,
+    handleClearMacro,
+    handlePlayMacro,
+  } = useMacroRecorder({
+    t,
+    layout,
+    setLayout,
+    activePaneRef,
+    setActivePane,
+    editorRef,
+    notify,
+  });
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -1341,53 +1380,6 @@ export function App() {
     saveCustomSnippets(customSnippets);
   }, [customSnippets]);
 
-  const refreshGitPanel = useCallback(async (root: string | null) => {
-    if (!root || !isTauri()) {
-      setGitPanelState(null);
-      return;
-    }
-    try {
-      const panel = await getGitPanelState(root);
-      setGitPanelState(panel);
-    } catch {
-      setGitPanelState(null);
-    }
-  }, []);
-
-  const refreshGitStatus = useCallback(
-    async (root: string | null) => {
-      if (!root || !isTauri()) {
-        setGitStatusEntries({});
-        setGitBranch(null);
-        setGitPanelState(null);
-        return;
-      }
-      try {
-        const st = await getGitStatus(root);
-        if (st.isRepo) {
-          setGitStatusEntries(st.entries || {});
-          setGitBranch(st.branch || null);
-          void refreshGitPanel(root);
-        } else {
-          setGitStatusEntries({});
-          setGitBranch(null);
-          setGitPanelState(null);
-        }
-      } catch {
-        setGitStatusEntries({});
-        setGitBranch(null);
-        setGitPanelState(null);
-      }
-    },
-    [refreshGitPanel]
-  );
-
-  useEffect(() => {
-    if (sidebarTab === 'git' && workspaceRoot) {
-      void refreshGitPanel(workspaceRoot);
-    }
-  }, [sidebarTab, workspaceRoot, refreshGitPanel]);
-
   const skipSessionPersistRef = useRef(false);
 
   const persistSessionNow = useCallback(() => {
@@ -1648,8 +1640,6 @@ export function App() {
     },
     [activeTab.id]
   );
-
-  const refreshWorkspaceRef = useRef<(root: string) => Promise<void>>(async () => {});
 
   const insertImageIntoActivePane = useCallback(
     (src: string, alt = '') => {
@@ -1950,6 +1940,7 @@ export function App() {
       syncLockRef.current = false;
     }
   }, [notify, t.toasts.reloadedExternal, refreshGitStatus]);
+  syncOpenTabsWithDiskRef.current = syncOpenTabsWithDisk;
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -3174,425 +3165,56 @@ export function App() {
     t.toasts.errorPrefix,
   ]);
 
-  const handleOpenFolder = useCallback(() => {
-    if (projectSetupBusy) {
-      setFolderSwitchGuardMode('setup-busy');
-      return;
-    }
-    if (projectServer?.running || projectServer?.starting) {
-      pendingFolderActionRef.current = { type: 'open-picker' };
-      setFolderSwitchGuardMode('server-running');
-      return;
-    }
-    void proceedOpenFolderPicker();
-  }, [
-    projectSetupBusy,
-    projectServer?.running,
-    projectServer?.starting,
-    proceedOpenFolderPicker,
-  ]);
-
-  const handleCloseFolder = useCallback(() => {
-    if (!workspaceRoot) return;
-    if (projectSetupBusy) {
-      setFolderSwitchGuardMode('setup-busy');
-      return;
-    }
-    if (projectServer?.running || projectServer?.starting) {
-      pendingFolderActionRef.current = { type: 'close-folder' };
-      setFolderSwitchGuardMode('server-running');
-      return;
-    }
-    proceedCloseWorkspaceFolder();
-  }, [
-    workspaceRoot,
-    projectSetupBusy,
-    projectServer?.running,
-    projectServer?.starting,
-    proceedCloseWorkspaceFolder,
-  ]);
-
-  const handleConfirmStopAndSwitchFolder = useCallback(async () => {
-    const stoppedUrl = projectServer?.url;
-    setStoppingServerForSwitch(true);
-    try {
-      clearPendingBrowseTarget();
-      const st = await stopProjectDevServer();
-      setProjectServer(st);
-      notify(t.toasts.devServerStopped);
-
-      if (
-        rightPaneMode === 'browser' &&
-        stoppedUrl &&
-        browserUrl.startsWith(stoppedUrl.replace(/\/+$/, ''))
-      ) {
-        setRightPaneMode('markdown');
-      }
-
-      setFolderSwitchGuardMode(null);
-      const pending = pendingFolderActionRef.current;
-      pendingFolderActionRef.current = { type: 'open-picker' };
-      if (pending.type === 'close-folder') {
-        proceedCloseWorkspaceFolder();
-      } else if (pending.type === 'open-path') {
-        await activateWorkspaceDir(pending.path);
-      } else {
-        await proceedOpenFolderPicker();
-      }
-    } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-    } finally {
-      setStoppingServerForSwitch(false);
-    }
-  }, [
-    projectServer?.url,
+  const {
+    handleOpenFolder,
+    handleCloseFolder,
+    handleConfirmStopAndSwitchFolder,
+    handleCreateFileInFolder,
+    handleOpenFileToSide,
+    handleCreateFileInDir,
+    handleCreateFolderInDir,
+    handleRenameEntry,
+    handleDuplicateEntry,
+    handleDeleteEntry,
+    handleSearchWorkspace,
+    handleReplaceInWorkspace,
+    handleAfterWorkspaceGrepReplace,
+    handleOpenFileAtLine,
+  } = useWorkspaceActions({
+    t,
+    layout,
     rightPaneMode,
     browserUrl,
-    notify,
-    t.toasts.devServerStopped,
-    t.toasts.errorPrefix,
-    activateWorkspaceDir,
-    proceedCloseWorkspaceFolder,
+    workspaceRoot,
+    workspaceRootRef,
+    tabsRef,
+    editorRef,
+    effectiveSettings,
+    projectSetupBusy,
+    projectServer,
+    pendingFolderActionRef,
+    setTabs,
+    setActiveTabId,
+    setSideTabId,
+    setSidePaneMode,
+    setLayout,
+    setRightPaneMode,
+    setSearchMatches,
+    setFolderSwitchGuardMode,
+    setStoppingServerForSwitch,
+    setProjectServer,
+    clearPendingBrowseTarget,
     proceedOpenFolderPicker,
-  ]);
-
-  const handleCreateFileInFolder = useCallback(
-    async (fileName: string) => {
-      if (!workspaceRoot) return;
-      try {
-        const starter = '';
-        const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
-        const eol = effectiveSettings.defaultNewFileEol ?? '\n';
-        const fullPath = await createFileInDir(workspaceRoot, fileName, starter, encoding);
-        await refreshWorkspace(workspaceRoot);
-        const syncRes = await checkFilesSync([fullPath]).catch(() => []);
-        const modifiedMs = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
-        const created = makeTab(fileName, starter, fullPath, modifiedMs, {
-          encoding,
-          eol,
-        });
-        setTabs((prev) => [...prev, created]);
-        setActiveTabId(created.id);
-        pushRecentFile(fullPath);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [
-      workspaceRoot,
-      effectiveSettings.defaultNewFileEncoding,
-      effectiveSettings.defaultNewFileEol,
-      refreshWorkspace,
-      pushRecentFile,
-      notify,
-      t.toasts.errorPrefix,
-    ]
-  );
-
-  const handleOpenFileToSide = useCallback(
-    async (filePath: string) => {
-      const existing = tabsRef.current.find((tb) => tb.filePath === filePath);
-      if (existing) {
-        handleOpenTabToSide(existing.id);
-        pushRecentFile(filePath);
-        return;
-      }
-      try {
-        const res = await readFileByPath(filePath);
-        const syncInfo = await checkFilesSync([res.path]).catch(() => []);
-        const modifiedMs = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : undefined;
-        const created = makeTab(res.name, res.content, res.path, modifiedMs, {
-          encoding: res.encoding,
-          eol: res.eol,
-        });
-        setTabs((prev) => [...prev, created]);
-        pushRecentFile(res.path);
-        if (layout === 'editor') setLayout('split');
-        setRightPaneMode('markdown');
-        setSideTabId(created.id);
-        setSidePaneMode('edit');
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [handleOpenTabToSide, pushRecentFile, layout, notify, t.toasts.errorPrefix]
-  );
-
-  const handleCreateFileInDir = useCallback(
-    async (targetDir: string, fileName: string) => {
-      if (!workspaceRoot) return;
-      try {
-        const starter = '';
-        const encoding = effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
-        const eol = effectiveSettings.defaultNewFileEol ?? '\n';
-        const fullPath = await createFileInDir(targetDir, fileName, starter, encoding);
-        await refreshWorkspace(workspaceRoot);
-        const syncRes = await checkFilesSync([fullPath]).catch(() => []);
-        const modifiedMs = syncRes[0]?.exists ? syncRes[0].modifiedMs : undefined;
-        const baseName = fileName.split(/[/\\]/).pop() || fileName;
-        const created = makeTab(baseName, starter, fullPath, modifiedMs, {
-          encoding,
-          eol,
-        });
-        setTabs((prev) => [...prev, created]);
-        setActiveTabId(created.id);
-        pushRecentFile(fullPath);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [
-      workspaceRoot,
-      effectiveSettings.defaultNewFileEncoding,
-      effectiveSettings.defaultNewFileEol,
-      refreshWorkspace,
-      pushRecentFile,
-      notify,
-      t.toasts.errorPrefix,
-    ]
-  );
-
-  const handleCreateFolderInDir = useCallback(
-    async (targetDir: string, folderName: string) => {
-      if (!workspaceRoot) return;
-      try {
-        const normRoot = workspaceRoot.replace(/\\/g, '/').replace(/\/+$/, '');
-        const normTarget = targetDir.replace(/\\/g, '/').replace(/\/+$/, '');
-        const relPrefix =
-          normTarget.toLowerCase().startsWith(`${normRoot.toLowerCase()}/`)
-            ? normTarget.slice(normRoot.length + 1)
-            : '';
-        const relPath = relPrefix
-          ? `${relPrefix}/${folderName.replace(/^\/+/, '')}`
-          : folderName.replace(/^\/+/, '');
-        await createWorkspaceFolder(workspaceRoot, relPath);
-        await refreshWorkspace(workspaceRoot);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [workspaceRoot, refreshWorkspace, notify, t.toasts.errorPrefix]
-  );
-
-  const handleRenameEntry = useCallback(
-    async (oldPath: string, newName: string) => {
-      if (!workspaceRoot) return;
-      try {
-        const newPath = await renameWorkspaceEntry(workspaceRoot, oldPath, newName);
-        const oldPrefixForward = `${oldPath.replace(/\\/g, '/')}/`;
-        const newPrefixForward = `${newPath.replace(/\\/g, '/')}/`;
-        setTabs((prev) =>
-          prev.map((tb) => {
-            if (!tb.filePath) return tb;
-            if (tb.filePath === oldPath) {
-              const title = newPath.split(/[/\\]/).pop() || newName;
-              return { ...tb, title, filePath: newPath, updatedAt: Date.now() };
-            }
-            const norm = tb.filePath.replace(/\\/g, '/');
-            if (norm.startsWith(oldPrefixForward)) {
-              const suffix = norm.slice(oldPrefixForward.length);
-              return { ...tb, filePath: `${newPrefixForward}${suffix}`, updatedAt: Date.now() };
-            }
-            return tb;
-          })
-        );
-        await refreshWorkspace(workspaceRoot);
-        notify(t.toasts.renamedSuccess);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [workspaceRoot, refreshWorkspace, notify, t.toasts.renamedSuccess, t.toasts.errorPrefix]
-  );
-
-  const handleDuplicateEntry = useCallback(
-    async (filePath: string) => {
-      if (!workspaceRoot) return;
-      try {
-        const dupPath = await duplicateWorkspaceFile(workspaceRoot, filePath);
-        await refreshWorkspace(workspaceRoot);
-        await openPathInTab(dupPath);
-        notify(t.toasts.duplicatedSuccess);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [workspaceRoot, refreshWorkspace, openPathInTab, notify, t.toasts.duplicatedSuccess, t.toasts.errorPrefix]
-  );
-
-  const handleDeleteEntry = useCallback(
-    async (targetPath: string, _isDir: boolean, name: string) => {
-      if (!workspaceRoot) return;
-      if (!window.confirm(t.sidebar.deleteConfirm.replace('{name}', name))) return;
-      try {
-        await deleteWorkspaceEntry(workspaceRoot, targetPath);
-        const normTarget = targetPath.replace(/\\/g, '/');
-        setTabs((prev) =>
-          prev.map((tb) => {
-            if (!tb.filePath) return tb;
-            const normFile = tb.filePath.replace(/\\/g, '/');
-            if (normFile === normTarget || normFile.startsWith(`${normTarget}/`)) {
-              return { ...tb, externalStatus: 'deleted' };
-            }
-            return tb;
-          })
-        );
-        await refreshWorkspace(workspaceRoot);
-        notify(t.toasts.deletedSuccess);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [workspaceRoot, refreshWorkspace, notify, t.sidebar.deleteConfirm, t.toasts.deletedSuccess, t.toasts.errorPrefix]
-  );
-
-  const handleSearchWorkspace = useCallback(
-    async (q: string) => {
-      if (!workspaceRoot || !q.trim()) {
-        setSearchMatches([]);
-        return;
-      }
-      try {
-        const res = await searchWorkspaceDir(workspaceRoot, q);
-        setSearchMatches(res);
-      } catch {
-        setSearchMatches([]);
-      }
-    },
-    [workspaceRoot]
-  );
-
-  const handleReplaceInWorkspace = useCallback(
-    async (query: string, replacement: string, caseSensitive: boolean, useRegex: boolean) => {
-      if (!workspaceRoot || !query) return;
-      const confirmed = window.confirm(
-        t.sidebar.replaceConfirm
-          .replace('{query}', query)
-          .replace('{replacement}', replacement)
-      );
-      if (!confirmed) return;
-      try {
-        const res = await replaceInWorkspace({
-          rootPath: workspaceRoot,
-          query,
-          replacement,
-          caseSensitive,
-          useRegex,
-        });
-        await refreshWorkspace(workspaceRoot);
-        if (res.modifiedPaths.length > 0) {
-          const modifiedSet = new Set(res.modifiedPaths);
-          const cleanTargets = tabsRef.current.filter(
-            (tb) => tb.filePath && modifiedSet.has(tb.filePath) && !tb.dirty
-          );
-          for (const tb of cleanTargets) {
-            try {
-              const reloaded = await readFileByPath(tb.filePath!, tb.encoding);
-              const norm = reloaded.content.includes('\r\n')
-                ? reloaded.content.replace(/\r\n/g, '\n')
-                : reloaded.content;
-              const syncInfo = await checkFilesSync([tb.filePath!]).catch(() => []);
-              const mtime = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : tb.diskModifiedMs;
-              setTabs((prev) =>
-                prev.map((item) =>
-                  item.id === tb.id
-                    ? {
-                        ...item,
-                        content: norm,
-                        savedContent: norm,
-                        dirty: false,
-                        diskModifiedMs: mtime,
-                        externalStatus: null,
-                      }
-                    : item
-                )
-              );
-            } catch {
-              // ignore individual reload failure
-            }
-          }
-          void syncOpenTabsWithDisk();
-        }
-        await handleSearchWorkspace(query);
-        notify(
-          t.sidebar.replaceDoneToast
-            .replace('{files}', String(res.filesModified))
-            .replace('{count}', String(res.replacements))
-        );
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [
-      workspaceRoot,
-      refreshWorkspace,
-      syncOpenTabsWithDisk,
-      handleSearchWorkspace,
-      notify,
-      t.sidebar.replaceConfirm,
-      t.sidebar.replaceDoneToast,
-      t.toasts.errorPrefix,
-    ]
-  );
-
-  const handleAfterWorkspaceGrepReplace = useCallback(
-    async (modifiedPaths: string[], count: number) => {
-      if (workspaceRootRef.current) {
-        await refreshWorkspace(workspaceRootRef.current);
-      }
-      if (modifiedPaths.length > 0) {
-        const modifiedSet = new Set(modifiedPaths);
-        const cleanTargets = tabsRef.current.filter(
-          (tb) => tb.filePath && modifiedSet.has(tb.filePath) && !tb.dirty
-        );
-        for (const tb of cleanTargets) {
-          try {
-            const reloaded = await readFileByPath(tb.filePath!, tb.encoding);
-            const norm = reloaded.content.includes('\r\n')
-              ? reloaded.content.replace(/\r\n/g, '\n')
-              : reloaded.content;
-            const syncInfo = await checkFilesSync([tb.filePath!]).catch(() => []);
-            const mtime = syncInfo[0]?.exists ? syncInfo[0].modifiedMs : tb.diskModifiedMs;
-            setTabs((prev) =>
-              prev.map((item) =>
-                item.id === tb.id
-                  ? {
-                      ...item,
-                      content: norm,
-                      savedContent: norm,
-                      dirty: false,
-                      diskModifiedMs: mtime,
-                      externalStatus: null,
-                    }
-                  : item
-              )
-            );
-          } catch {
-            // ignore
-          }
-        }
-        void syncOpenTabsWithDisk();
-      }
-      notify(
-        t.grepModal.doneToast
-          .replace('{files}', String(modifiedPaths.length))
-          .replace('{count}', String(count))
-      );
-    },
-    [refreshWorkspace, syncOpenTabsWithDisk, notify, t.grepModal.doneToast]
-  );
-
-  const handleOpenFileAtLine = useCallback(
-    async (filePath: string, line: number) => {
-      const opened = await openPathInTab(filePath);
-      if (opened) {
-        window.setTimeout(() => {
-          editorRef.current?.scrollToLine(line, 1);
-        }, 60);
-      }
-    },
-    [openPathInTab, editorRef]
-  );
+    proceedCloseWorkspaceFolder,
+    activateWorkspaceDir,
+    refreshWorkspace,
+    syncOpenTabsWithDisk,
+    openPathInTab,
+    handleOpenTabToSide,
+    pushRecentFile,
+    notify,
+    formatErrorMessage,
+  });
 
   const handleToggleFocusMode = useCallback(() => {
     setSettings((s) => ({ ...s, focusMode: !s.focusMode }));
@@ -3810,151 +3432,31 @@ export function App() {
     notify(t.toasts.aiCleaned);
   }, [activeTab.content, cleanOptions, updateActiveContent, notify, t.toasts.aiCleaned]);
 
-  const handleCopyRichText = useCallback(async () => {
-    const ed = getActiveEditorTarget();
-    const selected = ed?.getSelectedText() || '';
-    const targetTab = isSideEditorActive() && sideTab ? sideTab : activeTab;
-    const sourceMd = selected.trim() ? selected : targetTab.content;
-    const { html, plain } = await buildRichClipboardPayload(sourceMd);
-    try {
-      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            'text/html': new Blob([html], { type: 'text/html' }),
-            'text/plain': new Blob([plain], { type: 'text/plain' }),
-          }),
-        ]);
-      } else {
-        await writeClipboardText(plain);
-      }
-      notify(t.toasts.copiedRichText);
-    } catch {
-      await writeClipboardText(plain);
-      notify(t.toasts.copiedRichText);
-    }
-  }, [
+  const {
+    handleCopyRichText,
+    handleCopyHtml,
+    handlePasteHtmlAsMd,
+    handleExportHtml,
+    handleExportDocx,
+    handleDiagramExportNotify,
+    handleExportPdf,
+    handlePrintSource,
+  } = useExportActions({
+    t,
+    theme,
     activeTab,
     sideTab,
+    workspaceRoot,
+    settings,
+    effectiveSettings,
+    editorRef,
     isSideEditorActive,
     getActiveEditorTarget,
-    notify,
-    t.toasts.copiedRichText,
-  ]);
-
-  const handleCopyHtml = useCallback(async () => {
-    const htmlStr = await renderMarkdownToHtml(activeTab.content, {
-      breaks: Boolean(effectiveSettings.previewSingleLineBreak),
-    });
-    await navigator.clipboard.writeText(htmlStr);
-    notify(t.toasts.copiedHtml);
-  }, [activeTab.content, effectiveSettings.previewSingleLineBreak, notify, t.toasts.copiedHtml]);
-
-  const handlePasteHtmlAsMd = useCallback(async () => {
-    try {
-      if (navigator.clipboard.read) {
-        const items = await navigator.clipboard.read();
-        for (const item of items) {
-          if (item.types.includes('text/html')) {
-            const blob = await item.getType('text/html');
-            const htmlText = await blob.text();
-            const md = htmlToMarkdown(htmlText);
-            editorRef.current?.insertText(md);
-            notify(t.toasts.htmlPasted);
-            return;
-          }
-        }
-      }
-      notify(t.toasts.noClipboardHtml);
-    } catch {
-      notify(t.toasts.noClipboardHtml);
-    }
-  }, [notify, t.toasts.htmlPasted, t.toasts.noClipboardHtml]);
-
-  const handleExportHtml = useCallback(
-    async (overridePageSettings?: typeof DEFAULT_EXPORT_PAGE_SETTINGS) => {
-      const rawHtmlBody = await renderMarkdownToHtml(activeTab.content, {
-        breaks: Boolean(effectiveSettings.previewSingleLineBreak),
-      });
-      const docBaseDir = activeTab.filePath || workspaceRoot || undefined;
-      const htmlBody =
-        effectiveSettings.embedImagesOnHtmlExport !== false
-          ? await inlineLocalImagesInHtml(rawHtmlBody, docBaseDir)
-          : rawHtmlBody;
-      const pageOpts = {
-        ...DEFAULT_EXPORT_PAGE_SETTINGS,
-        ...(settings.exportPageSettings ?? {}),
-        ...(overridePageSettings ?? {}),
-      };
-      const pageCss = buildExportPageCss(pageOpts, activeTab.title);
-      const combinedCss = [pageCss, settings.customCss || ''].filter(Boolean).join('\n');
-      const themedBody = `<div class="export-theme-${pageOpts.designTheme}">${htmlBody}</div>`;
-      const full = exportStandaloneHtml(activeTab.title, themedBody, theme, combinedCss);
-      const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '');
-      const ok = await runWithHiddenNativeBrowser(() =>
-        saveExportFile(full, `${baseName}.html`, 'HTML', ['html'], 'text/html')
-      );
-      if (ok) notify(t.toasts.exportedSuccess);
-    },
-    [
-      activeTab.content,
-      activeTab.title,
-      activeTab.filePath,
-      workspaceRoot,
-      effectiveSettings.embedImagesOnHtmlExport,
-      theme,
-      settings.customCss,
-      settings.exportPageSettings,
-      runWithHiddenNativeBrowser,
-      notify,
-      t.toasts.exportedSuccess,
-    ]
-  );
-
-  const handleExportDocx = useCallback(async () => {
-    try {
-      const { exportMarkdownToDocxBytes } = await import('./utils/docxExport');
-      const docBaseDir = activeTab.filePath || workspaceRoot || undefined;
-      const bytes = await exportMarkdownToDocxBytes(activeTab.content, { baseDir: docBaseDir });
-      const baseName = activeTab.title.replace(/\.(md|markdown|txt)$/i, '') || 'document';
-      const ok = await runWithHiddenNativeBrowser(() =>
-        saveBinaryExportFile(
-          bytes,
-          `${baseName}.docx`,
-          'Word Document',
-          ['docx'],
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-        )
-      );
-      if (ok) notify(t.toasts.exportedSuccess);
-    } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-    }
-  }, [
-    activeTab.content,
-    activeTab.title,
-    activeTab.filePath,
-    workspaceRoot,
     runWithHiddenNativeBrowser,
+    setPrintMode,
     notify,
-    t.toasts.exportedSuccess,
-    t.toasts.errorPrefix,
-  ]);
-
-  const handleDiagramExportNotify = useCallback(
-    (kind: DiagramExportNotifyKind) => {
-      if (kind === 'saved-svg') notify(t.diagramExport.savedSvgToast);
-      else if (kind === 'saved-png') notify(t.diagramExport.savedPngToast);
-      else if (kind === 'copied-latex') notify(t.diagramExport.copiedLatexToast);
-      else notify(t.diagramExport.exportFailedToast);
-    },
-    [
-      notify,
-      t.diagramExport.savedSvgToast,
-      t.diagramExport.savedPngToast,
-      t.diagramExport.copiedLatexToast,
-      t.diagramExport.exportFailedToast,
-    ]
-  );
+    formatErrorMessage,
+  });
 
   const handleOpenCitationModal = useCallback(() => {
     const selected = getActiveEditorTarget()?.getSelectedText() || '';
@@ -4046,411 +3548,75 @@ export function App() {
     t.toasts.errorPrefix,
   ]);
 
-  const handleExportBackupJson = useCallback(
-    async (options: BackupExportOptions): Promise<boolean> => {
-      let inlineAiPresets: InlineAiPresetItem[] = [];
-      try {
-        const raw = localStorage.getItem(INLINE_AI_PRESETS_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) inlineAiPresets = parsed as InlineAiPresetItem[];
-        }
-      } catch {
-        inlineAiPresets = [];
-      }
-      const payload = buildSettingsBackupPayload(
-        {
-          mode,
-          theme,
-          locale,
-          settings,
-          aiConfig,
-          cleanOptions,
-          inlineAiPresets,
-          customSnippets,
-          customTemplates: loadCustomTemplates(),
-          customKeybindings,
-        },
-        options
-      );
-      const jsonText = `${JSON.stringify(payload, null, 2)}\n`;
-      const ok = await runWithHiddenNativeBrowser(() =>
-        saveExportFile(
-          jsonText,
-          'onigiri-settings-backup.json',
-          'JSON',
-          ['json'],
-          'application/json'
-        )
-      );
-      if (ok) {
-        notify(t.settingsModal.dataManagement.backupExportedToast);
-      }
-      return ok;
-    },
-    [
-      mode,
-      theme,
-      locale,
-      settings,
-      aiConfig,
-      cleanOptions,
-      customSnippets,
-      customKeybindings,
-      runWithHiddenNativeBrowser,
-      notify,
-      t.settingsModal.dataManagement.backupExportedToast,
-    ]
-  );
+  const handleResetWorkspaceTabsIfClean = useCallback(() => {
+    const hasDirty = tabsRef.current.some((tb) => tb.dirty);
+    if (hasDirty) return;
+    const welcome = makeTab(
+      locale === 'ja' ? 'ようこそ.md' : 'Welcome.md',
+      getTranslations(locale).sampleDocument
+    );
+    setTabs([welcome]);
+    setActiveTabId(welcome.id);
+    setSideTabId(null);
+    setGitHeadComparison(null);
+    setWorkspaceRoot(null);
+    setWorkspaceEntries([]);
+    setWorkspaceNoteIndex([]);
+    setSearchMatches([]);
+    resetGitState();
+    setProjectConfigBundle({ onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] });
+    setProjectInfo(null);
+    setProjectServer(null);
+  }, [locale, resetGitState]);
 
-  const handleReadBackupJsonFile = useCallback(async (): Promise<string | null> => {
-    if (isTauri()) {
-      return await runWithHiddenNativeBrowser(async () => {
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const selected = await open({
-          multiple: false,
-          directory: false,
-          filters: [{ name: 'JSON', extensions: ['json'] }],
-        });
-        if (!selected || typeof selected !== 'string') return null;
-        const fileRes = await readFileByPath(selected, 'utf-8');
-        return fileRes.content;
-      });
-    }
-    return await new Promise<string | null>((resolve) => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.json,application/json';
-      let settled = false;
-      const done = (val: string | null) => {
-        if (settled) return;
-        settled = true;
-        resolve(val);
-      };
-      input.onchange = async () => {
-        const f = input.files?.[0];
-        if (!f) {
-          done(null);
-          return;
-        }
-        try {
-          done(await f.text());
-        } catch {
-          done(null);
-        }
-      };
-      window.addEventListener(
-        'focus',
-        () => {
-          window.setTimeout(() => {
-            if (!settled && (!input.files || input.files.length === 0)) {
-              done(null);
-            }
-          }, 400);
-        },
-        { once: true }
-      );
-      input.click();
-    });
-  }, [runWithHiddenNativeBrowser]);
-
-  const handleApplyBackupImport = useCallback(
-    async (backup: OnigiriSettingsBackup, selection: BackupImportSelection) => {
-      if (selection.restoreAppAndEditor) {
-        if (backup.app?.mode) handleModeChange(backup.app.mode);
-        if (backup.app?.theme) setTheme(backup.app.theme);
-        if (backup.app?.locale) setLocale(backup.app.locale);
-        if (backup.editorSettings) {
-          setSettings((prev) => ({
-            ...DEFAULT_SETTINGS,
-            ...prev,
-            ...backup.editorSettings,
-            aiCustomButtons:
-              backup.editorSettings?.aiCustomButtons !== undefined
-                ? normalizeAiCustomButtons(backup.editorSettings.aiCustomButtons)
-                : prev.aiCustomButtons,
-          }));
-        }
-      }
-
-      if (selection.restoreAi && backup.ai) {
-        if (backup.ai.aiConfig) {
-          const importedAi = backup.ai.aiConfig;
-          const excludeKeys = Boolean(backup.ai.apiKeysExcluded);
-          setAiConfig((prev) => {
-            const nextProvider =
-              !isMacOs() && importedAi.provider === 'apple-foundation-models'
-                ? prev.provider === 'apple-foundation-models'
-                  ? DEFAULT_AI_CONFIG.provider
-                  : prev.provider
-                : importedAi.provider ?? prev.provider;
-            return {
-              ...DEFAULT_AI_CONFIG,
-              ...prev,
-              ...importedAi,
-              provider: nextProvider,
-              apiKeys: excludeKeys
-                ? { ...prev.apiKeys }
-                : { ...prev.apiKeys, ...(importedAi.apiKeys || {}) },
-              baseUrls: { ...prev.baseUrls, ...(importedAi.baseUrls || {}) },
-              models: { ...(prev.models || {}), ...(importedAi.models || {}) },
-            };
-          });
-        }
-        if (backup.ai.cleanOptions) {
-          setCleanOptions((prev) => ({ ...prev, ...backup.ai!.cleanOptions }));
-        }
-        if (Array.isArray(backup.ai.inlineAiPresets)) {
-          try {
-            localStorage.setItem(
-              INLINE_AI_PRESETS_KEY,
-              JSON.stringify(backup.ai.inlineAiPresets)
-            );
-          } catch {
-            // ignore
-          }
-          window.dispatchEvent(new CustomEvent('onigiri:inline-ai-presets-reset'));
-        }
-      }
-
-      if (selection.restoreSnippets && Array.isArray(backup.customSnippets)) {
-        if (selection.mergeCustomItems) {
-          setCustomSnippets((prev) => {
-            const byId = new Map(prev.map((s) => [s.id, s]));
-            for (const item of backup.customSnippets!) {
-              byId.set(item.id, item);
-            }
-            return Array.from(byId.values());
-          });
-        } else {
-          setCustomSnippets(backup.customSnippets);
-        }
-      }
-
-      if (selection.restoreTemplates && Array.isArray(backup.customTemplates)) {
-        const imported = backup.customTemplates.map((tpl) => ({ ...tpl, isBuiltin: false }));
-        if (selection.mergeCustomItems) {
-          const existing = loadCustomTemplates();
-          const byId = new Map(existing.map((tpl) => [tpl.id, tpl]));
-          for (const tpl of imported) {
-            byId.set(tpl.id, tpl);
-          }
-          saveCustomTemplates(Array.from(byId.values()));
-        } else {
-          saveCustomTemplates(imported);
-        }
-      }
-
-      if (selection.restoreKeybindings && backup.customKeybindings) {
-        if (selection.mergeCustomItems) {
-          setCustomKeybindings((prev) => ({ ...prev, ...backup.customKeybindings! }));
-        } else {
-          setCustomKeybindings({ ...backup.customKeybindings });
-        }
-      }
-
-      setDataSummaryTick((v) => v + 1);
-      notify(t.settingsModal.dataManagement.backupImportedToast);
-    },
-    [handleModeChange, setLocale, notify, t.settingsModal.dataManagement.backupImportedToast]
-  );
-
-  const handleGitStageFiles = useCallback(
-    async (paths: string[]) => {
-      const root = workspaceRootRef.current;
-      if (!root || paths.length === 0) return;
-      setGitPanelBusy(true);
-      try {
-        await gitStageFiles(root, paths);
-        await refreshGitStatus(root);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      } finally {
-        setGitPanelBusy(false);
-      }
-    },
-    [refreshGitStatus, notify, t.toasts.errorPrefix]
-  );
-
-  const handleGitUnstageFiles = useCallback(
-    async (paths: string[]) => {
-      const root = workspaceRootRef.current;
-      if (!root || paths.length === 0) return;
-      setGitPanelBusy(true);
-      try {
-        await gitUnstageFiles(root, paths);
-        await refreshGitStatus(root);
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      } finally {
-        setGitPanelBusy(false);
-      }
-    },
-    [refreshGitStatus, notify, t.toasts.errorPrefix]
-  );
-
-  const handleGitDiscardFiles = useCallback(
-    async (paths: string[]) => {
-      const root = workspaceRootRef.current;
-      if (!root || paths.length === 0) return;
-      setGitPanelBusy(true);
-      try {
-        await gitDiscardFiles(root, paths);
-        setGitDiffTarget(null);
-        await refreshWorkspace(root);
-        await syncOpenTabsWithDisk();
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      } finally {
-        setGitPanelBusy(false);
-      }
-    },
-    [refreshWorkspace, syncOpenTabsWithDisk, notify, t.toasts.errorPrefix]
-  );
-
-  const handleGitViewDiff = useCallback(
-    async (filePath: string, staged: boolean) => {
-      const root = workspaceRootRef.current;
-      if (!root) return;
-      try {
-        const content = await gitGetDiff(root, staged, filePath);
-        setGitDiffTarget({ path: filePath, staged, content });
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-      }
-    },
-    [notify, t.toasts.errorPrefix]
-  );
-
-  const handleGitCommit = useCallback(
-    async (message: string): Promise<boolean> => {
-      const root = workspaceRootRef.current;
-      if (!root || !message.trim()) return false;
-      setGitPanelBusy(true);
-      try {
-        await gitCommit(root, message.trim());
-        setGitDiffTarget(null);
-        await refreshGitStatus(root);
-        notify(t.gitPanel.committedToast);
-        return true;
-      } catch (err) {
-        notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-        return false;
-      } finally {
-        setGitPanelBusy(false);
-      }
-    },
-    [refreshGitStatus, notify, t.gitPanel.committedToast, t.toasts.errorPrefix]
-  );
-
-  const handleGitPush = useCallback(async () => {
-    const root = workspaceRootRef.current;
-    if (!root) return;
-    setGitPanelBusy(true);
-    try {
-      await gitPush(root);
-      await refreshGitStatus(root);
-      notify(t.gitPanel.pushedToast);
-    } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-    } finally {
-      setGitPanelBusy(false);
-    }
-  }, [refreshGitStatus, notify, t.gitPanel.pushedToast, t.toasts.errorPrefix]);
-
-  const handleGitPull = useCallback(async () => {
-    const root = workspaceRootRef.current;
-    if (!root) return;
-    setGitPanelBusy(true);
-    try {
-      await gitPull(root);
-      setGitDiffTarget(null);
-      await refreshWorkspace(root);
-      await syncOpenTabsWithDisk();
-      notify(t.gitPanel.pulledToast);
-    } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-    } finally {
-      setGitPanelBusy(false);
-    }
-  }, [refreshWorkspace, syncOpenTabsWithDisk, notify, t.gitPanel.pulledToast, t.toasts.errorPrefix]);
-
-  const handleGitAiCommitMessage = useCallback(async (): Promise<string> => {
-    const root = workspaceRootRef.current;
-    if (!root) return '';
-    try {
-      const [stagedDiff, unstagedDiff] = await Promise.all([
-        gitGetDiff(root, true).catch(() => ''),
-        gitGetDiff(root, false).catch(() => ''),
-      ]);
-      const combined = (stagedDiff.trim() ? stagedDiff : unstagedDiff).slice(0, 12000);
-      if (!combined.trim()) return '';
-      const sysPrompt =
-        locale === 'ja'
-          ? '以下の git diff に対して、簡潔で明確な Conventional Commits 形式のコミットメッセージを1つだけ（説明やコードブロックなし、1行目50文字目安）生成してください。'
-          : 'Generate a single concise, clear Conventional Commits style commit message for the following git diff. Return only the commit message text without code fences or explanations.';
-      const reply = await sendAiChat({
-        requestId: `git-commit-${Date.now()}`,
-        provider: aiConfig.provider,
-        model: aiConfig.model.trim() || undefined,
-        apiKey: aiConfig.apiKeys[aiConfig.provider] || undefined,
-        baseUrl: aiConfig.baseUrls[aiConfig.provider] || undefined,
-        customCliCmd: aiConfig.customCliCmd,
-        systemPrompt: sysPrompt,
-        messages: [{ role: 'user', content: combined }],
-        workspaceDir: root,
-        allowWorkspaceWrite: false,
-      });
-      return reply.content.replace(/^```[^\n]*\n?|\n?```$/g, '').trim();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (!aiConfig.apiKeys[aiConfig.provider] && ['openai', 'anthropic', 'gemini'].includes(aiConfig.provider)) {
-        notify(t.gitPanel.noAiProviderToast);
-      } else {
-        notify(`${t.toasts.errorPrefix} ${msg}`);
-      }
-      return '';
-    }
-  }, [aiConfig, locale, notify, t.gitPanel.noAiProviderToast, t.toasts.errorPrefix]);
-
-  const handleExportPdf = useCallback(
-    (overridePageSettings?: typeof DEFAULT_EXPORT_PAGE_SETTINGS) => {
-      const pageOpts = {
-        ...DEFAULT_EXPORT_PAGE_SETTINGS,
-        ...(settings.exportPageSettings ?? {}),
-        ...(overridePageSettings ?? {}),
-      };
-      const styleId = 'onigiri-export-page-style';
-      let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
-      if (!styleEl) {
-        styleEl = document.createElement('style');
-        styleEl.id = styleId;
-        document.head.appendChild(styleEl);
-      }
-      styleEl.textContent = `@media print {\n${buildExportPageCss(pageOpts, activeTab.title)}\n}`;
-      document.body.classList.remove(
-        'export-theme-modern',
-        'export-theme-business',
-        'export-theme-academic'
-      );
-      document.body.classList.add(`export-theme-${pageOpts.designTheme}`);
-
-      setPrintMode('preview');
-      requestAnimationFrame(() => {
-        window.print();
-      });
-    },
-    [settings.exportPageSettings, activeTab.title]
-  );
-
-  const handlePrintSource = useCallback(() => {
-    setPrintMode('source');
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.print();
-      });
-    });
-  }, []);
+  const {
+    handleExportBackupJson,
+    handleReadBackupJsonFile,
+    handleApplyBackupImport,
+    handleResetSelectedSettings,
+    handleClearSelectedUserData,
+  } = useBackupAndReset({
+    t,
+    mode,
+    theme,
+    locale,
+    settings,
+    aiConfig,
+    cleanOptions,
+    customSnippets,
+    customKeybindings,
+    defaultSettings: DEFAULT_SETTINGS,
+    defaultAiConfig: DEFAULT_AI_CONFIG,
+    defaultCleanOpts: DEFAULT_CLEAN_OPTS,
+    hasSavedLocaleOnStartRef,
+    skipSessionPersistRef,
+    preSimpleLayoutRef,
+    setTheme,
+    setMode,
+    setLayout,
+    setLocale,
+    setLocaleState,
+    setSettings,
+    setAiConfig,
+    setCleanOptions,
+    setCustomSnippets,
+    setCustomKeybindings,
+    setEditorSplitVertical,
+    setEditorSplitRatio,
+    setShowSidebar,
+    setShowInspector,
+    setSidebarTab,
+    setInspectorTab,
+    setPreviewSyncLineRange,
+    setDataSummaryTick,
+    handleModeChange,
+    handleClearRecent,
+    resetMacroState,
+    onResetWorkspaceTabsIfClean: handleResetWorkspaceTabsIfClean,
+    runWithHiddenNativeBrowser,
+    notify,
+    formatErrorMessage,
+  });
 
   const handleRequestGhostText = useCallback(
     async (prefix: string, suffix: string, signal: AbortSignal): Promise<string | null> => {
@@ -4619,106 +3785,6 @@ export function App() {
       editorZoom: clampZoom((s.editorZoom ?? 100) - 10),
     }));
   }, [clampZoom]);
-
-  const handleRecordMacroStep = useCallback(
-    (step: MacroStep) => {
-      if (!isRecordingMacroRef.current || isPlayingMacroRef.current) return;
-      const { steps: next, truncated } = appendMacroStep(
-        recordingMacroStepsRef.current,
-        step,
-        MAX_MACRO_STEPS
-      );
-      recordingMacroStepsRef.current = next;
-      setRecordingMacroSteps(next);
-      if (truncated) {
-        isRecordingMacroRef.current = false;
-        setIsRecordingMacro(false);
-        setMacroSteps(next);
-        macroStepsRef.current = next;
-        saveMacroSteps(next);
-        notify(t.toasts.macroStepLimit.replace('{n}', String(MAX_MACRO_STEPS)));
-      }
-    },
-    [notify, t.toasts.macroStepLimit]
-  );
-
-  const handleToggleMacroRecording = useCallback(() => {
-    if (isPlayingMacroRef.current) return;
-    if (!isRecordingMacroRef.current) {
-      recordingMacroStepsRef.current = [];
-      setRecordingMacroSteps([]);
-      isRecordingMacroRef.current = true;
-      setIsRecordingMacro(true);
-      if (layout === 'preview') {
-        setLayout('split');
-      }
-      activePaneRef.current = 'code';
-      setActivePane('code');
-      requestAnimationFrame(() => editorRef.current?.focus());
-      notify(t.toasts.macroRecordStarted);
-      return;
-    }
-
-    isRecordingMacroRef.current = false;
-    setIsRecordingMacro(false);
-    const recorded = recordingMacroStepsRef.current;
-    if (recorded.length > 0) {
-      setMacroSteps(recorded);
-      macroStepsRef.current = recorded;
-      saveMacroSteps(recorded);
-      notify(t.toasts.macroRecordStopped.replace('{n}', String(recorded.length)));
-    } else {
-      notify(t.toasts.macroRecordEmpty);
-    }
-  }, [layout, notify, t.toasts.macroRecordStarted, t.toasts.macroRecordStopped, t.toasts.macroRecordEmpty]);
-
-  const handleClearMacro = useCallback(() => {
-    if (isRecordingMacroRef.current) {
-      isRecordingMacroRef.current = false;
-      setIsRecordingMacro(false);
-    }
-    recordingMacroStepsRef.current = [];
-    setRecordingMacroSteps([]);
-    setMacroSteps([]);
-    macroStepsRef.current = [];
-    saveMacroSteps([]);
-    notify(t.toasts.macroCleared);
-  }, [notify, t.toasts.macroCleared]);
-
-  const handlePlayMacro = useCallback(async () => {
-    if (isRecordingMacroRef.current || isPlayingMacroRef.current) return;
-    const steps = macroStepsRef.current;
-    if (steps.length === 0) {
-      notify(t.toasts.macroNoRecorded);
-      return;
-    }
-
-    isPlayingMacroRef.current = true;
-    setIsPlayingMacro(true);
-    try {
-      if (layout === 'preview') {
-        setLayout('split');
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => window.setTimeout(resolve, 0));
-        });
-      }
-      activePaneRef.current = 'code';
-      setActivePane('code');
-      editorRef.current?.focus();
-
-      for (const step of steps) {
-        if (step.type === 'toolbarAction') {
-          await executeToolbarActionRef.current(step.action, true);
-        } else {
-          await editorRef.current?.runMacroStep(step);
-        }
-      }
-      notify(t.toasts.macroPlayed.replace('{n}', String(steps.length)));
-    } finally {
-      isPlayingMacroRef.current = false;
-      setIsPlayingMacro(false);
-    }
-  }, [layout, notify, t.toasts.macroNoRecorded, t.toasts.macroPlayed]);
 
   const executeToolbarAction = useCallback(
     async (action: string, fromMacro = false) => {
@@ -4903,243 +3969,26 @@ export function App() {
     [executeToolbarAction]
   );
 
-  // Toolbar AI Custom Buttons runtime state
-  const [runningAiCustom, setRunningAiCustom] = useState<{
-    buttonId: string;
-    label: string;
-  } | null>(null);
-  const aiCustomRequestRef = useRef<{
-    requestId: string;
-    buttonId: string;
-    buttonName: string;
-    cancelled: boolean;
-  } | null>(null);
-
-  const handleCancelAiCustom = useCallback(() => {
-    const active = aiCustomRequestRef.current;
-    if (!active) return;
-    active.cancelled = true;
-    aiCustomRequestRef.current = null;
-    setRunningAiCustom(null);
-    void cancelAiChat(active.requestId).catch(() => {});
-    notify(t.toasts.aiCustomCancelled.replace('{name}', active.buttonName));
-  }, [notify, t.toasts.aiCustomCancelled]);
-
-  const handleRunAiCustomButton = useCallback(
-    async (
-      button: AiCustomButton | AiCustomSubmenuItem,
-      parentButtonId?: string
-    ) => {
-      if (aiCustomRequestRef.current) return;
-      const toolbarButtonId = parentButtonId ?? button.id;
-      const fallbackName = parentButtonId && parentButtonId !== button.id
-        ? t.settingsModal.aiCustom.submenuDefaultName
-        : t.settingsModal.aiCustom.defaultButtonName;
-      const buttonName = button.name.trim() || fallbackName;
-      const rawPromptText = button.prompt.trim();
-      if (!rawPromptText) {
-        notify(t.toasts.aiCustomEmptyPrompt.replace('{name}', buttonName));
-        return;
-      }
-      if (!button.copyToClipboard && !button.replaceContent) {
-        notify(t.toasts.aiCustomNoOutputTarget.replace('{name}', buttonName));
-        return;
-      }
-
-      const sideActive =
-        isSideEditorActive() && Boolean(sideEditorRef.current) && Boolean(sideTabIdRef.current);
-      const targetTabId =
-        sideActive && sideTabIdRef.current ? sideTabIdRef.current : activeTabIdRef.current;
-      const targetTab =
-        tabsRef.current.find((tb) => tb.id === targetTabId) ?? activeTab;
-      const targetEditor = sideActive ? sideEditorRef.current : editorRef.current;
-
-      const range = targetEditor?.getSelectionRange() ?? null;
-      const selectedText = targetEditor?.getSelectedText() ?? '';
-      const liveDocText = targetEditor ? targetEditor.getText() : targetTab.content;
-      const hasSelection = Boolean(range && range.from < range.to && selectedText.length > 0);
-      const inputText = hasSelection ? selectedText : liveDocText;
-      const captureFrom = hasSelection && range ? range.from : 0;
-      const captureTo = hasSelection && range ? range.to : liveDocText.length;
-
-      let clipboardText = '';
-      if (hasClipboardVariable(rawPromptText)) {
-        try {
-          clipboardText = (await readClipboardText()) || '';
-        } catch {
-          clipboardText = '';
-        }
-      }
-      const promptText = expandAiPromptVariables(rawPromptText, {
-        selection: selectedText,
-        clipboard: clipboardText,
-        fileName: targetTab.title,
-        filePath: targetTab.filePath ?? '',
-        language: targetTab.languageOverride ?? detectedLanguageId ?? 'markdown',
-      });
-
-      const callOpts = resolveAiProviderCallOptions(
-        aiConfig,
-        button.aiProvider,
-        button.aiModel
-      );
-      const systemPrompt = [
-        'You are an AI assistant invoked from a custom toolbar button inside a Markdown editor.',
-        'Follow the user instruction faithfully and return ONLY the resulting text.',
-        'Do not add explanations, greetings, <input_text> tags, or surrounding Markdown code fences unless explicitly asked.',
-      ].join('\n');
-      const hasSelectionPlaceholder = /\{\{\s*selection\s*\}\}/i.test(rawPromptText);
-      const shouldAppendInputBlock =
-        inputText.length > 0 && !(hasSelection && hasSelectionPlaceholder);
-      let userPrompt = shouldAppendInputBlock
-        ? `${promptText}\n\n# 入力テキスト (Input Text)\n<input_text>\n${inputText}\n</input_text>`
-        : promptText;
-
-      if (settingsRef.current.aiSendPreviewEnabled) {
-        const confirmedPayload = await new Promise<string | null>((resolve) => {
-          setAiSendPreviewRequest({
-            title: buttonName,
-            providerLabel: callOpts.provider,
-            modelLabel: callOpts.model || 'default',
-            scopeLabel: hasSelection
-              ? locale === 'ja'
-                ? `選択範囲 (${selectedText.length} 文字)`
-                : `Selection (${selectedText.length} chars)`
-              : locale === 'ja'
-                ? `文書全体 (${liveDocText.length} 文字)`
-                : `Full Document (${liveDocText.length} chars)`,
-            payloadText: userPrompt,
-            onConfirm: (finalText) => resolve(finalText),
-            onCancel: () => resolve(null),
-          });
-        });
-        if (confirmedPayload === null) {
-          return;
-        }
-        userPrompt = confirmedPayload;
-      }
-
-      const requestId = `ai-custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-      const reqState = {
-        requestId,
-        buttonId: toolbarButtonId,
-        buttonName,
-        cancelled: false,
-      };
-      aiCustomRequestRef.current = reqState;
-      setRunningAiCustom({ buttonId: toolbarButtonId, label: buttonName });
-      notify(t.toasts.aiCustomRunning.replace('{name}', buttonName));
-
-      try {
-        const res = await sendAiChat({
-          requestId,
-          provider: callOpts.provider,
-          model: callOpts.model,
-          apiKey: callOpts.apiKey,
-          baseUrl: callOpts.baseUrl,
-          customCliCmd: callOpts.customCliCmd,
-          systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }],
-          workspaceDir: workspaceRootRef.current,
-          allowWorkspaceWrite: false,
-        });
-
-        if (reqState.cancelled) return;
-        const resultText = cleanAiCustomResponse(res.content, inputText, promptText);
-        if (!resultText.trim()) {
-          notify(t.toasts.aiCustomEmptyResponse.replace('{name}', buttonName));
-          return;
-        }
-
-        if (button.copyToClipboard) {
-          await writeClipboardText(resultText);
-        }
-
-        if (button.replaceContent) {
-          const stillOnSide =
-            sideActive &&
-            Boolean(sideEditorRef.current) &&
-            sideTabIdRef.current === targetTabId;
-          const stillOnMain =
-            !sideActive &&
-            Boolean(editorRef.current) &&
-            activeTabIdRef.current === targetTabId;
-          const liveEditor = stillOnSide
-            ? sideEditorRef.current
-            : stillOnMain
-              ? editorRef.current
-              : null;
-
-          if (liveEditor) {
-            if (hasSelection) {
-              liveEditor.replaceRange(captureFrom, captureTo, resultText, {
-                selectResult: true,
-              });
-            } else {
-              const latestDocLen =
-                tabsRef.current.find((tb) => tb.id === targetTabId)?.content.length ?? captureTo;
-              liveEditor.replaceRange(0, latestDocLen, resultText, {
-                selectResult: false,
-              });
-            }
-          } else {
-            const latestTab = tabsRef.current.find((tb) => tb.id === targetTabId);
-            if (latestTab) {
-              const nextContent = hasSelection
-                ? latestTab.content.slice(0, captureFrom) +
-                  resultText +
-                  latestTab.content.slice(captureTo)
-                : resultText;
-              updateTabContentById(targetTabId, nextContent);
-            }
-          }
-        }
-
-        if (button.replaceContent && button.copyToClipboard) {
-          notify(t.toasts.aiCustomReplacedAndCopied.replace('{name}', buttonName));
-        } else if (button.replaceContent) {
-          notify(t.toasts.aiCustomReplaced.replace('{name}', buttonName));
-        } else if (button.copyToClipboard) {
-          notify(t.toasts.aiCustomCopied.replace('{name}', buttonName));
-        }
-      } catch (err) {
-        if (reqState.cancelled) return;
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === 'CLI_CANCELLED') return;
-        if (
-          !aiConfig.apiKeys[callOpts.provider] &&
-          ['openai-api', 'anthropic-api', 'gemini-api'].includes(callOpts.provider)
-        ) {
-          notify(t.gitPanel.noAiProviderToast);
-        } else {
-          notify(`${t.toasts.errorPrefix} ${msg}`);
-        }
-      } finally {
-        if (aiCustomRequestRef.current?.requestId === requestId) {
-          aiCustomRequestRef.current = null;
-          setRunningAiCustom(null);
-        }
-      }
-    },
-    [
-      activeTab,
-      aiConfig,
-      isSideEditorActive,
-      notify,
-      t.gitPanel.noAiProviderToast,
-      t.settingsModal.aiCustom.defaultButtonName,
-      t.settingsModal.aiCustom.submenuDefaultName,
-      t.toasts.aiCustomCopied,
-      t.toasts.aiCustomEmptyPrompt,
-      t.toasts.aiCustomEmptyResponse,
-      t.toasts.aiCustomNoOutputTarget,
-      t.toasts.aiCustomReplaced,
-      t.toasts.aiCustomReplacedAndCopied,
-      t.toasts.aiCustomRunning,
-      t.toasts.errorPrefix,
-      updateTabContentById,
-    ]
-  );
+  // Toolbar AI Custom Buttons runtime state & runner
+  const detectedLanguageIdRef = useRef<string | null>(null);
+  const { runningAiCustom, handleCancelAiCustom, handleRunAiCustomButton } = useAiCustomRunner({
+    t,
+    locale,
+    activeTab,
+    aiConfig,
+    settingsRef,
+    tabsRef,
+    activeTabIdRef,
+    sideTabIdRef,
+    editorRef,
+    sideEditorRef,
+    workspaceRootRef,
+    detectedLanguageIdRef,
+    isSideEditorActive,
+    updateTabContentById,
+    setAiSendPreviewRequest,
+    notify,
+  });
 
   // Snapshots
   const handleCreateSnapshot = useCallback(
@@ -5277,6 +4126,7 @@ export function App() {
       }),
     [activeTab.title, activeTab.filePath, activeTab.content, activeTab.languageOverride]
   );
+  detectedLanguageIdRef.current = detectedLanguageId;
 
   const previewKind = useMemo(
     () =>
@@ -5300,125 +4150,25 @@ export function App() {
     [activeTab.title, activeTab.filePath, locale, activeTab.languageOverride, detectedLanguageId]
   );
 
-  const buildExternalPreviewPayload = useCallback(async () => {
-    if (previewKind === 'webpage') {
-      return { bodyHtml: activeTab.content, isRawPage: true };
-    }
-    if (previewKind === 'code') {
-      return {
-        bodyHtml: `<pre><code>${escapeHtmlText(activeTab.content)}</code></pre>`,
-        isRawPage: false,
-      };
-    }
-    return {
-      bodyHtml: await renderMarkdownToHtml(activeTab.content, {
-        breaks: Boolean(effectiveSettings.previewSingleLineBreak),
-      }),
-      isRawPage: false,
-    };
-  }, [previewKind, activeTab.content, effectiveSettings.previewSingleLineBreak]);
-
-  // External Live Preview controller
-  const handleToggleExternalPreview = useCallback(async () => {
-    try {
-      if (externalPreviewUrl) {
-        await stopExternalPreview();
-        setExternalPreviewUrl(null);
-        setExternalPreviewLanUrls([]);
-      } else {
-        const res = await startExternalPreview(
-          settings.externalBrowserPort,
-          true,
-          settings.externalBrowserAllowLan
-        );
-        setExternalPreviewUrl(res.url);
-        setExternalPreviewLanUrls(res.lanUrls ?? []);
-        const { bodyHtml, isRawPage } = await buildExternalPreviewPayload();
-        const docDir = activeTab.filePath
-          ? activeTab.filePath.replace(/[/\\][^/\\]+$/, '')
-          : workspaceRoot || null;
-        await updateExternalPreview({
-          title: activeTab.title,
-          bodyHtml,
-          theme,
-          customCss: settings.customCss,
-          docDir,
-          workspaceRoot: workspaceRoot || projectInfo?.rootPath || null,
-          isRawPage,
-        });
-        notify(t.toasts.externalPreviewStarted);
-      }
-    } catch (err) {
-      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-    }
-  }, [
+  const {
     externalPreviewUrl,
-    settings.externalBrowserPort,
-    settings.externalBrowserAllowLan,
-    settings.customCss,
-    activeTab.title,
-    activeTab.filePath,
-    workspaceRoot,
-    projectInfo?.rootPath,
+    setExternalPreviewUrl,
+    externalPreviewLanUrls,
+    setExternalPreviewLanUrls,
+    handleToggleExternalPreview,
+    handleCopyLanUrl,
+  } = useExternalPreview({
+    t,
     theme,
-    buildExternalPreviewPayload,
+    activeTab,
+    previewKind,
+    workspaceRoot,
+    projectInfo,
+    settings,
+    effectiveSettings,
     notify,
-    t.toasts.externalPreviewStarted,
-    t.toasts.errorPrefix,
-  ]);
-
-  // Rebind live preview server cleanly when LAN access or port setting changes while running
-  const externalPreviewRunning = Boolean(externalPreviewUrl);
-  const lastPreviewNetConfigRef = useRef({
-    allowLan: settings.externalBrowserAllowLan,
-    port: settings.externalBrowserPort,
+    formatErrorMessage,
   });
-  useEffect(() => {
-    const prev = lastPreviewNetConfigRef.current;
-    const changed =
-      prev.allowLan !== settings.externalBrowserAllowLan ||
-      prev.port !== settings.externalBrowserPort;
-    lastPreviewNetConfigRef.current = {
-      allowLan: settings.externalBrowserAllowLan,
-      port: settings.externalBrowserPort,
-    };
-    if (!changed || !externalPreviewRunning || !isTauri()) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await startExternalPreview(
-          settings.externalBrowserPort,
-          false,
-          settings.externalBrowserAllowLan
-        );
-        if (!cancelled) {
-          setExternalPreviewUrl(res.url);
-          setExternalPreviewLanUrls(res.lanUrls ?? []);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    externalPreviewRunning,
-    settings.externalBrowserAllowLan,
-    settings.externalBrowserPort,
-    notify,
-    t.toasts.errorPrefix,
-  ]);
-
-  const handleCopyLanUrl = useCallback(
-    async (lanUrl: string) => {
-      await writeClipboardText(lanUrl);
-      notify(`${t.toasts.copiedLanUrl}: ${lanUrl}`);
-    },
-    [notify, t.toasts.copiedLanUrl]
-  );
 
   const handleGoToLine = useCallback(
     (line: number, col?: number) => {
@@ -5433,45 +4183,6 @@ export function App() {
     },
     [layout]
   );
-
-  // Push debounced HTML updates to external live preview server
-  useEffect(() => {
-    if (!externalPreviewUrl) return;
-    let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      try {
-        const { bodyHtml, isRawPage } = await buildExternalPreviewPayload();
-        if (cancelled) return;
-        const docDir = activeTab.filePath
-          ? activeTab.filePath.replace(/[/\\][^/\\]+$/, '')
-          : workspaceRoot || null;
-        await updateExternalPreview({
-          title: activeTab.title,
-          bodyHtml,
-          theme,
-          customCss: settings.customCss,
-          docDir,
-          workspaceRoot: workspaceRoot || projectInfo?.rootPath || null,
-          isRawPage,
-        });
-      } catch {
-        // ignore
-      }
-    }, 220);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [
-    externalPreviewUrl,
-    activeTab.title,
-    activeTab.filePath,
-    workspaceRoot,
-    projectInfo?.rootPath,
-    theme,
-    settings.customCss,
-    buildExternalPreviewPayload,
-  ]);
 
   const handleOpenProjectUrl = useCallback(
     async (url: string, target: 'builtin' | 'external') => {
@@ -5604,173 +4315,6 @@ export function App() {
     setSettingsInitialTab(tab);
     setShowSettings(true);
   }, []);
-
-  const handleResetSelectedSettings = useCallback(
-    async (selection: SettingsResetSelection) => {
-      if (selection.editorSettings) {
-        setSettings(DEFAULT_SETTINGS);
-        setPreviewSyncLineRange(null);
-      }
-      if (selection.appearanceAndMode) {
-        const osTheme: ThemeId = window.matchMedia?.('(prefers-color-scheme: dark)').matches
-          ? 'dark'
-          : 'light';
-        setTheme(osTheme);
-        setMode('basic');
-        setLayout('split');
-        preSimpleLayoutRef.current = 'split';
-        setEditorSplitVertical(false);
-        setEditorSplitRatio(0.5);
-        setShowSidebar(true);
-        setShowInspector(false);
-        setSidebarTab('outline');
-        setInspectorTab('chat');
-      }
-      if (selection.locale) {
-        hasSavedLocaleOnStartRef.current = false;
-        try {
-          localStorage.removeItem('onigiri-markdown.locale');
-        } catch {
-          // ignore
-        }
-        try {
-          const osLoc = await getOsLocale();
-          setLocaleState(osLoc);
-        } catch {
-          setLocaleState(detectInitialLocale());
-        }
-      }
-      if (selection.aiConfigAndClean) {
-        setAiConfig(DEFAULT_AI_CONFIG);
-        setCleanOptions(DEFAULT_CLEAN_OPTS);
-      }
-      if (selection.inlineAiPresets) {
-        try {
-          localStorage.removeItem(INLINE_AI_PRESETS_KEY);
-        } catch {
-          // ignore
-        }
-        window.dispatchEvent(new CustomEvent('onigiri:inline-ai-presets-reset'));
-      }
-      if (selection.windowState) {
-        try {
-          await resetWindowState();
-        } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-        }
-      }
-      notify(t.settingsModal.dataManagement.resetDoneToast);
-    },
-    [notify, t.settingsModal.dataManagement.resetDoneToast, t.toasts.errorPrefix]
-  );
-
-  const handleClearSelectedUserData = useCallback(
-    async (
-      selection: UserDataClearSelection,
-      options: { reloadAfter: boolean }
-    ): Promise<ClearAppCacheResult> => {
-      let cacheRes: ClearAppCacheResult = { removedFiles: 0, removedBytes: 0 };
-
-      if (selection.sessions) {
-        try {
-          localStorage.removeItem(SESSION_STORAGE_KEY);
-          localStorage.removeItem(WORKSPACE_SESSIONS_KEY);
-        } catch {
-          // ignore
-        }
-        if (options.reloadAfter) {
-          skipSessionPersistRef.current = true;
-        } else {
-          const hasDirty = tabsRef.current.some((tb) => tb.dirty);
-          if (!hasDirty) {
-            const welcome = makeTab(
-              locale === 'ja' ? 'ようこそ.md' : 'Welcome.md',
-              getTranslations(locale).sampleDocument
-            );
-            setTabs([welcome]);
-            setActiveTabId(welcome.id);
-            setSideTabId(null);
-            setGitHeadComparison(null);
-            setWorkspaceRoot(null);
-            setWorkspaceEntries([]);
-            setWorkspaceNoteIndex([]);
-            setSearchMatches([]);
-            setGitStatusEntries({});
-            setGitBranch(null);
-            setGitPanelState(null);
-            setGitDiffTarget(null);
-            setProjectConfigBundle({ onigiriJson: null, onigiriJsonPath: null, editorconfigs: [] });
-            setProjectInfo(null);
-            setProjectServer(null);
-          }
-        }
-      }
-
-      if (selection.recentHistory) {
-        handleClearRecent();
-      }
-
-      if (selection.aiThreads) {
-        try {
-          localStorage.removeItem(AI_THREADS_STORAGE_KEY);
-        } catch {
-          // ignore
-        }
-        window.dispatchEvent(new CustomEvent('onigiri:ai-threads-cleared'));
-      }
-
-      if (selection.searchAndMacros) {
-        try {
-          localStorage.removeItem(FIND_OPTS_STORAGE_KEY);
-          localStorage.removeItem(MACRO_STORAGE_KEY);
-        } catch {
-          // ignore
-        }
-        setIsRecordingMacro(false);
-        setRecordingMacroSteps([]);
-        recordingMacroStepsRef.current = [];
-        setMacroSteps([]);
-        saveMacroSteps([]);
-        window.dispatchEvent(new CustomEvent('onigiri:find-opts-cleared'));
-      }
-
-      if (selection.customSnippetsAndTemplates) {
-        try {
-          localStorage.removeItem(CUSTOM_SNIPPETS_KEY);
-          localStorage.removeItem(CUSTOM_TEMPLATES_KEY);
-        } catch {
-          // ignore
-        }
-        setCustomSnippets([]);
-      }
-
-      if (selection.appCaches) {
-        try {
-          cacheRes = await clearAppCaches();
-        } catch (err) {
-          notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
-        }
-      }
-
-      setDataSummaryTick((v) => v + 1);
-      notify(t.settingsModal.dataManagement.clearDoneToast);
-
-      if (options.reloadAfter) {
-        window.setTimeout(() => {
-          window.location.reload();
-        }, 120);
-      }
-
-      return cacheRes;
-    },
-    [
-      handleClearRecent,
-      locale,
-      notify,
-      t.settingsModal.dataManagement.clearDoneToast,
-      t.toasts.errorPrefix,
-    ]
-  );
 
   const storedDataSummary = useMemo<StoredDataSummary>(() => {
     if (!showSettings) {
