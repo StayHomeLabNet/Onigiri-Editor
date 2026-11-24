@@ -157,6 +157,134 @@ export const DEFAULT_AI_TRANSLATE_PROMPT = [
   '* 原文のニュアンスと改行構造を可能な限り維持すること。',
 ].join('\n');
 
+export interface AiTranslatePresetSpec {
+  name: string;
+  prompt: string;
+}
+
+export const AI_TRANSLATE_PRESETS: Record<Locale, AiTranslatePresetSpec> = {
+  ja: {
+    name: 'AI翻訳',
+    prompt: DEFAULT_AI_TRANSLATE_PROMPT,
+  },
+  en: {
+    name: 'AI Translate',
+    prompt: [
+      '# Instructions',
+      '',
+      'Automatically detect the language of the input text and translate it according to the following rules:',
+      '* English → Japanese (natural, easy-to-read Japanese)',
+      '* Japanese → English (natural, idiomatic English)',
+      '',
+      '# Constraints',
+      '',
+      '* Output ONLY the translated text.',
+      '* Do NOT include any preambles, greetings, explanations, or notes.',
+      '* Preserve the original nuance and line-break structure as much as possible.',
+    ].join('\n'),
+  },
+  'zh-CN': {
+    name: 'AI 翻译',
+    prompt: [
+      '# 指令',
+      '',
+      '自动识别输入文本的语言，并按照以下规则进行翻译：',
+      '* 英语 → 简体中文（翻译为自然流畅的简体中文）',
+      '* 简体中文 → 英语（翻译为自然地道的英语）',
+      '',
+      '# 约束条件',
+      '',
+      '* 仅输出翻译后的文本。',
+      '* 严禁添加“以下是翻译结果”等前缀、问候、解释或注释。',
+      '* 尽可能保留原文的语气与换行结构。',
+    ].join('\n'),
+  },
+  'zh-TW': {
+    name: 'AI 翻譯',
+    prompt: [
+      '# 指令',
+      '',
+      '自動辨識輸入文字的語言，並依下列規則執行翻譯：',
+      '* 英語 → 繁體中文（翻譯為自然流暢的繁體中文）',
+      '* 繁體中文 → 英語（翻譯為自然道地的英語）',
+      '',
+      '# 限制條件',
+      '',
+      '* 僅輸出翻譯後的文字。',
+      '* 嚴禁加入「以下為翻譯結果」等前導語、問候、說明或註解。',
+      '* 盡可能保留原文的語氣與換行結構。',
+    ].join('\n'),
+  },
+  ko: {
+    name: 'AI 번역',
+    prompt: [
+      '# 지시사항',
+      '',
+      '입력 텍스트의 언어를 자동으로 감지하고 다음 규칙에 따라 번역하세요:',
+      '* 영어 → 한국어 (자연스럽고 읽기 쉬운 한국어로 번역)',
+      '* 한국어 → 영어 (자연스럽고 적절한 영어로 번역)',
+      '',
+      '# 제약 조건',
+      '',
+      '* 번역된 텍스트만 출력하세요.',
+      '* "다음은 번역 결과입니다"와 같은 서두, 인사, 설명, 주석을 절대 포함하지 마세요.',
+      '* 원문의 뉘앙스와 줄바꿈 구조를 가능한 한 유지하세요.',
+    ].join('\n'),
+  },
+  es: {
+    name: 'Traducir IA',
+    prompt: [
+      '# Instrucciones',
+      '',
+      'Detecta automáticamente el idioma del texto de entrada y tradúcelo según las siguientes reglas:',
+      '* Inglés → Español (español natural y fluido)',
+      '* Español → Inglés (inglés natural e idiomático)',
+      '',
+      '# Restricciones',
+      '',
+      '* Devuelve ÚNICAMENTE el texto traducido.',
+      '* No incluyas introducciones, saludos, explicaciones ni notas.',
+      '* Conserva el matiz original y la estructura de saltos de línea en la medida de lo posible.',
+    ].join('\n'),
+  },
+  fr: {
+    name: 'Traduction IA',
+    prompt: [
+      '# Instructions',
+      '',
+      "Détecte automatiquement la langue du texte d'entrée et traduis-le selon les règles suivantes :",
+      '* Anglais → Français (français naturel et fluide)',
+      '* Français → Anglais (anglais naturel et idiomatique)',
+      '',
+      '# Contraintes',
+      '',
+      '* Affiche UNIQUEMENT le texte traduit.',
+      "* N'ajoute aucun préambule, salutation, explication ou note.",
+      "* Préserve autant que possible les nuances et la structure des sauts de ligne d'origine.",
+    ].join('\n'),
+  },
+  de: {
+    name: 'KI-Übersetzen',
+    prompt: [
+      '# Anweisungen',
+      '',
+      'Erkenne die Sprache des Eingabetextes automatisch und übersetze nach folgenden Regeln:',
+      '* Englisch → Deutsch (natürliches, gut lesbares Deutsch)',
+      '* Deutsch → Englisch (natürliches, idiomatisches Englisch)',
+      '',
+      '# Vorgaben',
+      '',
+      '* Gib AUSSCHLIESSLICH den übersetzten Text aus.',
+      '* Keine Einleitungen, Begrüßungen, Erklärungen oder Anmerkungen.',
+      '* Bewahre Nuancen und Zeilenumbruch-Struktur des Originals so weit wie möglich.',
+    ].join('\n'),
+  },
+};
+
+export function getDefaultAiTranslatePreset(locale: Locale = 'ja'): AiTranslatePresetSpec {
+  return AI_TRANSLATE_PRESETS[locale] ?? AI_TRANSLATE_PRESETS.en;
+}
+
 export const DEFAULT_AI_CUSTOM_BUTTONS: AiCustomButton[] = [
   {
     id: 'preset-ai-translate',
@@ -170,11 +298,42 @@ export const DEFAULT_AI_CUSTOM_BUTTONS: AiCustomButton[] = [
   },
 ];
 
-export function cloneDefaultAiCustomButtons(): AiCustomButton[] {
+export function cloneDefaultAiCustomButtons(locale: Locale = 'ja'): AiCustomButton[] {
+  const preset = getDefaultAiTranslatePreset(locale);
   return DEFAULT_AI_CUSTOM_BUTTONS.map((btn) => ({
     ...btn,
+    ...(btn.id === 'preset-ai-translate' ? { name: preset.name, prompt: preset.prompt } : {}),
     submenuItems: (btn.submenuItems ?? []).map((item) => ({ ...item })),
   }));
+}
+
+/**
+ * If the default `preset-ai-translate` button is present and still has an unmodified
+ * built-in name & prompt for some locale, updates it to `targetLocale`'s preset.
+ * Returns `null` if no change is needed (or if the user customized the preset).
+ */
+export function syncDefaultAiTranslateButtonLocale(
+  buttons: AiCustomButton[] | undefined,
+  targetLocale: Locale
+): AiCustomButton[] | null {
+  if (!Array.isArray(buttons)) return null;
+  const target = getDefaultAiTranslatePreset(targetLocale);
+  let changed = false;
+  const next = buttons.map((btn) => {
+    if (btn.id !== 'preset-ai-translate') return btn;
+    const isUnmodifiedPreset = Object.values(AI_TRANSLATE_PRESETS).some(
+      (spec) => spec.name === btn.name && spec.prompt === btn.prompt
+    );
+    if (!isUnmodifiedPreset) return btn;
+    if (btn.name === target.name && btn.prompt === target.prompt) return btn;
+    changed = true;
+    return {
+      ...btn,
+      name: target.name,
+      prompt: target.prompt,
+    };
+  });
+  return changed ? next : null;
 }
 
 export function isValidAiCustomIconId(val: unknown): val is AiCustomButtonIconId {
@@ -219,9 +378,9 @@ export function normalizeAiCustomSubmenuItems(raw: unknown): AiCustomSubmenuItem
  * - An explicit empty array `[]` is preserved so users can remove all buttons if desired.
  * - Truncates to `MAX_AI_CUSTOM_BUTTONS` (5).
  */
-export function normalizeAiCustomButtons(raw: unknown): AiCustomButton[] {
+export function normalizeAiCustomButtons(raw: unknown, locale: Locale = 'ja'): AiCustomButton[] {
   if (!Array.isArray(raw)) {
-    return cloneDefaultAiCustomButtons();
+    return cloneDefaultAiCustomButtons(locale);
   }
   const seen = new Set<string>();
   const result: AiCustomButton[] = [];

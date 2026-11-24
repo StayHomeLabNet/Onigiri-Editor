@@ -122,6 +122,7 @@ import {
   hasClipboardVariable,
   normalizeAiCustomButtons,
   resolveAiProviderCallOptions,
+  syncDefaultAiTranslateButtonLocale,
 } from './utils/aiCustomButtons';
 import { buildExportPageCss, DEFAULT_EXPORT_PAGE_SETTINGS } from './utils/exportPresets';
 import { formatFileSizeShort, optimizeImageDataUrl } from './utils/imageOptimizer';
@@ -519,9 +520,18 @@ export function App() {
   );
   // Toolbar AI Custom Buttons (declared early so dynamic shortcuts integrate everywhere)
   const aiCustomButtons = useMemo(
-    () => normalizeAiCustomButtons(settings.aiCustomButtons),
-    [settings.aiCustomButtons]
+    () => normalizeAiCustomButtons(settings.aiCustomButtons, locale),
+    [settings.aiCustomButtons, locale]
   );
+
+  // Keep unmodified default AI Translate preset aligned with the active UI locale
+  useEffect(() => {
+    setSettings((prev) => {
+      const synced = syncDefaultAiTranslateButtonLocale(prev.aiCustomButtons, locale);
+      if (!synced) return prev;
+      return { ...prev, aiCustomButtons: synced };
+    });
+  }, [locale]);
   const aiCustomKeybindingDefs = useMemo(
     () =>
       buildAiCustomKeybindingDefs(

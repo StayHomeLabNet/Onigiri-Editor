@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AI_TRANSLATE_PRESETS,
   cleanAiCustomResponse,
   cloneDefaultAiCustomButtons,
   createNewAiCustomButton,
@@ -12,6 +13,7 @@ import {
   MAX_AI_CUSTOM_SUBMENU_ITEMS,
   normalizeAiCustomButtons,
   resolveAiProviderCallOptions,
+  syncDefaultAiTranslateButtonLocale,
 } from '../utils/aiCustomButtons';
 
 describe('aiCustomButtons', () => {
@@ -232,5 +234,39 @@ describe('aiCustomButtons', () => {
 
     expect(getModelsForAiProvider('ollama', null, baseConfig)).toContain('llama3.2');
     expect(getModelsForAiProvider('openai-api')).toContain('gpt-4.1');
+  });
+
+  it('localizes default AI Translate preset for all 8 locales and syncs only unmodified presets', () => {
+    const jaPreset = cloneDefaultAiCustomButtons('ja')[0];
+    expect(jaPreset.name).toBe('AI翻訳');
+    expect(jaPreset.prompt).toContain('英語 → 日本語');
+
+    const enPreset = cloneDefaultAiCustomButtons('en')[0];
+    expect(enPreset.name).toBe('AI Translate');
+    expect(enPreset.prompt).toContain('English → Japanese');
+
+    const zhCnPreset = cloneDefaultAiCustomButtons('zh-CN')[0];
+    expect(zhCnPreset.name).toBe('AI 翻译');
+    expect(zhCnPreset.prompt).toContain('英语 → 简体中文');
+
+    const frPreset = cloneDefaultAiCustomButtons('fr')[0];
+    expect(frPreset.name).toBe('Traduction IA');
+    expect(frPreset.prompt).toContain('Anglais → Français');
+
+    // Syncing an unmodified ja preset to ko updates name and prompt while preserving model override
+    const withModel = [{ ...jaPreset, aiProvider: 'apple-foundation-models' as const, aiModel: 'permissive' }];
+    const syncedToKo = syncDefaultAiTranslateButtonLocale(withModel, 'ko');
+    expect(syncedToKo).not.toBeNull();
+    expect(syncedToKo![0].name).toBe(AI_TRANSLATE_PRESETS.ko.name);
+    expect(syncedToKo![0].prompt).toBe(AI_TRANSLATE_PRESETS.ko.prompt);
+    expect(syncedToKo![0].aiProvider).toBe('apple-foundation-models');
+    expect(syncedToKo![0].aiModel).toBe('permissive');
+
+    // Already at target locale -> returns null (no-op)
+    expect(syncDefaultAiTranslateButtonLocale(syncedToKo!, 'ko')).toBeNull();
+
+    // User-customized prompt is never overwritten on locale change
+    const customized = [{ ...jaPreset, prompt: 'My custom translation rule' }];
+    expect(syncDefaultAiTranslateButtonLocale(customized, 'de')).toBeNull();
   });
 });

@@ -347,7 +347,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {models.length > 0 && (
                 <select
                   className="select-input"
-                  value={isCustomVal ? '__custom__' : curModel || models[0] || ''}
+                  value={
+                    currentProvider === 'apple-foundation-models'
+                      ? curModel === 'permissive'
+                        ? 'permissive'
+                        : 'default'
+                      : isCustomVal
+                        ? '__custom__'
+                        : curModel || models[0] || ''
+                  }
                   onChange={(e) => {
                     if (e.target.value === '__custom__') {
                       onPatch({ aiModel: curModel || '' });
@@ -359,15 +367,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 >
                   {models.map((m) => (
                     <option key={m} value={m}>
-                      {m}
+                      {currentProvider === 'apple-foundation-models'
+                        ? m === 'permissive'
+                          ? t.aiChat.appleFmModelPermissive
+                          : t.aiChat.appleFmModelDefault
+                        : m}
                     </option>
                   ))}
-                  <option value="__custom__">
-                    {t.settingsModal.aiCustom.customModelOption}
-                  </option>
+                  {currentProvider !== 'apple-foundation-models' && (
+                    <option value="__custom__">
+                      {t.settingsModal.aiCustom.customModelOption}
+                    </option>
+                  )}
                 </select>
               )}
-              {(models.length === 0 || isCustomVal) && (
+              {currentProvider !== 'apple-foundation-models' && (models.length === 0 || isCustomVal) && (
                 <input
                   type="text"
                   className="text-input"
@@ -405,8 +419,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const aiCustomButtons = useMemo(
-    () => normalizeAiCustomButtons(settings.aiCustomButtons),
-    [settings.aiCustomButtons]
+    () => normalizeAiCustomButtons(settings.aiCustomButtons, locale),
+    [settings.aiCustomButtons, locale]
   );
 
   const updateAiCustomButtons = (next: AiCustomButton[]) => {
@@ -505,7 +519,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleResetAiCustomButtons = () => {
     setOpenIconPickerId(null);
-    updateAiCustomButtons(cloneDefaultAiCustomButtons());
+    updateAiCustomButtons(cloneDefaultAiCustomButtons(locale));
   };
 
   const aiCustomKeybindingDefs = useMemo(

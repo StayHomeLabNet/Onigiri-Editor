@@ -106,6 +106,9 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Expanded from 2 to 8 Languages**: Added **Simplified Chinese (`zh-CN`)**, **Traditional Chinese (`zh-TW`)**, **Korean (`ko`)**, **Spanish (`es`)**, **French (`fr`)**, and **German (`de`)** alongside **English (`en`)** and **Japanese (`ja`)**.
   - **TopBar Language Dropdown & Settings Selector**: Replaced the 2-way `EN / 日本語` toggle button with a dropdown menu in the TopBar and an updated selector in **Settings → General & View** supporting all 8 languages.
   - **OS Locale Auto-Detection & Native Menu Bar**: Updated macOS, Windows, and Linux OS language detection (`get_os_locale`) and the Rust native application menu bar (`menu.rs`) to localize across all 8 languages, backed by a deep-merge English fallback (`mergeTranslations`) so omitted keys never break the UI.
+- **Localized Default `AI Translate` Preset & Apple Intelligence Picker Fix**:
+  - **Locale-Aware `AI Translate` Preset**: The default **AI Translate** toolbar button now automatically adapts its button label and prompt across all 8 languages (pairing each non-Japanese language with English, and Japanese/English together) whenever switching UI languages or resetting presets, without overwriting user-edited prompts or model selections.
+  - **Apple Foundation Models Model Picker (`Settings → AI Custom`)**: Displays readable labels (**Apple Intelligence (Default)** / **Apple Intelligence (Content Transformations)**) when selecting Apple Foundation Models per button or submenu item.
 - **Expanded Welcome Sample Document**:
   - Updated the built-in Welcome sample document across all locales to showcase live preview sync, AI custom buttons, slash commands, Mermaid diagrams, KaTeX math, and multi-language editing.
 
