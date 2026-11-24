@@ -3,7 +3,7 @@ import type { Translations } from './types';
 
 export const ko: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.0',
+  versionLabel: 'v1.5.1',
   modes: {
     simple: '심플',
     basic: '기본',

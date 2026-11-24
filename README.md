@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v150">What's New in v1.5.0</a> ・
+    <a href="#whats-new-in-v151">What's New in v1.5.1</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.5.0`
+Current version: `v1.5.1`
 
 ## Key Features
 
@@ -100,7 +100,14 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.5.0
+## What's New in v1.5.1
+
+- **Architecture Modularization & Maintainability Refactoring**:
+  - **Settings Modal Tab Decomposition (`src/components/settings/`)**: Split `SettingsModal.tsx` into 7 focused tab components (`GeneralTab`, `EditorTab`, `SyntaxTab`, `KeybindingsTab`, `AiCustomTab`, `IntegrationsTab`, `DataTab`), reducing `SettingsModal.tsx` from 4,094 lines to 439 lines.
+  - **Custom Hooks Extraction (`src/hooks/`)**: Extracted cohesive domain hooks (`useGitPanelActions`, `useMacroRecorder`, `useAiCustomRunner`, `useExportActions`, `useBackupAndReset`, `useExternalPreview`, `useWorkspaceActions`) out of `App.tsx` (reducing it from 8,739 lines to 7,283 lines) and unified workspace clean-tab reload logic with zero behavior regressions.
+
+<details>
+<summary>Previous release: v1.5.0</summary>
 
 - **8-Language UI & Native Menu Localization**:
   - **Expanded from 2 to 8 Languages**: Added **Simplified Chinese (`zh-CN`)**, **Traditional Chinese (`zh-TW`)**, **Korean (`ko`)**, **Spanish (`es`)**, **French (`fr`)**, and **German (`de`)** alongside **English (`en`)** and **Japanese (`ja`)**.
@@ -111,6 +118,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Apple Foundation Models Model Picker (`Settings → AI Custom`)**: Displays readable labels (**Apple Intelligence (Default)** / **Apple Intelligence (Content Transformations)**) when selecting Apple Foundation Models per button or submenu item.
 - **Expanded Welcome Sample Document**:
   - Updated the built-in Welcome sample document across all locales to showcase live preview sync, AI custom buttons, slash commands, Mermaid diagrams, KaTeX math, and multi-language editing.
+
+</details>
 
 <details>
 <summary>Previous release: v1.4.2</summary>

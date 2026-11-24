@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v150-の更新内容">v1.5.0 の更新内容</a> ・
+    <a href="#v151-の更新内容">v1.5.1 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.0-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.1-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、**8言語**（**English** / **日本語** / **简体中文** / **繁體中文** / **한국어** / **Español** / **Français** / **Deutsch**）の中から最適な UI とネイティブメニューバーで起動します。
 
-現在のバージョン: `v1.5.0`
+現在のバージョン: `v1.5.1`
 
 ## 主な機能
 
@@ -100,7 +100,14 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.5.0 の更新内容
+## v1.5.1 の更新内容
+
+- **フロントエンド構成のモジュール分割＆保守性向上リファクタリング**:
+  - **設定モーダルのタブ別分割（`src/components/settings/`）**: `SettingsModal.tsx` を 7 つの単一責務タブコンポーネント（`GeneralTab` / `EditorTab` / `SyntaxTab` / `KeybindingsTab` / `AiCustomTab` / `IntegrationsTab` / `DataTab`）へ分割し、本体を 4,094 行から 439 行へ整理しました。
+  - **カスタムフック抽出（`src/hooks/`）**: `App.tsx` から 7 つのドメイン別フック（`useGitPanelActions` / `useMacroRecorder` / `useAiCustomRunner` / `useExportActions` / `useBackupAndReset` / `useExternalPreview` / `useWorkspaceActions`）を切り出し（8,739 行 → 7,283 行）、ワークスペース一括置換後のクリーンタブ再読み込みロジックも共通化しました。
+
+<details>
+<summary>以前のリリース: v1.5.0</summary>
 
 - **UI ＆ネイティブメニューの 8 言語対応**:
   - **2 言語から 8 言語へ拡張**: 従来の **日本語 (`ja`)**・**英語 (`en`)** に加え、**簡体字中国語 (`zh-CN`)**・**繁体字中国語 (`zh-TW`)**・**韓国語 (`ko`)**・**スペイン語 (`es`)**・**フランス語 (`fr`)**・**ドイツ語 (`de`)** を新規追加しました。
@@ -111,6 +118,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Apple Foundation Models 選択表示（`設定 → AIカスタム`）**: ボタン／サブメニュー毎のモデル選択で Apple Foundation Models を選んだ際に、`Apple Intelligence（標準）` / `Apple Intelligence（文章変換向け）` を分かりやすく選択できるよう修正しました。
 - **ウェルカムサンプルドキュメント拡充**:
   - 初期表示されるサンプルドキュメント（`ようこそ.md` / `Welcome.md`）を拡充し、AI カスタムボタン・スラッシュコマンド・Mermaid 図・KaTeX 数式・双方向プレビュー同期などをすぐに試せる内容に更新しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.4.2</summary>
