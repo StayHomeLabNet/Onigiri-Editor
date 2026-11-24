@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import type { AppMode, Locale, ThemeId, ViewLayout } from '../types';
 import type { Translations } from '../i18n/types';
+import { SUPPORTED_LOCALES, localeNames, localeShortLabels } from '../i18n';
 import { formatShortcut, isMacOs } from '../utils/platform';
 import {
   computeNextTopBarLevel,
@@ -233,10 +234,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   const isLayoutLabelsHidden = collapseLevel >= 3;
   const isVersionHidden = collapseLevel >= 4;
 
-  const themeTooltip =
-    locale === 'ja' ? `テーマ: ${t.themes[theme]}` : `Theme: ${t.themes[theme]}`;
-  const localeTooltip =
-    locale === 'ja' ? '言語切替 (日本語 / English)' : 'Switch Language (English / 日本語)';
+  const themeTooltip = `${t.actions.theme}: ${t.themes[theme]}`;
+  const localeTooltip = `${t.actions.language}: ${localeNames[locale]}`;
 
   return (
     <header
@@ -537,7 +536,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 )}
                 {onOpenExportOptions && (
                   <button type="button" onClick={() => onOpenExportOptions('pdf')}>
-                    {locale === 'ja' ? 'ページ設定して書き出し (PDF / HTML)...' : 'Page Setup & Export (PDF / HTML)...'}
+                    {t.actions.exportOptions}
                   </button>
                 )}
               </div>
@@ -567,25 +566,39 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span className="topbar-btn-label">{t.themes[theme]}</span>
         </button>
 
-        <button
-          ref={localeBtnRef}
-          type="button"
-          className={`pill-btn topbar-locale-btn ${isRightLabelsHidden ? 'is-icon-only' : ''}`}
-          onClick={() => onLocaleChange(locale === 'ja' ? 'en' : 'ja')}
-          data-tooltip={localeTooltip}
-          aria-label={localeTooltip}
-        >
-          <Languages size={14} />
-          <span className="topbar-btn-label">{locale === 'ja' ? '日本語' : 'EN'}</span>
-        </button>
+        <div className="dropdown-wrapper">
+          <button
+            ref={localeBtnRef}
+            type="button"
+            className={`pill-btn topbar-locale-btn ${isRightLabelsHidden ? 'is-icon-only' : ''}`}
+            data-tooltip={localeTooltip}
+            aria-label={localeTooltip}
+          >
+            <Languages size={14} />
+            <span className="topbar-btn-label">{localeShortLabels[locale] || locale}</span>
+          </button>
+          <div className="dropdown-menu dropdown-right">
+            {SUPPORTED_LOCALES.map((loc) => (
+              <button
+                key={loc}
+                type="button"
+                className={loc === locale ? 'is-active' : undefined}
+                onClick={() => onLocaleChange(loc)}
+              >
+                <span>{localeNames[loc]}</span>
+                {loc === locale ? <span style={{ marginLeft: 'auto' }}>✓</span> : null}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {onOpenFeatureGuide && (
           <button
             type="button"
             className="icon-btn"
             onClick={onOpenFeatureGuide}
-            data-tooltip={locale === 'ja' ? '機能を探すガイド' : 'Feature Finder Guide'}
-            aria-label={locale === 'ja' ? '機能を探すガイド' : 'Feature Finder Guide'}
+            data-tooltip={t.actions.featureGuide}
+            aria-label={t.actions.featureGuide}
           >
             <Compass size={15} />
           </button>

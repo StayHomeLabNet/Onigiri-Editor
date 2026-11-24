@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v142">What's New in v1.4.2</a> ・
+    <a href="#whats-new-in-v150">What's New in v1.5.0</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.4.2-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.0-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -37,9 +37,9 @@
 
 **Onigiri Editor** is a lightweight, high-speed desktop editor built with **Tauri v2, React 19, TypeScript, and Rust** for writing Markdown, editing source code, previewing web projects, and collaborating with AI tools on **macOS, Windows, and Linux**.
 
-On first launch, it automatically detects the OS language (Japanese when the OS is set to Japanese; English for all other OS languages) and switches both the UI and the native application menu bar accordingly.
+On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.4.2`
+Current version: `v1.5.0`
 
 ## Key Features
 
@@ -60,7 +60,7 @@ Current version: `v1.4.2`
   - **Pattern 1**: Native multi-WebView **Embedded Web Browser** in the right pane (`Settings` toggleable) with **Home** button (configurable Home URL), **Responsive Viewport Presets (`Full` / `Tablet 768px` / `Mobile 390px`)**, **★ Bookmarks & Recent URL History bar**, **DevTools (`F12`)**, keyboard shortcuts (`⌘L`/`Ctrl+L`, `F5`/`⌘R`, `Alt+←/→`), and **Server Stopped** recovery banner.
   - **Pattern 2**: **External Live Browser Preview** (`127.0.0.1` or LAN `0.0.0.0`) with real-time auto-reload, plus **Project Dev Server LAN Access** (`LAN: ON / OFF` toggle, `0.0.0.0` binding, smart physical LAN prioritization with **`+N virtual/other`** collapse, copy chips, and **QR Code** cards) to preview projects on phones or other PCs over local Wi-Fi.
 - **Productivity Extras & Auto-Update Manager**: **Quick Open (`⌘P` / `@headings`)**, Keyboard macro recording & playback (`⌘⇧M` / `F8`), Format Toolbar edit/zoom controls & Status Bar zoom popover (`25%`–`400%`), Smart Line Copy (`⌘C` / `Ctrl+C`), Mermaid diagrams, KaTeX math, GitHub callouts, YAML Frontmatter editor, AI output cleanup & table formatter, estimated LLM token counter, **Copy as Rich Text** & HTML/TSV smart paste, Find & Replace, Command Palette (`⌘K` / `Ctrl+K`), Zen Mode (`⌘⇧F` / `Ctrl+Shift+F`), **Self-Contained Word (`.docx`) / HTML** (embedded local images) / PDF export, and **In-App Auto-Update & Background Update Checker** (configurable periodic check intervals, background auto-download, in-app release notes viewer / tab opener, version skip, and 1-click apply & restart).
-- **OS-Aware First-Launch Language**: Automatically launches in Japanese when the OS language is Japanese, and English for all other languages (manual switch available anytime in Settings or TopBar).
+- **OS-Aware First-Launch Language (8 Languages)**: Automatically detects the OS language on first launch across **English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, and **Deutsch** (manual switch available anytime via the TopBar language dropdown or **Settings → General**).
 
 ## Requirements
 
@@ -100,7 +100,17 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.4.2
+## What's New in v1.5.0
+
+- **8-Language UI & Native Menu Localization**:
+  - **Expanded from 2 to 8 Languages**: Added **Simplified Chinese (`zh-CN`)**, **Traditional Chinese (`zh-TW`)**, **Korean (`ko`)**, **Spanish (`es`)**, **French (`fr`)**, and **German (`de`)** alongside **English (`en`)** and **Japanese (`ja`)**.
+  - **TopBar Language Dropdown & Settings Selector**: Replaced the 2-way `EN / 日本語` toggle button with a dropdown menu in the TopBar and an updated selector in **Settings → General & View** supporting all 8 languages.
+  - **OS Locale Auto-Detection & Native Menu Bar**: Updated macOS, Windows, and Linux OS language detection (`get_os_locale`) and the Rust native application menu bar (`menu.rs`) to localize across all 8 languages, backed by a deep-merge English fallback (`mergeTranslations`) so omitted keys never break the UI.
+- **Expanded Welcome Sample Document**:
+  - Updated the built-in Welcome sample document across all locales to showcase live preview sync, AI custom buttons, slash commands, Mermaid diagrams, KaTeX math, and multi-language editing.
+
+<details>
+<summary>Previous release: v1.4.2</summary>
 
 - **Inline Selection Sync & Enhanced Cursor Block Highlight in Preview**:
   - **Character-Level Selection Sync (`Settings → Editor`, on by default)**: Selecting text in the CodeMirror editor highlights the exact corresponding inline text in the live TipTap preview in real time using non-destructive ProseMirror decorations.
@@ -112,6 +122,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Simple Mode Defaults**: Sets **Hide top header bar in Simple mode** and **Show format toolbar in Simple mode** to ON by default for a cleaner writing experience with immediate access to file and formatting tools.
   - **One-Click Built-in Browser Close (`✕`)**: Adds a close button directly next to the **Web Browser** tab in the right-pane header to close the embedded WebView and return to Markdown preview.
   - **Header & Release UI Hardening**: Removes the redundant version pill from the top-left brand header, suppresses the browser default context menu (`Back`, `Refresh`, `Save as`, `Print`, `Inspect`) on non-editable app UI chrome in production builds, and disables DevTools/Inspect on the main application window in release builds (while keeping DevTools available for the built-in Web Browser).
+
+</details>
 
 <details>
 <summary>Previous release: v1.4.1</summary>

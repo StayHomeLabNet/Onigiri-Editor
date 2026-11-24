@@ -64,6 +64,7 @@ import type { Translations } from '../i18n/types';
 import {
   SNIPPETS,
   customRecordToSnippetItem,
+  getSnippetText,
   loadCustomSnippets,
   saveCustomSnippets,
   type CustomSnippetRecord,
@@ -1838,9 +1839,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         className="snippet-card is-custom"
                         onClick={() => onInsertSnippet(s.content)}
                       >
-                        <div className="snippet-title">{s.title[locale]}</div>
-                        {s.description[locale] && (
-                          <div className="snippet-desc">{s.description[locale]}</div>
+                        <div className="snippet-title">{getSnippetText(s.title, locale)}</div>
+                        {getSnippetText(s.description, locale) && (
+                          <div className="snippet-desc">{getSnippetText(s.description, locale)}</div>
                         )}
                       </button>
                       <div className="snippet-card-actions">
@@ -1888,8 +1889,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   className="snippet-card"
                   onClick={() => onInsertSnippet(s.content)}
                 >
-                  <div className="snippet-title">{s.title[locale]}</div>
-                  <div className="snippet-desc">{s.description[locale]}</div>
+                  <div className="snippet-title">{getSnippetText(s.title, locale)}</div>
+                  <div className="snippet-desc">{getSnippetText(s.description, locale)}</div>
                 </button>
               ))}
             </div>

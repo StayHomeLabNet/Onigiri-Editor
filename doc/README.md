@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.4.2)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.0)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -32,8 +32,8 @@
 
 ### First-Launch Language Detection
 
-- On first launch, Onigiri Editor detects your OS language automatically: Japanese OS environments start with the **Japanese UI and native menu bar**, while all other OS languages start in **English**.
-- You can switch languages anytime from the top-right **Language button** (`EN` / `日本語`), **Settings (`⌘,` / `Ctrl+,`) → General & View**, or the **Command Palette (`⌘K` / `Ctrl+K`)**.
+- On first launch, Onigiri Editor detects your OS language automatically across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native menu bar accordingly (falling back to English for other OS languages).
+- You can switch languages anytime from the top-right **Language dropdown** (`EN`, `日本語`, `简中`, `繁中`, `한국어`, `ES`, `FR`, `DE`), **Settings (`⌘,` / `Ctrl+,`) → General & View**, or the **Command Palette (`⌘K` / `Ctrl+K`)**.
 - Selecting **Help → Online Manual** (or **Online Manual** in the Command Palette) opens the online manual (`https://stayhomelab.net/help/onigiri-editor/`) in your external browser.
 
 ---

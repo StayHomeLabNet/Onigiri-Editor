@@ -1797,26 +1797,81 @@ async fn replace_in_workspace(
     .map_err(|e| format!("Workspace replace task failed: {}", e))?
 }
 
-fn parse_locale_tag_is_ja(tag: &str) -> bool {
+fn parse_locale_tag(tag: &str) -> &'static str {
     let lower = tag.trim().trim_matches('"').trim_matches('\'').to_ascii_lowercase();
     let first = lower.split(':').next().unwrap_or("").trim();
-    first == "ja"
+    if first == "ja"
         || first.starts_with("ja-")
         || first.starts_with("ja_")
         || first.starts_with("ja.")
         || first.starts_with("japanese")
+    {
+        return "ja";
+    }
+    if first.starts_with("zh-tw")
+        || first.starts_with("zh_tw")
+        || first.starts_with("zh-hant")
+        || first.starts_with("zh_hant")
+        || first.starts_with("zh-hk")
+        || first.starts_with("zh_hk")
+        || first.starts_with("zh-mo")
+        || first.starts_with("zh_mo")
+    {
+        return "zh-TW";
+    }
+    if first == "zh"
+        || first.starts_with("zh-")
+        || first.starts_with("zh_")
+        || first.starts_with("zh.")
+        || first.starts_with("chinese")
+    {
+        return "zh-CN";
+    }
+    if first == "ko"
+        || first.starts_with("ko-")
+        || first.starts_with("ko_")
+        || first.starts_with("ko.")
+        || first.starts_with("korean")
+    {
+        return "ko";
+    }
+    if first == "es"
+        || first.starts_with("es-")
+        || first.starts_with("es_")
+        || first.starts_with("es.")
+        || first.starts_with("spanish")
+    {
+        return "es";
+    }
+    if first == "fr"
+        || first.starts_with("fr-")
+        || first.starts_with("fr_")
+        || first.starts_with("fr.")
+        || first.starts_with("french")
+    {
+        return "fr";
+    }
+    if first == "de"
+        || first.starts_with("de-")
+        || first.starts_with("de_")
+        || first.starts_with("de.")
+        || first.starts_with("german")
+    {
+        return "de";
+    }
+    "en"
 }
 
-fn detect_env_locale_is_ja() -> bool {
+fn detect_env_locale() -> &'static str {
     for key in ["LC_ALL", "LC_MESSAGES", "LANGUAGE", "LANG"] {
         if let Ok(val) = std::env::var(key) {
             let trimmed = val.trim();
             if !trimmed.is_empty() && trimmed != "C" && trimmed != "POSIX" {
-                return parse_locale_tag_is_ja(trimmed);
+                return parse_locale_tag(trimmed);
             }
         }
     }
-    false
+    "en"
 }
 
 fn detect_os_locale_impl() -> &'static str {
@@ -1833,11 +1888,7 @@ fn detect_os_locale_impl() -> &'static str {
                     if trimmed.is_empty() || trimmed == "(" || trimmed == ")" {
                         continue;
                     }
-                    return if parse_locale_tag_is_ja(trimmed) {
-                        "ja"
-                    } else {
-                        "en"
-                    };
+                    return parse_locale_tag(trimmed);
                 }
             }
         }
@@ -1853,15 +1904,23 @@ fn detect_os_locale_impl() -> &'static str {
         let lang_id = unsafe { GetUserDefaultUILanguage() };
         if lang_id != 0 {
             let primary_lang = lang_id & 0x03FF;
-            return if primary_lang == 0x11 { "ja" } else { "en" };
+            let sub_lang = (lang_id >> 10) & 0x3F;
+            return match primary_lang {
+                0x11 => "ja",
+                0x12 => "ko",
+                0x04 => match sub_lang {
+                    0x01 | 0x03 | 0x05 => "zh-TW",
+                    _ => "zh-CN",
+                },
+                0x0A => "es",
+                0x0C => "fr",
+                0x07 => "de",
+                _ => "en",
+            };
         }
     }
 
-    if detect_env_locale_is_ja() {
-        "ja"
-    } else {
-        "en"
-    }
+    detect_env_locale()
 }
 
 #[tauri::command]
@@ -2992,15 +3051,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_locale_tag_detects_japanese_and_defaults_other() {
-        assert!(parse_locale_tag_is_ja("ja"));
-        assert!(parse_locale_tag_is_ja("\"ja-JP\""));
-        assert!(parse_locale_tag_is_ja("ja_JP.UTF-8"));
-        assert!(parse_locale_tag_is_ja("ja:en"));
-        assert!(!parse_locale_tag_is_ja("en-US"));
-        assert!(!parse_locale_tag_is_ja("fr_FR.UTF-8"));
-        assert!(!parse_locale_tag_is_ja("zh-Hans"));
-        assert!(!parse_locale_tag_is_ja("C.UTF-8"));
+    fn parse_locale_tag_detects_supported_locales_and_defaults_en() {
+        assert_eq!(parse_locale_tag("ja"), "ja");
+        assert_eq!(parse_locale_tag("\"ja-JP\""), "ja");
+        assert_eq!(parse_locale_tag("ja_JP.UTF-8"), "ja");
+        assert_eq!(parse_locale_tag("ja:en"), "ja");
+        assert_eq!(parse_locale_tag("zh-Hans"), "zh-CN");
+        assert_eq!(parse_locale_tag("zh_CN.UTF-8"), "zh-CN");
+        assert_eq!(parse_locale_tag("zh-Hant"), "zh-TW");
+        assert_eq!(parse_locale_tag("zh-TW"), "zh-TW");
+        assert_eq!(parse_locale_tag("ko-KR"), "ko");
+        assert_eq!(parse_locale_tag("es-ES"), "es");
+        assert_eq!(parse_locale_tag("fr_FR.UTF-8"), "fr");
+        assert_eq!(parse_locale_tag("de-DE"), "de");
+        assert_eq!(parse_locale_tag("en-US"), "en");
+        assert_eq!(parse_locale_tag("C.UTF-8"), "en");
     }
 
     #[test]

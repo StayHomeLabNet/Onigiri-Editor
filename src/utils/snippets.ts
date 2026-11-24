@@ -1,10 +1,16 @@
 import type { Locale } from '../types';
 
+export type LocalizedTextMap = Record<'en' | 'ja', string> & Partial<Record<Locale, string>>;
+
+export function getSnippetText(map: LocalizedTextMap, locale: Locale): string {
+  return map[locale] ?? map.en;
+}
+
 export interface SnippetItem {
   id: string;
   category: 'diagram' | 'structure' | 'ai' | 'math' | 'custom';
-  title: Record<Locale, string>;
-  description: Record<Locale, string>;
+  title: LocalizedTextMap;
+  description: LocalizedTextMap;
   content: string;
   isCustom?: boolean;
 }

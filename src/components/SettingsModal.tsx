@@ -72,6 +72,7 @@ import type {
   WrapMode,
 } from '../types';
 import type { Translations } from '../i18n/types';
+import { SUPPORTED_LOCALES, localeNames } from '../i18n';
 import { detectAiCapabilities, formatShortcut, getHostOs, isTauri } from '../utils/platform';
 import { TEXT_ENCODINGS } from '../utils/encodings';
 import { getAutoPresetForTheme, resolveSyntaxColors, SYNTAX_PRESETS } from '../utils/syntaxThemes';
@@ -729,8 +730,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       value={locale}
                       onChange={(e) => onLocaleChange(e.target.value as Locale)}
                     >
-                      <option value="ja">日本語 (Japanese)</option>
-                      <option value="en">English</option>
+                      {SUPPORTED_LOCALES.map((loc) => (
+                        <option key={loc} value={loc}>
+                          {localeNames[loc]} ({loc})
+                        </option>
+                      ))}
                     </select>
                   </div>
 

@@ -119,6 +119,10 @@ export interface Translations {
     knowledgeGraph: string;
     openGitPanel: string;
     checkUpdates: string;
+    theme: string;
+    language: string;
+    exportOptions: string;
+    featureGuide: string;
   };
   toolbar: {
     heading1: string;

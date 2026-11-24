@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.4.2',
+  versionLabel: 'v1.5.0',
   modes: {
     simple: 'Simple',
     basic: 'Basic',
@@ -121,6 +121,10 @@ export const en: Translations = {
     knowledgeGraph: 'Open Knowledge Graph & Link Diagnostics...',
     openGitPanel: 'Open Git Panel (Stage / Commit / Push)',
     checkUpdates: 'Check for Updates...',
+    theme: 'Theme',
+    language: 'Language',
+    exportOptions: 'Page Setup & Export (PDF / HTML)...',
+    featureGuide: 'Feature Guide & Shortcuts',
   },
   toolbar: {
     heading1: 'Heading 1',
@@ -1553,30 +1557,53 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
 
 # Welcome to Onigiri Editor 🍙
 
-**Onigiri Editor** brings together **bidirectional visual Markdown editing**, **PKM & Knowledge Graph visualization**, **Git source control**, **100+ language syntax highlighting**, **auto-detected dev server & built-in Web Browser preview**, and **AI Chat & inline editing** in one cross-platform workspace.
+**Onigiri Editor** brings together **bidirectional visual Markdown editing**, **AI Chat & Custom Toolbar Actions**, **PKM & Knowledge Graph**, **Git source control**, **100+ language code editing**, and **auto-detected dev server & built-in Web Browser preview** in one cross-platform workspace.
 
 > [!TIP]
-> - Switch between **Simple**, **Basic**, and **Advanced** anytime (\`⌘ + \\\` / \`Ctrl + \\\`).
-> - Press \`⌘ + P\` (\`Ctrl + P\`) for **Quick Open** (prefix \`@\` for headings) or \`⌘ + K\` (\`Ctrl + K\`) for the **Command Palette**.
-> - Click the top-right **Bot / Panel icon (Options / AI Chat)** for AI Chat, review, formatting, stats, and snapshots, or \`⌘ + ,\` (\`Ctrl + ,\`) for Settings (including custom Keybindings & JSON backup).
+> - **Switch Modes Anytime (\`⌘ + \\\` / \`Ctrl + \\\`)**: Toggle between **Simple** (clean writing focus with Format Toolbar), **Basic** (bidirectional split preview & AI), and **Advanced** (multi-tab, file explorer, Git, integrated terminal).
+> - **Feature Finder Guide (\`?\`)**: Click **\`?\`** in the TopBar or open the **Command Palette (\`⌘ + K\` / \`Ctrl + K\`)** to search any capability in English or Japanese and launch it directly.
+> - **Quick Open (\`⌘ + P\` / \`Ctrl + P\`)**: Jump to workspace files or type \`@\` to jump to any heading.
+> - **Settings (\`⌘ + ,\` / \`Ctrl + ,\`)**: Customize 112+ keybindings, AI Custom buttons, snapshots, and JSON settings backups.
+
+---
 
 ## Highlights
 
-- [x] **3 Modes & Dual Editor**: \`Simple\` (minimal single-pane), \`Basic\` (bidirectional preview & AI), and \`Advanced\` (tabs, folder explorer, **Git tab**, **Knowledge Graph** & Side-by-Side split / 2-tab diff compare)
-- [x] **Rich Markdown Writing & Citations**: Line-start \`/\` **Slash Commands**, **clipboard image auto-save (\`assets/\`)**, Sidebar D&D relative links, **Citations / Link Cards / BibTeX & DOI Lookup / Footnotes**, **URL auto-title paste**, **Auto TOC**, and **Slide Presentation Mode**
-- [x] **Knowledge Graph & Workspace Search**: \`[[WikiLinks]]\`, Backlinks & \`#tag\` browser, **interactive Knowledge Graph & broken link diagnostics**, **Unused Image Cleaner**, and **Cross-Folder Regex Grep Replace (\`⌘ + ⇧ + G\`)**
-- [x] **Git Source Control & Project Config**: Stage, unstage, discard, inspect inline diffs, commit with **AI Commit Message**, and Pull/Push from the **Git Sidebar tab**, plus automatic \`.editorconfig\` and \`.onigiri.json\` support
-- [x] **AI Chat, Review & Inline Selection Edit (\`⌘ + ⇧ + E\`)**: Supports **Codex / Claude Code / Gemini CLI / Antigravity CLI**, Cloud APIs, and **Ollama / LM Studio** with per-tab threads, \`.md\` export, rule/AI proofreading, and Diff Preview
-- [x] **Dev Server Auto-Detection & Live Previews**: Detects Vite / Next.js / Astro / Nuxt / Laravel / WordPress / Docker / Python / Hugo projects for built-in or external LAN browser preview, plus **CSV/TSV table**, **JSON/YAML/ENV tools**, and **HTML/SVG preview**
-- [x] **Flexible Export & Customization**: **Word (\`.docx\`)**, HTML, and PDF export, **Mermaid & KaTeX SVG/PNG export**, **Copy as Rich Text**, customizable **Keybindings** (27 commands), and **JSON Settings Backup & Reset**
+- [x] **Bidirectional Live Editing & Real-Time Sync Highlights**: Edit in CodeMirror 6 (left) or TipTap visual preview (right) with live sync. Both **cursor-line block highlight** and **character-level inline selection sync** highlight matching content in the preview (toggleable in **Settings → Editor**)
+- [x] **Modern Markdown Writing & Citations**:
+  - Floating **Selection Bubble Menu** above selected text (Bold, Italic, Code, Link, Inline AI Edit, quick AI Custom buttons)
+  - Automatic **Markdown Table GUI Toolbar** when the cursor is inside a table (add/remove rows & columns, align, numeric sort, format)
+  - Line-start \`/\` **Slash Commands**, **Custom Snippets**, **Auto TOC**, **Single-Line-Break (\`<br>\`) preview**
+  - **Citations / Link Cards / BibTeX & DOI Lookup / Footnotes**, **URL auto-title paste**, **Daily Notes & Templates**, **URL Web Clipper**, and **Slide Presentation Mode**
+- [x] **Multi-Provider AI & Customizable Toolbar Actions (\`⌘ + ⇧ + E\` for Inline Edit)**:
+  - Supports **Apple Foundation Models (on-device, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio**
+  - **Toolbar AI Custom Buttons & Submenus**: Register up to 5 primary buttons + 10 submenu items each, with **per-button / per-item model overrides (Subscription CLI / Cloud API / Local AI)** and prompt variables (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\`, etc.), preloaded with an **AI Translate** preset
+  - Includes **AI Ghost Text Autocomplete (\`Tab\` to accept)**, **AI Send Content Preview & Secret Redaction**, **line-by-line Diff Preview**, and **Rule & AI Proofreading**
+- [x] **Safety & Compatibility Tools**:
+  - **Auto Snapshot Timeline & Partial Chunk Restore** (on save & periodic intervals)
+  - **Markdown Compatibility Check** (diagnose dialect differences for GitHub / Zenn / Qiita / Notion / Obsidian)
+  - **Image Auto-Optimization (\`assets/\`) & All Images Size Inventory**, plus **Unused Image Cleaner**
+- [x] **Knowledge Graph, Git Source Control & Dev Tools**:
+  - \`[[WikiLinks]]\`, Backlinks, \`#tag\` browser, and **interactive Knowledge Graph & broken-link diagnostics**
+  - **Git Sidebar Tab** (stage/unstage/discard, inline diff, **AI Commit Message**, Pull/Push), **Cross-Folder Regex Grep Replace (\`⌘ + ⇧ + G\`)**, and external file change detection
+  - **Integrated Terminal Drawer (Advanced Mode)**, **Multi-Server Dev Launcher (QR / LAN sharing & AI log diagnosis)**, and **Built-in Web Browser** (with 1-click \`✕\` close button)
+- [x] **Flexible Export & Productivity Extras**: **Word (\`.docx\`)**, **PDF / HTML (with Page Setup, Design Themes & Headers/Footers)**, **Mermaid & KaTeX SVG/PNG export**, **Copy as Rich Text**, **Quick Scratchpad**, and **Keyboard Macros (\`⌘ + ⇧ + M\` / \`F8\`)**
 
-### 1. Choose Your Mode
+---
 
-| Mode | Best For | Key Capabilities |
+### 1. Try Interactive Features Right Here
+
+1. **Test Inline Selection Sync & Bubble Menu**: Select any phrase in the sample quote below on the **editor side**—the floating Bubble Menu appears above your selection and the matching text highlights in the live preview!
+   > こんにちは！下の「AI翻訳」ボタンや選択メニューを使って、この文章を英語に翻訳してみてください。
+2. **Test the Markdown Table GUI Toolbar**: Click inside any cell of the table below to bring up the table editing bar above the editor.
+
+| Mode | Best For | Layout & Capabilities |
 | :--- | :--- | :--- |
-| **Simple** | Quick notes & fast code edits | Minimal UI, editor-only view, smart line copy, box selection, syntax highlight |
-| **Basic** | Writing & live visual editing | Bidirectional split preview, toolbar, \`/\` commands, citations, browser, AI chat & review |
-| **Advanced** | Dev workflows, PKM & Git | Multi-tab & side-by-side diff, \`[[WikiLinks]]\` & Graph, Git panel, Grep replace, dev server |
+| **Simple** | Quick notes & fast code edits | Clean single-pane editor with hidden header bar & visible format toolbar |
+| **Basic** | Daily writing & visual editing | Editor + bidirectional live preview + format toolbar + AI Chat |
+| **Advanced** | Dev workflows, PKM & Git | Multi-tab & side-by-side diff, Wiki Graph, Git panel, dev server & terminal |
+
+---
 
 ### 2. Workflow Overview (Mermaid)
 
@@ -1585,22 +1612,29 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
 
 \`\`\`mermaid
 flowchart LR
-  Write["✍️ Write / Cite / Auto-Save Images"] --> Knowledge["🕸️ WikiLinks & Knowledge Graph"]
-  Knowledge --> AI["🤖 AI Edit & Proofread Review"]
-  AI --> Git["🌿 Git Panel & Inline Diff"]
-  Git --> Export["📦 Word (.docx) / HTML / PDF / Slides"]
+  Write["✍️ Write / Slash / Auto-Optimize Images"] --> Knowledge["🕸️ WikiLinks & Knowledge Graph"]
+  Knowledge --> AI["🤖 AI Custom / Ghost Text / Proofread"]
+  AI --> Check["🛡️ Compat Check & Auto Snapshots"]
+  Check --> Git["🌿 Git Panel & Inline Diff"]
+  Git --> Export["📦 Word / HTML / PDF / Slides"]
 \`\`\`
 
-### 3. Handy Shortcuts (Customizable in Settings → Keybindings)
+---
+
+### 3. Handy Shortcuts (112+ Commands Customizable in Settings → Keybindings)
 
 | Action | macOS | Windows / Linux |
 | :--- | :--- | :--- |
+| Cycle Mode (Simple / Basic / Advanced) | \`⌘ + \\\` | \`Ctrl + \\\` |
 | Quick Open (Files / \`@Headings\`) | \`⌘ + P\` | \`Ctrl + P\` |
 | Command Palette | \`⌘ + K\` | \`Ctrl + K\` |
 | Cross-Folder Grep & Replace | \`⌘ + ⇧ + G\` | \`Ctrl + Shift + G\` |
 | Inline AI Edit on Selection | \`⌘ + ⇧ + E\` | \`Ctrl + Shift + E\` |
 | Toggle / Jump Line Bookmark | \`⌘ + F2\` / \`F2\` | \`Ctrl + F2\` / \`F2\` |
-| Box Selection / Zen Mode | \`Option + Drag\` / \`⌘ + ⇧ + F\` | \`Alt + Drag\` / \`Ctrl + Shift + F\` |
+| Zen Mode / Box Selection | \`⌘ + ⇧ + F\` / \`Option + Drag\` | \`Ctrl + Shift + F\` / \`Alt + Drag\` |
+| Global Summon Hotkey (opt-in in Settings) | \`⌘ + ⇧ + Space\` | \`Ctrl + Shift + Space\` |
+
+---
 
 ### 4. LaTeX Math & Multi-Language Syntax Highlighting
 
@@ -1610,12 +1644,11 @@ $$
 \\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V
 $$
 
-\`\`\`php
-<?php
-function greetOnigiri(string $name): string {
-    return "Hello, " . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . "!";
+\`\`\`typescript
+export function greetOnigiri(name: string): string {
+  return \`Hello, \${name} 🍙\`;
 }
-echo greetOnigiri('Onigiri Editor');
+console.log(greetOnigiri('Onigiri Editor'));
 \`\`\`
 `,
 };

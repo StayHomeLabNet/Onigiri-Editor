@@ -11,6 +11,7 @@ import type {
   GitPanelState,
   GitStatusResult,
   ImageAssetPayload,
+  Locale,
   MigrateTempImagesResult,
   ProjectConfigBundle,
   ProjectInfo,
@@ -23,6 +24,7 @@ import type {
   WorkspaceGrepResult,
   WorkspaceNoteIndexEntry,
 } from '../types';
+import { normalizeLocaleTag } from '../i18n';
 import {
   decodeBytesBrowser,
   encodeTextBrowser,
@@ -628,25 +630,24 @@ export async function writeWorkspaceFile(
   return invoke<string>('write_workspace_file', { rootPath, relativePath, content });
 }
 
-export async function getOsLocale(): Promise<'ja' | 'en'> {
+export async function getOsLocale(): Promise<Locale> {
   if (isTauri()) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const loc = await invoke<string>('get_os_locale');
-      return loc === 'ja' ? 'ja' : 'en';
+      return normalizeLocaleTag(loc);
     } catch {
       // fall through
     }
   }
-  const navLang = (
+  const navLang =
     (typeof navigator !== 'undefined' && (navigator.languages?.[0] || navigator.language)) ||
-    'en'
-  ).toLowerCase();
-  return navLang.startsWith('ja') ? 'ja' : 'en';
+    'en';
+  return normalizeLocaleTag(navLang);
 }
 
 export async function rebuildAppMenu(
-  locale: 'ja' | 'en',
+  locale: Locale,
   state?: {
     showTopBar?: boolean;
     showFormatToolbar?: boolean;

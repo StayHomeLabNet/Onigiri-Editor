@@ -21,174 +21,603 @@ pub fn build_app_menu_with_state<R: Runtime>(
     recent_files: &[String],
     recent_folders: &[String],
 ) -> tauri::Result<Menu<R>> {
-    let is_ja = locale == "ja";
+    struct MenuLabels {
+        about: &'static str,
+        settings: &'static str,
+        #[cfg(target_os = "macos")]
+        services: &'static str,
+        #[cfg(target_os = "macos")]
+        hide: &'static str,
+        #[cfg(target_os = "macos")]
+        hide_others: &'static str,
+        #[cfg(target_os = "macos")]
+        show_all: &'static str,
+        quit: &'static str,
+        file: &'static str,
+        new_file: &'static str,
+        new_encoding: &'static str,
+        open: &'static str,
+        quick_open: &'static str,
+        reopen_encoding: &'static str,
+        open_folder: &'static str,
+        save: &'static str,
+        save_as: &'static str,
+        export_html: &'static str,
+        export_pdf: &'static str,
+        print_source: &'static str,
+        open_recent: &'static str,
+        recent_files_hdr: &'static str,
+        recent_folders_hdr: &'static str,
+        recent_empty: &'static str,
+        clear_recent: &'static str,
+        close_tab: &'static str,
+        edit: &'static str,
+        undo: &'static str,
+        redo: &'static str,
+        cut: &'static str,
+        copy: &'static str,
+        paste: &'static str,
+        select_all: &'static str,
+        find: &'static str,
+        goto_line: &'static str,
+        macro_toggle: &'static str,
+        macro_play: &'static str,
+        view: &'static str,
+        mode_simple: &'static str,
+        mode_basic: &'static str,
+        mode_adv: &'static str,
+        top_bar: &'static str,
+        format_toolbar: &'static str,
+        editor_split: &'static str,
+        palette: &'static str,
+        options: &'static str,
+        external_preview: &'static str,
+        zen: &'static str,
+        window: &'static str,
+        minimize: &'static str,
+        close_win: &'static str,
+        help: &'static str,
+        online_manual: &'static str,
+        check_updates: &'static str,
+    }
 
-    let about_label = if is_ja {
-        "Onigiri Editor について"
-    } else {
-        "About Onigiri Editor"
+    let lbl = match locale {
+        "ja" => MenuLabels {
+            about: "Onigiri Editor について",
+            settings: "設定…",
+            #[cfg(target_os = "macos")]
+            services: "サービス",
+            #[cfg(target_os = "macos")]
+            hide: "Onigiri Editor を隠す",
+            #[cfg(target_os = "macos")]
+            hide_others: "ほかを隠す",
+            #[cfg(target_os = "macos")]
+            show_all: "すべてを表示",
+            quit: "Onigiri Editor を終了",
+            file: "ファイル",
+            new_file: "新規作成",
+            new_encoding: "新規作成（文字コード指定）…",
+            open: "ファイルを開く…",
+            quick_open: "クイックオープン…",
+            reopen_encoding: "文字コードを指定して再読み込み…",
+            open_folder: "フォルダを開く…",
+            save: "保存",
+            save_as: "名前を付けて保存…",
+            export_html: "HTML として書き出し…",
+            export_pdf: "印刷 / PDF 書き出し…",
+            print_source: "ソースコードとして印刷…",
+            open_recent: "最近開いた項目",
+            recent_files_hdr: "— ファイル —",
+            recent_folders_hdr: "— フォルダ —",
+            recent_empty: "履歴はありません",
+            clear_recent: "履歴をクリア",
+            close_tab: "タブを閉じる",
+            edit: "編集",
+            undo: "元に戻す",
+            redo: "やり直し",
+            cut: "切り取り",
+            copy: "コピー",
+            paste: "貼り付け",
+            select_all: "すべて選択",
+            find: "検索・置換",
+            goto_line: "指定行へ移動…",
+            macro_toggle: "マクロの記録開始 / 停止",
+            macro_play: "マクロを再生",
+            view: "表示",
+            mode_simple: "シンプルモード",
+            mode_basic: "標準モード",
+            mode_adv: "拡張モード",
+            top_bar: "上部ヘッダーバーを表示",
+            format_toolbar: "書式ツールバーを表示",
+            editor_split: "エディタを上下に分割表示",
+            palette: "コマンドパレット",
+            options: "オプション / AIチャット",
+            external_preview: "外部ブラウザでライブプレビュー",
+            zen: "集中モード (Zen)",
+            window: "ウィンドウ",
+            minimize: "しまう",
+            close_win: "閉じる",
+            help: "ヘルプ",
+            online_manual: "オンラインマニュアル",
+            check_updates: "アップデートを確認…",
+        },
+        "zh-CN" => MenuLabels {
+            about: "关于 Onigiri Editor",
+            settings: "设置…",
+            #[cfg(target_os = "macos")]
+            services: "服务",
+            #[cfg(target_os = "macos")]
+            hide: "隐藏 Onigiri Editor",
+            #[cfg(target_os = "macos")]
+            hide_others: "隐藏其他",
+            #[cfg(target_os = "macos")]
+            show_all: "全部显示",
+            quit: "退出 Onigiri Editor",
+            file: "文件",
+            new_file: "新建文件",
+            new_encoding: "使用指定编码新建…",
+            open: "打开文件…",
+            quick_open: "快速打开…",
+            reopen_encoding: "使用指定编码重新打开…",
+            open_folder: "打开文件夹…",
+            save: "保存",
+            save_as: "另存为…",
+            export_html: "导出为 HTML…",
+            export_pdf: "打印 / 导出 PDF…",
+            print_source: "打印源代码…",
+            open_recent: "最近打开",
+            recent_files_hdr: "— 文件 —",
+            recent_folders_hdr: "— 文件夹 —",
+            recent_empty: "无最近记录",
+            clear_recent: "清除记录",
+            close_tab: "关闭标签页",
+            edit: "编辑",
+            undo: "撤销",
+            redo: "重做",
+            cut: "剪切",
+            copy: "复制",
+            paste: "粘贴",
+            select_all: "全选",
+            find: "查找与替换",
+            goto_line: "跳转到行…",
+            macro_toggle: "开始/停止录制宏",
+            macro_play: "播放宏",
+            view: "视图",
+            mode_simple: "简洁模式",
+            mode_basic: "标准模式",
+            mode_adv: "高级模式",
+            top_bar: "显示顶部标题栏",
+            format_toolbar: "显示格式工具栏",
+            editor_split: "上下拆分编辑器",
+            palette: "命令面板",
+            options: "选项 / AI 聊天",
+            external_preview: "在外部浏览器中实时预览",
+            zen: "专注模式 (Zen)",
+            window: "窗口",
+            minimize: "最小化",
+            close_win: "关闭窗口",
+            help: "帮助",
+            online_manual: "在线手册",
+            check_updates: "检查更新…",
+        },
+        "zh-TW" => MenuLabels {
+            about: "關於 Onigiri Editor",
+            settings: "設定…",
+            #[cfg(target_os = "macos")]
+            services: "服務",
+            #[cfg(target_os = "macos")]
+            hide: "隱藏 Onigiri Editor",
+            #[cfg(target_os = "macos")]
+            hide_others: "隱藏其他",
+            #[cfg(target_os = "macos")]
+            show_all: "顯示全部",
+            quit: "結束 Onigiri Editor",
+            file: "檔案",
+            new_file: "新增檔案",
+            new_encoding: "以指定編碼新增…",
+            open: "開啟檔案…",
+            quick_open: "快速開啟…",
+            reopen_encoding: "以指定編碼重新開啟…",
+            open_folder: "開啟資料夾…",
+            save: "儲存",
+            save_as: "另存新檔…",
+            export_html: "匯出為 HTML…",
+            export_pdf: "列印 / 匯出 PDF…",
+            print_source: "列印原始碼…",
+            open_recent: "最近開啟",
+            recent_files_hdr: "— 檔案 —",
+            recent_folders_hdr: "— 資料夾 —",
+            recent_empty: "無最近項目",
+            clear_recent: "清除紀錄",
+            close_tab: "關閉分頁",
+            edit: "編輯",
+            undo: "復原",
+            redo: "重做",
+            cut: "剪下",
+            copy: "複製",
+            paste: "貼上",
+            select_all: "全選",
+            find: "尋找與取代",
+            goto_line: "跳至行…",
+            macro_toggle: "開始/停止錄製巨集",
+            macro_play: "播放巨集",
+            view: "檢視",
+            mode_simple: "簡潔模式",
+            mode_basic: "標準模式",
+            mode_adv: "進階模式",
+            top_bar: "顯示頂部標題列",
+            format_toolbar: "顯示格式工具列",
+            editor_split: "上下分割編輯器",
+            palette: "命令面板",
+            options: "選項 / AI 聊天",
+            external_preview: "在外部瀏覽器中即時預覽",
+            zen: "專注模式 (Zen)",
+            window: "視窗",
+            minimize: "最小化",
+            close_win: "關閉視窗",
+            help: "說明",
+            online_manual: "線上使用手冊",
+            check_updates: "檢查更新…",
+        },
+        "ko" => MenuLabels {
+            about: "Onigiri Editor 정보",
+            settings: "설정…",
+            #[cfg(target_os = "macos")]
+            services: "서비스",
+            #[cfg(target_os = "macos")]
+            hide: "Onigiri Editor 가리기",
+            #[cfg(target_os = "macos")]
+            hide_others: "기타 가리기",
+            #[cfg(target_os = "macos")]
+            show_all: "모두 보기",
+            quit: "Onigiri Editor 종료",
+            file: "파일",
+            new_file: "새 파일",
+            new_encoding: "인코딩 지정하여 새로 만들기…",
+            open: "파일 열기…",
+            quick_open: "빠른 열기…",
+            reopen_encoding: "인코딩으로 다시 열기…",
+            open_folder: "폴더 열기…",
+            save: "저장",
+            save_as: "다른 이름으로 저장…",
+            export_html: "HTML로 내보내기…",
+            export_pdf: "인쇄 / PDF 내보내기…",
+            print_source: "소스 코드 인쇄…",
+            open_recent: "최근 항목 열기",
+            recent_files_hdr: "— 파일 —",
+            recent_folders_hdr: "— 폴더 —",
+            recent_empty: "최근 항목 없음",
+            clear_recent: "기록 지우기",
+            close_tab: "탭 닫기",
+            edit: "편집",
+            undo: "실행 취소",
+            redo: "다시 실행",
+            cut: "잘라내기",
+            copy: "복사",
+            paste: "붙여넣기",
+            select_all: "모두 선택",
+            find: "찾기 및 바꾸기",
+            goto_line: "줄로 이동…",
+            macro_toggle: "매크로 기록 시작 / 중지",
+            macro_play: "매크로 재생",
+            view: "보기",
+            mode_simple: "심플 모드",
+            mode_basic: "기본 모드",
+            mode_adv: "고급 모드",
+            top_bar: "상단 헤더 바 표시",
+            format_toolbar: "서식 도구 모음 표시",
+            editor_split: "편집기 위/아래 분할",
+            palette: "명령 팔레트",
+            options: "옵션 / AI 채팅",
+            external_preview: "외부 브라우저 실시간 미리보기",
+            zen: "집중 모드 (Zen)",
+            window: "창",
+            minimize: "최소화",
+            close_win: "창 닫기",
+            help: "도움말",
+            online_manual: "온라인 설명서",
+            check_updates: "업데이트 확인…",
+        },
+        "es" => MenuLabels {
+            about: "Acerca de Onigiri Editor",
+            settings: "Ajustes...",
+            #[cfg(target_os = "macos")]
+            services: "Servicios",
+            #[cfg(target_os = "macos")]
+            hide: "Ocultar Onigiri Editor",
+            #[cfg(target_os = "macos")]
+            hide_others: "Ocultar otros",
+            #[cfg(target_os = "macos")]
+            show_all: "Mostrar todo",
+            quit: "Salir de Onigiri Editor",
+            file: "Archivo",
+            new_file: "Nuevo archivo",
+            new_encoding: "Nuevo archivo con codificación...",
+            open: "Abrir archivo...",
+            quick_open: "Apertura rápida...",
+            reopen_encoding: "Reabrir con codificación...",
+            open_folder: "Abrir carpeta...",
+            save: "Guardar",
+            save_as: "Guardar como...",
+            export_html: "Exportar HTML...",
+            export_pdf: "Imprimir / Exportar PDF...",
+            print_source: "Imprimir código fuente...",
+            open_recent: "Abrir reciente",
+            recent_files_hdr: "— Archivos —",
+            recent_folders_hdr: "— Carpetas —",
+            recent_empty: "Sin elementos recientes",
+            clear_recent: "Limpiar historial",
+            close_tab: "Cerrar pestaña",
+            edit: "Editar",
+            undo: "Deshacer",
+            redo: "Rehacer",
+            cut: "Cortar",
+            copy: "Copiar",
+            paste: "Pegar",
+            select_all: "Seleccionar todo",
+            find: "Buscar y reemplazar",
+            goto_line: "Ir a la línea...",
+            macro_toggle: "Grabar / Detener macro",
+            macro_play: "Reproducir macro",
+            view: "Ver",
+            mode_simple: "Modo Simple",
+            mode_basic: "Modo Básico",
+            mode_adv: "Modo Avanzado",
+            top_bar: "Mostrar barra superior",
+            format_toolbar: "Mostrar barra de formato",
+            editor_split: "Dividir editor arriba / abajo",
+            palette: "Paleta de comandos",
+            options: "Opciones / Chat IA",
+            external_preview: "Vista previa en navegador externo",
+            zen: "Modo Zen",
+            window: "Ventana",
+            minimize: "Minimizar",
+            close_win: "Cerrar ventana",
+            help: "Ayuda",
+            online_manual: "Manual en línea",
+            check_updates: "Buscar actualizaciones...",
+        },
+        "fr" => MenuLabels {
+            about: "À propos d'Onigiri Editor",
+            settings: "Paramètres...",
+            #[cfg(target_os = "macos")]
+            services: "Services",
+            #[cfg(target_os = "macos")]
+            hide: "Masquer Onigiri Editor",
+            #[cfg(target_os = "macos")]
+            hide_others: "Masquer les autres",
+            #[cfg(target_os = "macos")]
+            show_all: "Tout afficher",
+            quit: "Quitter Onigiri Editor",
+            file: "Fichier",
+            new_file: "Nouveau fichier",
+            new_encoding: "Nouveau fichier avec encodage...",
+            open: "Ouvrir un fichier...",
+            quick_open: "Ouverture rapide...",
+            reopen_encoding: "Rouvrir avec l'encodage...",
+            open_folder: "Ouvrir un dossier...",
+            save: "Enregistrer",
+            save_as: "Enregistrer sous...",
+            export_html: "Exporter en HTML...",
+            export_pdf: "Imprimer / Exporter en PDF...",
+            print_source: "Imprimer le code source...",
+            open_recent: "Récents",
+            recent_files_hdr: "— Fichiers —",
+            recent_folders_hdr: "— Dossiers —",
+            recent_empty: "Aucun élément récent",
+            clear_recent: "Effacer l'historique",
+            close_tab: "Fermer l'onglet",
+            edit: "Édition",
+            undo: "Annuler",
+            redo: "Rétablir",
+            cut: "Couper",
+            copy: "Copier",
+            paste: "Coller",
+            select_all: "Tout sélectionner",
+            find: "Rechercher et remplacer",
+            goto_line: "Aller à la ligne...",
+            macro_toggle: "Enregistrer / Arrêter la macro",
+            macro_play: "Lire la macro",
+            view: "Affichage",
+            mode_simple: "Mode Simple",
+            mode_basic: "Mode Standard",
+            mode_adv: "Mode Avancé",
+            top_bar: "Afficher la barre d'en-tête",
+            format_toolbar: "Afficher la barre de mise en forme",
+            editor_split: "Fractionner l'éditeur haut / bas",
+            palette: "Palette de commandes",
+            options: "Options / Chat IA",
+            external_preview: "Aperçu en direct dans le navigateur",
+            zen: "Mode Zen",
+            window: "Fenêtre",
+            minimize: "Réduire",
+            close_win: "Fermer la fenêtre",
+            help: "Aide",
+            online_manual: "Manuel en ligne",
+            check_updates: "Vérifier les mises à jour...",
+        },
+        "de" => MenuLabels {
+            about: "Über Onigiri Editor",
+            settings: "Einstellungen...",
+            #[cfg(target_os = "macos")]
+            services: "Dienste",
+            #[cfg(target_os = "macos")]
+            hide: "Onigiri Editor ausblenden",
+            #[cfg(target_os = "macos")]
+            hide_others: "Andere ausblenden",
+            #[cfg(target_os = "macos")]
+            show_all: "Alle einblenden",
+            quit: "Onigiri Editor beenden",
+            file: "Datei",
+            new_file: "Neue Datei",
+            new_encoding: "Neue Datei mit Kodierung...",
+            open: "Datei öffnen...",
+            quick_open: "Schnell öffnen...",
+            reopen_encoding: "Mit Kodierung neu öffnen...",
+            open_folder: "Ordner öffnen...",
+            save: "Speichern",
+            save_as: "Speichern unter...",
+            export_html: "Als HTML exportieren...",
+            export_pdf: "Drucken / Als PDF exportieren...",
+            print_source: "Quellcode drucken...",
+            open_recent: "Zuletzt geöffnet",
+            recent_files_hdr: "— Dateien —",
+            recent_folders_hdr: "— Ordner —",
+            recent_empty: "Keine letzten Einträge",
+            clear_recent: "Verlauf löschen",
+            close_tab: "Tab schließen",
+            edit: "Bearbeiten",
+            undo: "Rückgängig",
+            redo: "Wiederholen",
+            cut: "Ausschneiden",
+            copy: "Kopieren",
+            paste: "Einfügen",
+            select_all: "Alles auswählen",
+            find: "Suchen & Ersetzen",
+            goto_line: "Gehe zu Zeile...",
+            macro_toggle: "Makro aufnehmen / stoppen",
+            macro_play: "Makro abspielen",
+            view: "Ansicht",
+            mode_simple: "Einfacher Modus",
+            mode_basic: "Standardmodus",
+            mode_adv: "Erweiterter Modus",
+            top_bar: "Kopfzeile anzeigen",
+            format_toolbar: "Formatierungsleiste anzeigen",
+            editor_split: "Editor oben / unten teilen",
+            palette: "Befehlspalette",
+            options: "Optionen / KI-Chat",
+            external_preview: "Live-Vorschau im externen Browser",
+            zen: "Zen-Modus",
+            window: "Fenster",
+            minimize: "Minimieren",
+            close_win: "Fenster schließen",
+            help: "Hilfe",
+            online_manual: "Online-Handbuch",
+            check_updates: "Nach Updates suchen...",
+        },
+        _ => MenuLabels {
+            about: "About Onigiri Editor",
+            settings: "Settings...",
+            #[cfg(target_os = "macos")]
+            services: "Services",
+            #[cfg(target_os = "macos")]
+            hide: "Hide Onigiri Editor",
+            #[cfg(target_os = "macos")]
+            hide_others: "Hide Others",
+            #[cfg(target_os = "macos")]
+            show_all: "Show All",
+            quit: "Quit Onigiri Editor",
+            file: "File",
+            new_file: "New File",
+            new_encoding: "New File with Encoding...",
+            open: "Open File...",
+            quick_open: "Quick Open...",
+            reopen_encoding: "Reopen with Encoding...",
+            open_folder: "Open Folder...",
+            save: "Save",
+            save_as: "Save As...",
+            export_html: "Export HTML...",
+            export_pdf: "Print / Export PDF...",
+            print_source: "Print Source Code...",
+            open_recent: "Open Recent",
+            recent_files_hdr: "— Files —",
+            recent_folders_hdr: "— Folders —",
+            recent_empty: "No Recent Items",
+            clear_recent: "Clear History",
+            close_tab: "Close Tab",
+            edit: "Edit",
+            undo: "Undo",
+            redo: "Redo",
+            cut: "Cut",
+            copy: "Copy",
+            paste: "Paste",
+            select_all: "Select All",
+            find: "Find & Replace",
+            goto_line: "Go to Line...",
+            macro_toggle: "Record / Stop Macro",
+            macro_play: "Play Macro",
+            view: "View",
+            mode_simple: "Simple Mode",
+            mode_basic: "Basic Mode",
+            mode_adv: "Advanced Mode",
+            top_bar: "Show Header Bar",
+            format_toolbar: "Show Format Toolbar",
+            editor_split: "Split Editor Top / Bottom",
+            palette: "Command Palette",
+            options: "Options / AI Chat",
+            external_preview: "Live Preview in External Browser",
+            zen: "Zen Mode",
+            window: "Window",
+            minimize: "Minimize",
+            close_win: "Close Window",
+            help: "Help",
+            online_manual: "Online Manual",
+            check_updates: "Check for Updates...",
+        },
     };
-    let settings_label = if is_ja { "設定…" } else { "Settings..." };
+
+    let about_label = lbl.about;
+    let settings_label = lbl.settings;
     #[cfg(target_os = "macos")]
-    let services_label = if is_ja { "サービス" } else { "Services" };
+    let services_label = lbl.services;
     #[cfg(target_os = "macos")]
-    let hide_label = if is_ja {
-        "Onigiri Editor を隠す"
-    } else {
-        "Hide Onigiri Editor"
-    };
+    let hide_label = lbl.hide;
     #[cfg(target_os = "macos")]
-    let hide_others_label = if is_ja {
-        "ほかを隠す"
-    } else {
-        "Hide Others"
-    };
+    let hide_others_label = lbl.hide_others;
     #[cfg(target_os = "macos")]
-    let show_all_label = if is_ja {
-        "すべてを表示"
-    } else {
-        "Show All"
-    };
-    let quit_label = if is_ja {
-        "Onigiri Editor を終了"
-    } else {
-        "Quit Onigiri Editor"
-    };
+    let show_all_label = lbl.show_all;
+    let quit_label = lbl.quit;
 
-    let file_title = if is_ja { "ファイル" } else { "File" };
-    let new_label = if is_ja { "新規作成" } else { "New File" };
-    let new_encoding_label = if is_ja {
-        "新規作成（文字コード指定）…"
-    } else {
-        "New File with Encoding..."
-    };
-    let open_label = if is_ja { "ファイルを開く…" } else { "Open File..." };
-    let quick_open_label = if is_ja { "クイックオープン…" } else { "Quick Open..." };
-    let reopen_encoding_label = if is_ja {
-        "文字コードを指定して再読み込み…"
-    } else {
-        "Reopen with Encoding..."
-    };
-    let open_folder_label = if is_ja {
-        "フォルダを開く…"
-    } else {
-        "Open Folder..."
-    };
-    let save_label = if is_ja { "保存" } else { "Save" };
-    let save_as_label = if is_ja {
-        "名前を付けて保存…"
-    } else {
-        "Save As..."
-    };
-    let export_html_label = if is_ja {
-        "HTML として書き出し…"
-    } else {
-        "Export HTML..."
-    };
-    let export_pdf_label = if is_ja {
-        "印刷 / PDF 書き出し…"
-    } else {
-        "Print / Export PDF..."
-    };
-    let print_source_label = if is_ja {
-        "ソースコードとして印刷…"
-    } else {
-        "Print Source Code..."
-    };
-    let open_recent_title = if is_ja {
-        "最近開いた項目"
-    } else {
-        "Open Recent"
-    };
-    let recent_files_header = if is_ja { "— ファイル —" } else { "— Files —" };
-    let recent_folders_header = if is_ja { "— フォルダ —" } else { "— Folders —" };
-    let recent_empty_label = if is_ja {
-        "履歴はありません"
-    } else {
-        "No Recent Items"
-    };
-    let clear_recent_label = if is_ja {
-        "履歴をクリア"
-    } else {
-        "Clear History"
-    };
-    let close_tab_label = if is_ja { "タブを閉じる" } else { "Close Tab" };
+    let file_title = lbl.file;
+    let new_label = lbl.new_file;
+    let new_encoding_label = lbl.new_encoding;
+    let open_label = lbl.open;
+    let quick_open_label = lbl.quick_open;
+    let reopen_encoding_label = lbl.reopen_encoding;
+    let open_folder_label = lbl.open_folder;
+    let save_label = lbl.save;
+    let save_as_label = lbl.save_as;
+    let export_html_label = lbl.export_html;
+    let export_pdf_label = lbl.export_pdf;
+    let print_source_label = lbl.print_source;
+    let open_recent_title = lbl.open_recent;
+    let recent_files_header = lbl.recent_files_hdr;
+    let recent_folders_header = lbl.recent_folders_hdr;
+    let recent_empty_label = lbl.recent_empty;
+    let clear_recent_label = lbl.clear_recent;
+    let close_tab_label = lbl.close_tab;
 
-    let edit_title = if is_ja { "編集" } else { "Edit" };
-    let undo_label = if is_ja { "元に戻す" } else { "Undo" };
-    let redo_label = if is_ja { "やり直し" } else { "Redo" };
-    let cut_label = if is_ja { "切り取り" } else { "Cut" };
-    let copy_label = if is_ja { "コピー" } else { "Copy" };
-    let paste_label = if is_ja { "貼り付け" } else { "Paste" };
-    let select_all_label = if is_ja { "すべて選択" } else { "Select All" };
-    let find_label = if is_ja { "検索・置換" } else { "Find & Replace" };
-    let goto_line_label = if is_ja {
-        "指定行へ移動…"
-    } else {
-        "Go to Line..."
-    };
-    let macro_toggle_label = if is_ja {
-        "マクロの記録開始 / 停止"
-    } else {
-        "Record / Stop Macro"
-    };
-    let macro_play_label = if is_ja {
-        "マクロを再生"
-    } else {
-        "Play Macro"
-    };
+    let edit_title = lbl.edit;
+    let undo_label = lbl.undo;
+    let redo_label = lbl.redo;
+    let cut_label = lbl.cut;
+    let copy_label = lbl.copy;
+    let paste_label = lbl.paste;
+    let select_all_label = lbl.select_all;
+    let find_label = lbl.find;
+    let goto_line_label = lbl.goto_line;
+    let macro_toggle_label = lbl.macro_toggle;
+    let macro_play_label = lbl.macro_play;
 
-    let view_title = if is_ja { "表示" } else { "View" };
-    let mode_simple_label = if is_ja { "シンプルモード" } else { "Simple Mode" };
-    let mode_basic_label = if is_ja { "標準モード" } else { "Basic Mode" };
-    let mode_adv_label = if is_ja { "拡張モード" } else { "Advanced Mode" };
-    let top_bar_label = if is_ja {
-        "上部ヘッダーバーを表示"
-    } else {
-        "Show Header Bar"
-    };
-    let format_toolbar_label = if is_ja {
-        "書式ツールバーを表示"
-    } else {
-        "Show Format Toolbar"
-    };
-    let editor_split_label = if is_ja {
-        "エディタを上下に分割表示"
-    } else {
-        "Split Editor Top / Bottom"
-    };
-    let palette_label = if is_ja {
-        "コマンドパレット"
-    } else {
-        "Command Palette"
-    };
-    let options_label = if is_ja {
-        "オプション / AIチャット"
-    } else {
-        "Options / AI Chat"
-    };
-    let external_preview_label = if is_ja {
-        "外部ブラウザでライブプレビュー"
-    } else {
-        "Live Preview in External Browser"
-    };
-    let zen_label = if is_ja { "集中モード (Zen)" } else { "Zen Mode" };
+    let view_title = lbl.view;
+    let mode_simple_label = lbl.mode_simple;
+    let mode_basic_label = lbl.mode_basic;
+    let mode_adv_label = lbl.mode_adv;
+    let top_bar_label = lbl.top_bar;
+    let format_toolbar_label = lbl.format_toolbar;
+    let editor_split_label = lbl.editor_split;
+    let palette_label = lbl.palette;
+    let options_label = lbl.options;
+    let external_preview_label = lbl.external_preview;
+    let zen_label = lbl.zen;
 
-    let window_title = if is_ja { "ウィンドウ" } else { "Window" };
-    let minimize_label = if is_ja { "しまう" } else { "Minimize" };
-    let close_win_label = if is_ja { "閉じる" } else { "Close Window" };
+    let window_title = lbl.window;
+    let minimize_label = lbl.minimize;
+    let close_win_label = lbl.close_win;
 
-    let help_title = if is_ja { "ヘルプ" } else { "Help" };
-    let online_manual_label = if is_ja {
-        "オンラインマニュアル"
-    } else {
-        "Online Manual"
-    };
-    let check_updates_label = if is_ja {
-        "アップデートを確認…"
-    } else {
-        "Check for Updates..."
-    };
+    let help_title = lbl.help;
+    let online_manual_label = lbl.online_manual;
+    let check_updates_label = lbl.check_updates;
 
     let menu_about = MenuItemBuilder::with_id("open-about", about_label).build(app)?;
     let menu_settings = MenuItemBuilder::with_id("open-settings", settings_label)
