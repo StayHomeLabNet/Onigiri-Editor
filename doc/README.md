@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.2)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.3)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -103,7 +103,7 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 - **Single Line Break Preview, Selection Bubble Menu, AI Ghost Text Autocomplete & Markdown Table GUI Toolbar (`v1.4.0`, toggleable in Settings → Editor)**:
   - **Single Line Break (`<br>`) Preview**: Renders single Enter line breaks directly as `<br>` in Live Preview, HTML Export, and External Live Preview while preserving code blocks (on by default; disable for strict CommonMark behavior).
   - **Selection Floating Bubble Menu**: Selecting text displays a floating mini bar right above the selection for Bold, Italic, Inline Code, Link, Inline AI Edit (`⌘⇧E`), and up to 3 quick AI Custom buttons.
-  - **AI Ghost Text Autocomplete**: Pausing while typing (including after Japanese IME commits) displays a muted inline AI continuation suggestion (`Tab` to accept, `Esc` to dismiss; opt-in with configurable `400–2500ms` delay).
+  - **AI Ghost Text Autocomplete**: Pausing while typing (including after Japanese IME commits) displays a subtle pulsing `…` loading indicator while generating, then shows a muted inline AI continuation suggestion (`Tab` to accept, `Esc` to dismiss; opt-in with configurable `400–2500ms` delay) and surfaces actionable provider hints on errors.
   - **Interactive Preview Image Controls**: In the visual preview, click an image to float left/right with text wrap, cycle widths (`200 / 280 / 380px`), edit Alt text, or delete directly.
   - **Markdown Table GUI Toolbar**: Automatically appears when the cursor is inside a Markdown table for 1-click row/column insertion & deletion, alignment, numeric-aware ascending/descending sort, and column width formatting.
 - **AI Prompt Variables, Export Page Setup, Quick Scratchpad & Global Hotkey, Integrated Terminal (`v1.4.0`)**:
@@ -189,7 +189,7 @@ Right-click inside the editor to access:
 - **100+ Languages & Status Bar Override**: Automatic syntax highlighting by file extension and content, plus a **clickable Status Bar language pill** to override highlighting and preview mode per tab.
 - **Presets & Per-Token Colors**: Choose from 7 syntax presets (`Auto`, `GitHub`, `One Dark`, `Dracula`, `Nord`, `Monokai`, `Solarized`) and customize 10 token categories.
 - **Structured Data Tools (CSV / TSV / JSON / YAML / `.env`)**:
-  - **CSV / TSV Preview**: Interactive filterable and column-sortable table view with click-to-jump line sync and one-click **Copy MD Table** / **Copy CSV**.
+  - **CSV / TSV Preview**: Virtualized for multi-MB files with sticky row numbers, filterable & column-sortable table view, delimiter switcher (`Auto` / `,` / `Tab` / `;`), wrap toggle, right-aligned numeric columns with `Σ / Avg / Min / Max` stats, **bidirectional editor ⇔ table cell/substring highlight**, double-click cell copy (toggleable in **Settings → Editor**), and one-click **Copy MD Table** / **Copy CSV**.
   - **JSON / YAML / `.env` Commands**: Run **Format JSON**, **Minify JSON**, **Sort JSON Keys**, **Convert JSON → YAML**, **Convert YAML → JSON**, and **Sort & Format `.env`** from the Command Palette.
 - **Specialized Live Previews**:
   - **HTML (`.html` / `.htm`)**: **HTML Live Page Preview** with **Visual / Code toggle**, **Full Width / Mobile (390px)** viewport switcher, relative CSS/image resolution, and dev-server prompts when an app entry is detected.
@@ -259,7 +259,7 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
   - Sends the active selection when highlighted or the entire document otherwise, replaces immediately with single-step Undo (`⌘Z` / `Ctrl+Z`), and lets you click the spinner (or press its shortcut again) while running to cancel.
 - **Per-Tab vs. Shared Threads**: Switch between keeping an isolated AI conversation per active tab or using a shared workspace thread.
 - **Save Chat as `.md` Note**: Export the current AI conversation directly into a new Markdown tab for archiving or further editing.
-- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets in a resizable/expandable modal, with **Diff Preview** confirmation before applying.
+- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets in a resizable/expandable modal with live progress streaming, elapsed timer, troubleshooting hints, and **Diff Preview** confirmation before applying.
 - **AI Folder Access (Advanced Mode)**: Switch between **Disabled**, **Read-Only**, **Read + Write (Diff Preview approval)**, and **CLI Direct Workspace Write**.
 
 ### Proofread & Document Review, Formatter & Stats

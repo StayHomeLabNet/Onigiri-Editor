@@ -3,7 +3,7 @@ import type { Translations } from './types';
 
 export const ko: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.2',
+  versionLabel: 'v1.5.3',
   modes: {
     simple: '심플',
     basic: '기본',
@@ -201,15 +201,15 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **오른쪽 클릭 변환 및 데이터 도구**: 대/소문자/제목 대소문자 변환, 줄 앞 공백 제거, 인용 부호 추가, **JSON 포맷 / 압축 / 키 정렬**, **JSON ⇔ YAML 변환**, **\`.env\` 포맷터**, **서식 있는 텍스트로 복사**
   - **인코딩 및 줄 바꿈 관리**: UTF-8 / Shift_JIS / EUC-JP로 새로 만들기·다시 열기, LF/CRLF 전환, 실시간 글자 수 / 단어 수 / 읽기 시간 카운터
 
-### 🤖 2. 멀티 프로바이더 AI 및 개인정보 보호
-- [x] **멀티 프로바이더 AI (선택 영역 인라인 편집: \`⌘ + ⇧ + E\`)**:
-  - **Apple Foundation Models(온디바이스, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini API**, **Ollama**, **LM Studio** 지원
+### 🤖 2. AI 하네스(Harness), 멀티 프로바이더 및 개인정보 보호
+- [x] **통합 AI 하네스 (선택 영역 인라인 편집: \`⌘ + ⇧ + E\`)**:
+  - **Apple Foundation Models(온디바이스, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini API**, **Ollama**, **LM Studio**를 하나의 작업 공간에서 안전하게 오케스트레이션하며 실시간 진행 상황·중단·오류 원인 안내까지 제공합니다
 - [x] **AI 출력 정리 (\`AI 정리\` 버튼)**:
   - 붙여넣은 AI 출력을 한 번의 클릭으로 규칙 기반 정리: 코드 블록을 보존한 채 **GFM 표 열 너비 정렬**, 글머리 기호 및 제목 빈 줄 정규화, 제로 너비 공백/NBSP 제거, 스마트 따옴표 정리. **HTML 붙여넣기 시 Markdown 자동 변환**도 지원
 - [x] **도구 모음 AI 사용자 지정 버튼 및 하위 메뉴**:
   - 최대 5개의 기본 버튼 + 각 10개의 하위 메뉴 항목을 등록할 수 있으며, **버튼/항목별 모델 개별 지정(구독 CLI / 클라우드 API / 로컬 AI)** 및 프롬프트 변수(\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\` 등)를 지원합니다. **AI 번역** 프리셋 기본 제공
-- [x] **AI 채팅(\`@파일\` 참조 지원), AI 고스트 텍스트 자동 완성(\`Tab\` 수락) 및 교정**:
-  - **AI 전송 내용 미리보기 및 민감 정보 마스킹**(API 키/토큰 자동 가리기)과 적용 전 **줄 단위 Diff 미리보기**로 안전하게 보호
+- [x] **AI 채팅(\`@파일\` 참조 지원), AI 고스트 텍스트 자동 완성(\`Tab\` 수락·생성 중 표시) 및 교정**:
+  - 읽기 전용 샌드박스 실행, **AI 전송 내용 미리보기 및 민감 정보 마스킹**(API 키/토큰 자동 가리기), 적용 전 **줄 단위 Diff 미리보기**로 안전하게 검증·반영합니다
 
 ### 🛡️ 3. 안전 백업, 자산 관리 및 호환성 진단
 - [x] **자동 스냅샷 및 빠른 메모**:
@@ -227,7 +227,7 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Git 사이드바 탭**(스테이지/스테이지 해제/변경 취소, 인라인 Diff, **AI 커밋 메시지**, Pull/Push) 및 **Git HEAD와 비교**
   - **다중 탭 및 나란히 분할 비교**, **폴더 전체 정규식 Grep 바꾸기(\`⌘ + ⇧ + G\`)**
   - **통합 터미널 서랍**, **멀티 개발 서버 런처(QR / LAN 공유 및 AI 로그 진단)**, **내장 웹 브라우저**(원클릭 \`✕\` 닫기)
-  - **데이터 표 미리보기(CSV / TSV / JSON / YAML)** 및 Markdown 표로 복사
+  - **CSV / TSV 표 미리보기(대용량 가상 스크롤 & 양방향 하이라이트)**: 수 MB 크기 CSV도 부드럽게 렌더링하며 고정 행 번호 열, 숫자 열 자동 오른쪽 정렬 및 통계(합계/평균/최소/최대), 구분 기호 전환(자동 / , / Tab / ;), 줄 바꿈 토글, **편집기 ⇔ 표 셀·부분 문자열 양방향 하이라이트**, 더블 클릭 셀 복사(설정에서 ON/OFF 가능), Markdown 표로 복사를 지원합니다
 - [x] **내보내기 및 사용자 지정**:
   - **Word(\`.docx\`)**, **PDF / HTML(페이지 설정, 디자인 테마 및 머리글/바닥글)**, **Mermaid 및 KaTeX SVG/PNG 내보내기 및 확대**
   - **키보드 매크로(\`⌘ + ⇧ + M\` / \`F8\`)**, **4가지 테마(라이트 / 다크 / 세피아 / 미드나이트) + 사용자 지정 CSS**, **8개 언어 UI**

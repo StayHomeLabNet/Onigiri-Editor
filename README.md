@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v152">What's New in v1.5.2</a> ・
+    <a href="#whats-new-in-v153">What's New in v1.5.3</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.2-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.3-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.5.2`
+Current version: `v1.5.3`
 
 ## Key Features
 
@@ -100,7 +100,19 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.5.2
+## What's New in v1.5.3
+
+- **AI Harness Wait-Time Visibility & Error Guidance**:
+  - **AI Ghost Text Loading & Error Hints**: Shows a subtle pulsing `…` indicator while completions are generating and surfaces throttled, actionable provider hints on failure.
+  - **Inline AI Edit Progress**: Displays elapsed seconds, live `ai-chat-progress` CLI status, an indeterminate progress bar, and categorized troubleshooting hints (`aiErrorHint.ts`).
+- **CSV / TSV Table Preview Overhaul & Multi-MB Virtualization**:
+  - **Virtual Scrolling & Performance**: Virtualized both Table and Raw views with `useDeferredValue` for smooth handling of multi-MB CSVs.
+  - **Bidirectional Editor ⇔ Table Highlight**: Selecting or clicking cells/substrings syncs highlights between the editor and table preview, paired with sticky `#` row numbers, numeric column stats (`Σ / Avg / Min / Max`), delimiter selector, wrap toggle, and a **Settings → Editor** toggle for double-click cell copy.
+- **Welcome Guide Updates & Modularization**:
+  - Updated `Welcome.md` / `ようこそ.md` across all 8 languages to highlight AI Harness and CSV/TSV Table Preview features, and extracted `AppModals.tsx`, `EditorInlinePopup.tsx`, and `editorContextActions.ts`.
+
+<details>
+<summary>Previous release: v1.5.2</summary>
 
 - **Multi-Window Support (`⌘⇧N` / `Ctrl+Shift+N`) & Release Hardening**:
   - Open independent editor windows via **File → New Window** with per-window isolated session state, focused-window menu routing, and release-build WebView hardening.
@@ -110,6 +122,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - Drag edges/corners to resize the Inline AI Edit modal (persisted across sessions) or expand it, and trigger AI Ghost Text autocomplete reliably after Japanese IME commits (`compositionend`).
 - **Expanded Welcome Document Across All 8 Languages**:
   - Updated `Welcome.md` / `ようこそ.md` across all 8 languages (`en`, `ja`, `zh-CN`, `zh-TW`, `ko`, `es`, `fr`, `de`) with the full feature guide, shortcuts, Mermaid workflow, and interactive examples.
+
+</details>
 
 <details>
 <summary>Previous release: v1.5.1</summary>

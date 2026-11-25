@@ -1,6 +1,6 @@
 [package]
 name = "onigiri-editor"
-version = "1.5.2"
+version = "1.5.3"
 description = "Onigiri Editor - AI-Era Cross-Platform Markdown & Code Editor"
 authors = ["StayHomeLabNet"]
 license = "MIT"

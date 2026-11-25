@@ -590,6 +590,24 @@ export const EditorTab: React.FC<EditorTabProps> = ({
         <label className="check-row">
           <input
             type="checkbox"
+            checked={settings.dataPreviewCellCopyEnabled ?? true}
+            onChange={(e) =>
+              onSettingsChange({
+                ...settings,
+                dataPreviewCellCopyEnabled: e.target.checked,
+              })
+            }
+          />
+          <span>
+            {locale === 'ja'
+              ? 'CSV / TSV テーブルプレビューでセルのダブルクリックコピーを有効にする'
+              : 'Enable double-click cell copy in CSV / TSV table preview'}
+          </span>
+        </label>
+
+        <label className="check-row">
+          <input
+            type="checkbox"
             checked={settings.autoSnapshotEnabled ?? true}
             onChange={(e) =>
               onSettingsChange({ ...settings, autoSnapshotEnabled: e.target.checked })

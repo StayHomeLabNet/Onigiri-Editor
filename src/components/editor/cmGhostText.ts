@@ -4,22 +4,26 @@ import { Decoration, type DecorationSet, EditorView, keymap, WidgetType } from '
 export interface GhostTextSuggestion {
   pos: number;
   text: string;
+  loading?: boolean;
 }
 
 export const setGhostTextEffect = StateEffect.define<GhostTextSuggestion | null>();
 
 class GhostTextWidget extends WidgetType {
-  constructor(readonly text: string) {
+  constructor(
+    readonly text: string,
+    readonly loading: boolean = false
+  ) {
     super();
   }
 
   eq(other: GhostTextWidget): boolean {
-    return other.text === this.text;
+    return other.text === this.text && other.loading === this.loading;
   }
 
   toDOM(): HTMLElement {
     const span = document.createElement('span');
-    span.className = 'cm-ai-ghost-text';
+    span.className = this.loading ? 'cm-ai-ghost-text is-loading' : 'cm-ai-ghost-text';
     span.textContent = this.text;
     span.setAttribute('aria-hidden', 'true');
     return span;
@@ -47,7 +51,7 @@ export const ghostTextField = StateField.define<GhostTextSuggestion | null>({
     EditorView.decorations.from(field, (suggestion): DecorationSet => {
       if (!suggestion || !suggestion.text) return Decoration.none;
       const widget = Decoration.widget({
-        widget: new GhostTextWidget(suggestion.text),
+        widget: new GhostTextWidget(suggestion.text, Boolean(suggestion.loading)),
         side: 1,
       });
       return Decoration.set([widget.range(suggestion.pos)]);
@@ -56,7 +60,7 @@ export const ghostTextField = StateField.define<GhostTextSuggestion | null>({
 
 export function acceptGhostTextCommand(view: EditorView): boolean {
   const suggestion = view.state.field(ghostTextField, false);
-  if (!suggestion || !suggestion.text) return false;
+  if (!suggestion || suggestion.loading || !suggestion.text) return false;
   const cursor = view.state.selection.main.head;
   if (cursor !== suggestion.pos || !view.state.selection.main.empty) return false;
 

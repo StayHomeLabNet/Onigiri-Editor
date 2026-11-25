@@ -1243,6 +1243,22 @@
   user-select: none;
 }
 
+.cm-ai-ghost-text.is-loading {
+  opacity: 0.55;
+  font-style: normal;
+  letter-spacing: 1px;
+  animation: onigiri-ghost-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes onigiri-ghost-pulse {
+  0%, 100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.72;
+  }
+}
+
 /* Markdown Table GUI Toolbar */
 .md-table-bar {
   display: flex;

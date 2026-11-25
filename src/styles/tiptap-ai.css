@@ -1005,6 +1005,22 @@
   background: rgba(56, 189, 248, 0.12) !important;
 }
 
+.cm-sync-marker-range {
+  background: rgba(99, 102, 241, 0.24);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.42);
+}
+
+[data-theme='sepia'] .cm-sync-marker-range {
+  background: rgba(180, 83, 9, 0.22);
+  box-shadow: 0 0 0 1px rgba(180, 83, 9, 0.4);
+}
+
+[data-theme='midnight'] .cm-sync-marker-range {
+  background: rgba(56, 189, 248, 0.24);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.45);
+}
+
 .mf-tiptap-editor.ProseMirror > .mf-sync-target-block {
   position: relative;
   border-radius: 6px;

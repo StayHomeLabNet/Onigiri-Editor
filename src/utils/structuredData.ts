@@ -6,10 +6,28 @@ export interface ParsedDelimitedTable {
   rows: string[][];
 }
 
-export function parseDelimitedRows(
+export interface DelimitedCellSpan {
+  value: string;
+  /** Start/end character offsets of the raw field in the normalized document */
+  from: number;
+  to: number;
+  /** Exact character offsets of the unescaped trimmed value when 1:1 mappable, else null */
+  valueFrom: number | null;
+  valueTo: number | null;
+  /** 1-based source line number where this row starts */
+  line: number;
+}
+
+export interface ParsedDelimitedTableWithSpans {
+  delimiter: '\t' | ',' | ';';
+  headers: DelimitedCellSpan[];
+  rows: DelimitedCellSpan[][];
+}
+
+function parseDelimitedRowsInternal(
   text: string,
   forcedDelimiter?: '\t' | ',' | ';'
-): { delimiter: '\t' | ',' | ';'; rows: string[][] } {
+): { delimiter: '\t' | ',' | ';'; rows: DelimitedCellSpan[][] } {
   const normalized = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const trimmed = normalized.replace(/\n+$/, '');
   if (!trimmed) {
@@ -18,7 +36,17 @@ export function parseDelimitedRows(
 
   let delimiter: '\t' | ',' | ';' = forcedDelimiter || ',';
   if (!forcedDelimiter) {
-    const sampleLines = trimmed.split('\n').slice(0, 8);
+    const sampleLines: string[] = [];
+    let linePos = 0;
+    while (sampleLines.length < 8 && linePos < trimmed.length) {
+      const nextNl = trimmed.indexOf('\n', linePos);
+      if (nextNl === -1) {
+        sampleLines.push(trimmed.slice(linePos));
+        break;
+      }
+      sampleLines.push(trimmed.slice(linePos, nextNl));
+      linePos = nextNl + 1;
+    }
     const tabCount = sampleLines.reduce((acc, l) => acc + (l.match(/\t/g)?.length || 0), 0);
     const commaCount = sampleLines.reduce((acc, l) => acc + (l.match(/,/g)?.length || 0), 0);
     const semiCount = sampleLines.reduce((acc, l) => acc + (l.match(/;/g)?.length || 0), 0);
@@ -31,20 +59,60 @@ export function parseDelimitedRows(
     }
   }
 
-  const rows: string[][] = [];
-  let row: string[] = [];
+  const rows: DelimitedCellSpan[][] = [];
+  let row: DelimitedCellSpan[] = [];
   let field = '';
   let inQuotes = false;
+  let fieldStart = 0;
+  let rowStartLine = 1;
+  let currentLine = 1;
+  let hadQuotes = false;
+  let hadEscapedQuote = false;
+  let quoteOpenIdx = -1;
+  let quoteCloseIdx = -1;
+
+  const pushCell = (fieldEnd: number) => {
+    const trimmedVal = field.trim();
+    const leadWs = field.length - field.trimStart().length;
+    const trailWs = field.length - field.trimEnd().length;
+    let valueFrom: number | null = null;
+    let valueTo: number | null = null;
+    if (!hadQuotes) {
+      valueFrom = fieldStart + leadWs;
+      valueTo = Math.max(valueFrom, fieldEnd - trailWs);
+    } else if (!hadEscapedQuote && quoteOpenIdx >= 0 && quoteCloseIdx > quoteOpenIdx) {
+      valueFrom = quoteOpenIdx + 1 + leadWs;
+      valueTo = Math.max(valueFrom, quoteCloseIdx - trailWs);
+    }
+    row.push({
+      value: field,
+      from: fieldStart,
+      to: fieldEnd,
+      valueFrom: trimmedVal.length > 0 ? valueFrom : fieldStart,
+      valueTo: trimmedVal.length > 0 ? valueTo : fieldEnd,
+      line: rowStartLine,
+    });
+    field = '';
+    hadQuotes = false;
+    hadEscapedQuote = false;
+    quoteOpenIdx = -1;
+    quoteCloseIdx = -1;
+  };
 
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i];
+    if (ch === '\n') {
+      currentLine += 1;
+    }
     if (inQuotes) {
       if (ch === '"') {
         if (trimmed[i + 1] === '"') {
           field += '"';
+          hadEscapedQuote = true;
           i += 1;
         } else {
           inQuotes = false;
+          quoteCloseIdx = i;
         }
       } else {
         field += ch;
@@ -54,26 +122,40 @@ export function parseDelimitedRows(
 
     if (ch === '"') {
       inQuotes = true;
+      hadQuotes = true;
+      if (quoteOpenIdx === -1) quoteOpenIdx = i;
       continue;
     }
     if (ch === delimiter) {
-      row.push(field);
-      field = '';
+      pushCell(i);
+      fieldStart = i + 1;
       continue;
     }
     if (ch === '\n') {
-      row.push(field);
+      pushCell(i);
       rows.push(row);
       row = [];
-      field = '';
+      fieldStart = i + 1;
+      rowStartLine = currentLine;
       continue;
     }
     field += ch;
   }
-  row.push(field);
+  pushCell(trimmed.length);
   rows.push(row);
 
   return { delimiter, rows };
+}
+
+export function parseDelimitedRows(
+  text: string,
+  forcedDelimiter?: '\t' | ',' | ';'
+): { delimiter: '\t' | ',' | ';'; rows: string[][] } {
+  const { delimiter, rows } = parseDelimitedRowsInternal(text, forcedDelimiter);
+  return {
+    delimiter,
+    rows: rows.map((r) => r.map((c) => c.value)),
+  };
 }
 
 export function parseCsvTsvTable(
@@ -92,6 +174,38 @@ export function parseCsvTsvTable(
   };
   const headers = padRow(rows[0]).map((h, i) => h || `Col ${i + 1}`);
   const body = rows.slice(1).map(padRow);
+  return { delimiter, headers, rows: body };
+}
+
+export function parseCsvTsvTableWithSpans(
+  text: string,
+  forcedDelimiter?: '\t' | ',' | ';'
+): ParsedDelimitedTableWithSpans {
+  const { delimiter, rows } = parseDelimitedRowsInternal(text, forcedDelimiter);
+  if (rows.length === 0) {
+    return { delimiter, headers: [], rows: [] };
+  }
+  const colCount = Math.max(...rows.map((r) => r.length), 1);
+  const padSpanRow = (r: DelimitedCellSpan[], fallbackLine: number): DelimitedCellSpan[] => {
+    const lastTo = r.length > 0 ? r[r.length - 1].to : 0;
+    const out = r.map((c) => ({ ...c, value: c.value.trim() }));
+    while (out.length < colCount) {
+      out.push({
+        value: '',
+        from: lastTo,
+        to: lastTo,
+        valueFrom: lastTo,
+        valueTo: lastTo,
+        line: fallbackLine,
+      });
+    }
+    return out;
+  };
+  const headers = padSpanRow(rows[0], 1).map((h, i) => ({
+    ...h,
+    value: h.value || `Col ${i + 1}`,
+  }));
+  const body = rows.slice(1).map((r, idx) => padSpanRow(r, r[0]?.line ?? idx + 2));
   return { delimiter, headers, rows: body };
 }
 

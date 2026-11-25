@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, BookmarkPlus, Loader2, Maximize2, Minimize2, RotateCcw, SlidersHorizontal, Sparkles, Square, Trash2, X } from 'lucide-react';
 import type { AiProviderConfig, AiProviderId, InlineAiPresetItem } from '../types';
 import type { Translations } from '../i18n/types';
-import { cancelAiChat, sendAiChat } from '../utils/platform';
+import { cancelAiChat, listenAiChatProgress, sendAiChat } from '../utils/platform';
+import { formatAiErrorHint, type AiErrorInfo } from '../utils/aiErrorHint';
 
 export const INLINE_AI_PRESETS_KEY = 'onigiri-markdown.inline-ai-presets.v1';
 const INLINE_AI_MODAL_SIZE_KEY = 'onigiri-markdown.inline-ai-modal-size.v1';
@@ -119,7 +120,9 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
 }) => {
   const [instruction, setInstruction] = useState('');
   const [busy, setBusy] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [elapsedSecs, setElapsedSecs] = useState(0);
+  const [progressText, setProgressText] = useState<string | null>(null);
+  const [errorInfo, setErrorInfo] = useState<AiErrorInfo | null>(null);
   const [presets, setPresets] = useState<InlineAiPresetItem[]>(() => loadSavedPresets(t));
   const [managingPresets, setManagingPresets] = useState(false);
   const [addingPreset, setAddingPreset] = useState(false);
@@ -162,7 +165,9 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    setErrorMsg(null);
+    setErrorInfo(null);
+    setProgressText(null);
+    setElapsedSecs(0);
     setBusy(false);
     setAddingPreset(false);
     cancelledRef.current = false;
@@ -245,7 +250,24 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
     requestIdRef.current = reqId;
     cancelledRef.current = false;
     setBusy(true);
-    setErrorMsg(null);
+    setElapsedSecs(0);
+    setProgressText(null);
+    setErrorInfo(null);
+
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSecs(Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    const unlisten = await listenAiChatProgress((ev) => {
+      if (ev.requestId !== reqId) return;
+      if (ev.elapsedSecs > 0) {
+        setElapsedSecs(ev.elapsedSecs);
+      }
+      const line = ev.text.trim().split(/\r?\n/).pop()?.trim();
+      if (line) {
+        setProgressText(line.slice(0, 110));
+      }
+    });
 
     const effectiveModel =
       aiConfig.model.trim() || DEFAULT_MODELS[aiConfig.provider] || '';
@@ -282,11 +304,14 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
       if (cancelledRef.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       if (msg !== 'CLI_CANCELLED') {
-        setErrorMsg(msg);
+        setErrorInfo(formatAiErrorHint(err, aiConfig.provider, isJa));
       }
     } finally {
+      window.clearInterval(timer);
+      unlisten();
       requestIdRef.current = null;
       setBusy(false);
+      setProgressText(null);
     }
   };
 
@@ -536,7 +561,33 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
             }}
           />
 
-          {errorMsg && <div className="inline-ai-error">{errorMsg}</div>}
+          {busy && (
+            <div className="inline-ai-progress-box" role="status" aria-live="polite">
+              <div className="inline-ai-progress-row">
+                <Loader2 size={13} className="spin-icon" />
+                <span>
+                  {isJa
+                    ? `${aiConfig.provider} で生成中… (${elapsedSecs}秒)`
+                    : `Generating with ${aiConfig.provider}… (${elapsedSecs}s)`}
+                </span>
+              </div>
+              {progressText && (
+                <div className="inline-ai-progress-detail">{progressText}</div>
+              )}
+              <div className="inline-ai-progress-bar">
+                <div className="inline-ai-progress-bar-fill" />
+              </div>
+            </div>
+          )}
+
+          {errorInfo && (
+            <div className="inline-ai-error">
+              <div>{errorInfo.message}</div>
+              {errorInfo.hint && (
+                <div className="inline-ai-error-hint">{errorInfo.hint}</div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="ai-diff-modal-footer">

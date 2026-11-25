@@ -3,7 +3,7 @@ import type { Translations } from './types';
 
 export const de: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.2',
+  versionLabel: 'v1.5.3',
   modes: {
     simple: 'Einfach',
     basic: 'Standard',
@@ -201,15 +201,15 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Rechtsklick-Transformationen & Datenwerkzeuge**: Groß-/Kleinschreibung/Titelformat, führende Leerzeichen entfernen, Zitatzeichen einfügen, **JSON Formatieren / Minifizieren / Schlüssel sortieren**, **JSON ⇔ YAML**, **\`.env\`-Formatierer**, **Als Rich-Text kopieren**
   - **Kodierung & Zeilenenden**: Neu/Erneut öffnen mit UTF-8 / Shift_JIS / EUC-JP, LF/CRLF-Umschaltung, Live-Zähler für Zeichen, Wörter und Lesezeit
 
-### 🤖 2. Multi-Provider-KI & Datenschutz
-- [x] **Multi-Provider-KI (\`⌘ + ⇧ + E\` für Inline-Bearbeitung der Auswahl)**:
-  - Unterstützt **Apple Foundation Models (lokal auf dem Gerät, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama** und **LM Studio**
+### 🤖 2. KI-Harness, Multi-Provider-Routing & Datenschutz
+- [x] **Einheitlicher KI-Harness (\`⌘ + ⇧ + E\` für Inline-Bearbeitung der Auswahl)**:
+  - Orchestrieren Sie **Apple Foundation Models (lokal auf dem Gerät, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama** und **LM Studio** aus einem Arbeitsbereich mit Live-Fortschritt, Abbruch und Fehlerdiagnose
 - [x] **KI-Ausgabe bereinigen (Schaltfläche \`KI bereinigen\`)**:
   - Regelbasierte Ein-Klick-Bereinigung eingefügter KI-Texte: richtet **GFM-Tabellenspalten** aus, vereinheitlicht Aufzählungen und Überschriftenabstände, entfernt Nullbreiten-Zeichen/NBSP und normalisiert Anführungszeichen unter Beibehaltung von Codeblöcken. Wandelt auch **eingefügtes HTML automatisch in Markdown** um
 - [x] **KI-Schaltflächen & Untermenüs in der Symbolleiste**:
   - Bis zu 5 Hauptschaltflächen + je 10 Untermenüpunkte mit **eigener Modellwahl pro Schaltfläche/Eintrag (Abo-CLI / Cloud-API / Lokale KI)** und Prompt-Variablen (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\` usw.), inklusive **KI-Übersetzen**-Preset
-- [x] **KI-Chat (mit \`@Datei\`-Erwähnungen), KI-Ghost-Text-Autovervollständigung (\`Tab\`) & Korrekturlesen**:
-  - Geschützt durch **Sendeinhalt-Vorschau & Geheimnis-Maskierung** (verbirgt API-Keys/Tokens) sowie **zeilenweise Diff-Vorschau** vor dem Übernehmen
+- [x] **KI-Chat (mit \`@Datei\`-Erwähnungen), KI-Ghost-Text-Autovervollständigung (\`Tab\`, mit Ladeanzeige) & Korrekturlesen**:
+  - Geschützt durch schreibgeschützte Sandbox-Ausführung, **Sendeinhalt-Vorschau & Geheimnis-Maskierung** (verbirgt API-Keys/Tokens) sowie **zeilenweise Diff-Vorschau** vor dem Übernehmen
 
 ### 🛡️ 3. Sicherheit, Asset-Verwaltung & Kompatibilität
 - [x] **Automatische Snapshots & Schnellnotizblock**:
@@ -227,7 +227,7 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Git-Seitenleiste** (Stage/Unstage/Discard, Inline-Diff, **KI-Commit-Nachricht**, Pull/Push) & **Mit Git HEAD vergleichen**
   - **Multi-Tab & Side-by-Side-Vergleich**, **Ordnerübergreifendes Regex-Grep-Ersetzen (\`⌘ + ⇧ + G\`)**
   - **Integriertes Terminal**, **Multi-Server-Dev-Launcher (QR-/LAN-Freigabe & KI-Log-Diagnose)** und **Integrierter Webbrowser** (1-Klick-\`✕\`-Schließen)
-  - **Datentabellen-Vorschau (CSV / TSV / JSON / YAML)** mit Kopieren als Markdown-Tabelle
+  - **CSV / TSV-Tabellenvorschau (virtuelles Scrollen für Multi-MB-Dateien & bidirektionale Synchronisation)**: Flüssiges Scrollen bei großen CSVs, fixierte Zeilennummernspalte, rechtsbündige Zahlenspalten mit Statistik (\`Σ / Ø / Min / Max\`), Trennzeichen-Umschalter (Auto / , / Tab / ;), Zeilenumbruch, **bidirektionale Markierung Editor ⇔ Zelle/Teilstring**, Zellenkopie per Doppelklick (in Einstellungen umschaltbar) und Kopieren als Markdown-Tabelle
 - [x] **Export & Anpassung**:
   - **Word (\`.docx\`)**, **PDF / HTML (Seiteneinrichtung, Design-Themes & Kopf-/Fußzeilen)**, **SVG/PNG-Export & Zoom für Mermaid und KaTeX**
   - **Tastaturmakros (\`⌘ + ⇧ + M\` / \`F8\`)**, **4 Themes (Hell / Dunkel / Sepia / Mitternacht) + eigenes CSS** und **8-sprachige Oberfläche**

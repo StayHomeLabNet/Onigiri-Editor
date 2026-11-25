@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v152-の更新内容">v1.5.2 の更新内容</a> ・
+    <a href="#v153-の更新内容">v1.5.3 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.2-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.3-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、**8言語**（**English** / **日本語** / **简体中文** / **繁體中文** / **한국어** / **Español** / **Français** / **Deutsch**）の中から最適な UI とネイティブメニューバーで起動します。
 
-現在のバージョン: `v1.5.2`
+現在のバージョン: `v1.5.3`
 
 ## 主な機能
 
@@ -100,7 +100,19 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.5.2 の更新内容
+## v1.5.3 の更新内容
+
+- **AI ハーネス待ち時間の可視化 ＆ エラー対処ヒント**:
+  - **ゴーストテキスト生成中表示＆エラー通知**: 応答待ち中にカーソル位置へ控えめなパルス付き `…` を表示し、失敗時はクールダウン付きで原因と対処ヒントを通知します。
+  - **インライン AI 編集の進捗表示**: 経過秒数・`ai-chat-progress` 進捗・プログレスバー・エラー診断ヒント（`aiErrorHint.ts`）を追加しました。
+- **CSV / TSV テーブルプレビュー強化 ＆ 大容量仮想スクロール**:
+  - **仮想スクロール＆高速化**: テーブル／Raw 表示双方の仮想スクロールと `useDeferredValue` により数 MB 級 CSV を軽快に表示します。
+  - **双方向ハイライト＆操作性向上**: エディタ ⇔ テーブル間のセル／部分文字列双方向ハイライト、行番号列固定、数値列の統計表示（合計/平均/最小/最大）、区切り文字切替、折り返しトグル、および **設定 → エディタ** でのセルのダブルクリックコピー ON/OFF 切替に対応しました。
+- **ウェルカムドキュメント更新 ＆ リファクタリング**:
+  - 全 8 言語の `ようこそ.md` / `Welcome.md` に AI ハーネスと CSV テーブルプレビューの紹介を追記し、`AppModals.tsx`・`EditorInlinePopup.tsx`・`editorContextActions.ts` を切り出しました。
+
+<details>
+<summary>以前のリリース: v1.5.2</summary>
 
 - **マルチウィンドウ対応（`⌘⇧N` / `Ctrl+Shift+N`）＆リリースビルド強化**:
   - **ファイル → 新しいウィンドウ** から独立したウィンドウを起動可能にし、ウィンドウ単位のセッション分離、フォーカス中ウィンドウへのメニューイベント振り分け、リリースビルド時の WebView DevTools 無効化を実装しました。
@@ -110,6 +122,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - インライン AI 編集モーダルのドラッグリサイズ（サイズ記憶）と拡大トグルを追加し、AI ゴーストテキスト補完が日本語 IME 確定（`compositionend`）後や先頭空行を含む応答でも確実に動作するよう改善しました。
 - **全 8 言語のウェルカムドキュメント拡充**:
   - `ようこそ.md` / `Welcome.md` を全 8 言語（`en` / `ja` / `zh-CN` / `zh-TW` / `ko` / `es` / `fr` / `de`）で最新機能・ショートカット・Mermaid 図・体験サンプルまで拡充しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.5.1</summary>

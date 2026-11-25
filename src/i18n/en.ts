@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const en: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.2',
+  versionLabel: 'v1.5.3',
   modes: {
     simple: 'Simple',
     basic: 'Basic',
@@ -1585,15 +1585,15 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Right-Click Transforms & Data Tools**: Upper/Lower/Title case, trim leading spaces, insert quotes, **JSON Format / Minify / Sort Keys**, **JSON ⇔ YAML**, **\`.env\` Formatter**, **Copy as Rich Text**
   - **Encoding & Line Ending Control**: New/reopen with UTF-8 / Shift_JIS / EUC-JP, LF/CRLF toggle, live character/word/reading-time counters
 
-### 🤖 2. Multi-Provider AI & Privacy Guardrails
-- [x] **Multi-Provider AI (\`⌘ + ⇧ + E\` for Inline Selection Edit)**:
-  - Supports **Apple Foundation Models (on-device, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio**
+### 🤖 2. AI Harness, Multi-Provider Routing & Guardrails
+- [x] **Unified AI Harness (\`⌘ + ⇧ + E\` for Inline Selection Edit)**:
+  - Orchestrate **Apple Foundation Models (on-device, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio** from one workspace with live progress streaming, cancellation, and actionable error diagnostics
 - [x] **AI Output Cleanup (\`AI Cleanup\` button)**:
   - One-click rule-based cleanup for pasted AI output: aligns **GFM table column widths**, normalizes bullets & heading spacing, strips zero-width/NBSP characters, normalizes smart quotes—all while preserving fenced code blocks. Also supports **auto-converting pasted HTML to Markdown**
 - [x] **Toolbar AI Custom Buttons & Submenus**:
   - Register up to 5 primary buttons + 10 submenu items each, with **per-button / per-item model overrides (Subscription CLI / Cloud API / Local AI)** and prompt variables (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\`, etc.), preloaded with an **AI Translate** preset
-- [x] **AI Chat (with \`@file\` mentions), AI Ghost Text Autocomplete (\`Tab\` to accept) & Proofreading**:
-  - Protected by **AI Send Content Preview & Secret Redaction** (masks API keys/tokens) and **line-by-line Diff Preview** before applying edits
+- [x] **AI Chat (with \`@file\` mentions), AI Ghost Text Autocomplete (\`Tab\` to accept, live loading indicator) & Proofreading**:
+  - Protected by read-only sandbox execution, **AI Send Content Preview & Secret Redaction** (masks API keys/tokens), and **line-by-line Diff Preview** before applying edits
 
 ### 🛡️ 3. Safety, Asset Management & Compatibility
 - [x] **Auto Snapshots & Quick Scratchpad**:
@@ -1611,7 +1611,7 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Git Sidebar Tab** (stage/unstage/discard, inline diff, **AI Commit Message**, Pull/Push) & **Compare with Git HEAD**
   - **Multi-Tab & Side-by-Side Split Compare**, **Cross-Folder Regex Grep Replace (\`⌘ + ⇧ + G\`)**
   - **Integrated Terminal Drawer**, **Multi-Server Dev Launcher (QR / LAN sharing & AI log diagnosis)**, and **Built-in Web Browser** (with 1-click \`✕\` close)
-  - **Data Table Preview (CSV / TSV / JSON / YAML)** with Copy-as-Markdown-Table
+  - **CSV / TSV Table Preview (Virtualized for Multi-MB Files & Bidirectional Sync)**: Smooth virtual scrolling for large CSVs, sticky row numbers, auto right-aligned numeric columns with \`Σ / Avg / Min / Max\` stats, delimiter switcher (Auto / , / Tab / ;), text wrap toggle, **bidirectional editor ⇔ table cell/substring highlight**, double-click cell copy (toggleable in Settings), and Copy-as-Markdown-Table
 - [x] **Export & Customization**:
   - **Word (\`.docx\`)**, **PDF / HTML (Page Setup, Design Themes & Headers/Footers)**, **Mermaid & KaTeX SVG/PNG export & zoom**
   - **Keyboard Macros (\`⌘ + ⇧ + M\` / \`F8\`)**, **4 Themes (Light / Dark / Sepia / Midnight) + Custom CSS**, and **8-Language UI**

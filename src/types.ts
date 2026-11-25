@@ -306,6 +306,7 @@ export interface EditorSettings {
   aiGhostTextEnabled?: boolean;
   aiGhostTextDelayMs?: number;
   markdownTableBarEnabled?: boolean;
+  dataPreviewCellCopyEnabled?: boolean;
   exportPageSettings?: ExportPageSettings;
   scratchpadEnabled?: boolean;
   globalHotkeyEnabled?: boolean;

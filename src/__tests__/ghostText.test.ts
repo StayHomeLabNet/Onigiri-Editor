@@ -8,6 +8,7 @@ import {
   ghostTextField,
   setGhostTextEffect,
 } from '../components/editor/cmGhostText';
+import { formatAiErrorHint } from '../utils/aiErrorHint';
 
 function createTestView(doc: string, anchor: number): EditorView {
   const state = EditorState.create({
@@ -52,5 +53,22 @@ describe('cmGhostText extension', () => {
     view.dispatch({ selection: { anchor: 5 } });
     expect(view.state.field(ghostTextField)).toBeNull();
     view.destroy();
+  });
+
+  it('does not insert loading placeholder on Tab and formats AI error hints', () => {
+    const view = createTestView('Markdown test', 13);
+    view.dispatch({
+      effects: setGhostTextEffect.of({ pos: 13, text: ' …', loading: true }),
+    });
+    expect(acceptGhostTextCommand(view)).toBe(false);
+    expect(view.state.doc.toString()).toBe('Markdown test');
+    expect(dismissGhostTextCommand(view)).toBe(true);
+    expect(view.state.field(ghostTextField)).toBeNull();
+    view.destroy();
+
+    const cliHint = formatAiErrorHint(new Error('Codex CLI (`codex`) was not found on PATH'), 'codex-cli', true);
+    expect(cliHint.hint).toContain('codex-cli');
+    const authHint = formatAiErrorHint(new Error('401 Unauthorized'), 'openai-api', false);
+    expect(authHint.hint).toContain('Settings → AI');
   });
 });

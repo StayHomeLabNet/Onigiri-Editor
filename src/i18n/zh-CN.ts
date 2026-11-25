@@ -3,7 +3,7 @@ import type { Translations } from './types';
 
 export const zhCN: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.2',
+  versionLabel: 'v1.5.3',
   modes: {
     simple: '简洁',
     basic: '标准',
@@ -201,15 +201,15 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **右键快捷转换与数据工具**：大/小写/首字母大写、去除行首空格、添加引用符、**JSON 格式化 / 压缩 / 键排序**、**JSON ⇔ YAML 互转**、**\`.env\` 格式化**、**复制为富文本**
   - **编码与换行符管理**：支持 UTF-8 / Shift_JIS / EUC-JP 新建与重新打开、LF/CRLF 切换、实时字数 / 词数 / 阅读时间统计
 
-### 🤖 2. 多模型 AI 集成与隐私保护
-- [x] **多提供商 AI（选中文本后按 \`⌘ + ⇧ + E\` 进行行内编辑）**：
-  - 支持 **Apple Foundation Models（设备端，macOS 26+）**、**Codex CLI**、**Claude Code CLI**、**Gemini CLI**、**Antigravity CLI**、**OpenAI / Anthropic / Gemini API**、**Ollama** 与 **LM Studio**
+### 🤖 2. AI Harness 多模型编排与隐私保护
+- [x] **统一 AI Harness（选中文本后按 \`⌘ + ⇧ + E\` 进行行内编辑）**：
+  - 在同一工作区安全编排与调度 **Apple Foundation Models（设备端，macOS 26+）**、**Codex CLI**、**Claude Code CLI**、**Gemini CLI**、**Antigravity CLI**、**OpenAI / Anthropic / Gemini API**、**Ollama** 与 **LM Studio**，支持实时进度流、随时中断及智能错误诊断
 - [x] **AI 输出整理（\`AI 整理\` 按钮）**：
   - 一键规则化清洗粘贴的 AI 文本：自动对齐 **GFM 表格列宽**、统一列表与标题空行、清除零宽字符与 NBSP、规范智能引号，同时完整保留代码块。亦支持**粘贴 HTML 时自动转为 Markdown**
 - [x] **工具栏 AI 自定义按钮与子菜单**：
   - 最多可注册 5 个主按钮 + 每个最多 10 个子菜单项，支持**按按钮/子项独立指定模型（订阅 CLI / 云端 API / 本地 AI）**及提示词变量（\`{{selection}}\`、\`{{clipboard}}\`、\`{{date}}\` 等），内置 **AI 翻译**预设
-- [x] **AI 聊天（支持 \`@文件\` 引用）、AI 幽灵文本补全（\`Tab\` 采纳）与校对**：
-  - 配备 **AI 发送内容预览与敏感信息脱敏**（自动遮蔽 API Key / Token）以及应用修改前的**逐行 Diff 预览**
+- [x] **AI 聊天（支持 \`@文件\` 引用）、AI 幽灵文本补全（\`Tab\` 采纳、含生成中指示）与校对**：
+  - 配备只读沙箱保护、**AI 发送内容预览与敏感信息脱敏**（自动遮蔽 API Key / Token）以及应用修改前的**逐行 Diff 预览**
 
 ### 🛡️ 3. 安全备份、资源管理与兼容性诊断
 - [x] **自动快照与快速便签**：
@@ -227,7 +227,7 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Git 侧边栏**（暂存/取消暂存/放弃更改、行内 Diff、**AI 生成提交信息**、Pull/Push）与 **与 Git HEAD 对比**
   - **多标签与双栏并排对比**、**跨文件夹正则 Grep 替换（\`⌘ + ⇧ + G\`）**
   - **集成终端抽屉**、**多开发服务器启动器（支持 QR / LAN 局域网分享与 AI 日志诊断）**、**内置 Web 浏览器**（一键 \`✕\` 关闭）
-  - **数据表格预览（CSV / TSV / JSON / YAML）**，支持复制为 Markdown 表格
+  - **CSV / TSV 表格预览（大文件虚拟滚动与双向高亮）**：轻松流畅浏览数 MB 级 CSV，支持固定行号列、数值列右对齐及统计（总和/均值/最小/最大）、分隔符切换（自动 / , / Tab / ;）、自动换行、**编辑器 ⇔ 表格单元格与子串双向高亮**、双击复制单元格（可在设置中开关）及复制为 Markdown 表格
 - [x] **导出与个性化定制**：
   - **Word（\`.docx\`）**、**PDF / HTML（页面设置、主题样式与页眉页脚）**、**Mermaid 与 KaTeX 一键导出 SVG/PNG 及放大查看**
   - **键盘宏录制回放（\`⌘ + ⇧ + M\` / \`F8\`）**、**4 套主题（浅色 / 深色 / 护眼 / 午夜）+ 自定义 CSS**、**8 种界面语言**

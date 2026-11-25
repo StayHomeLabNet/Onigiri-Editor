@@ -3,7 +3,7 @@ import type { Translations } from './types';
 
 export const es: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.2',
+  versionLabel: 'v1.5.3',
   modes: {
     simple: 'Simple',
     basic: 'Básico',
@@ -201,15 +201,15 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Transformaciones con clic derecho y herramientas de datos**: Mayúsculas/Minúsculas/Título, recortar espacios iniciales, añadir citas, **Formatear / Minificar / Ordenar claves JSON**, **JSON ⇔ YAML**, **Formateador \`.env\`**, **Copiar como texto enriquecido**
   - **Control de codificación y saltos de línea**: Abrir/crear en UTF-8 / Shift_JIS / EUC-JP, cambio LF/CRLF, contadores en vivo de caracteres, palabras y tiempo de lectura
 
-### 🤖 2. IA multiproveedor y protección de privacidad
-- [x] **IA multiproveedor (\`⌘ + ⇧ + E\` para edición en línea de la selección)**:
-  - Compatible con **Apple Foundation Models (en el dispositivo, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **APIs de OpenAI / Anthropic / Gemini**, **Ollama** y **LM Studio**
+### 🤖 2. AI Harness, multimodelo y protección de privacidad
+- [x] **AI Harness unificado (\`⌘ + ⇧ + E\` para edición en línea de la selección)**:
+  - Orquesta **Apple Foundation Models (en el dispositivo, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **APIs de OpenAI / Anthropic / Gemini**, **Ollama** y **LM Studio** desde un único espacio con progreso en vivo, cancelación y diagnóstico de errores
 - [x] **Limpieza de salida IA (botón \`Limpiar IA\`)**:
   - Limpieza basada en reglas con un clic para texto pegado de IA: alinea **anchos de columna en tablas GFM**, normaliza viñetas y espacios en encabezados, elimina caracteres de ancho cero/NBSP y normaliza comillas tipográficas preservando bloques de código. También **convierte HTML pegado a Markdown**
 - [x] **Botones personalizados de IA y submenús en la barra**:
   - Registra hasta 5 botones principales + 10 elementos de submenú cada uno, con **selección de modelo independiente por botón/elemento (CLI de suscripción / API en la nube / IA local)** y variables de prompt (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\`, etc.), incluyendo el preset **Traducir con IA**
-- [x] **Chat IA (con menciones \`@archivo\`), Autocompletado fantasma (\`Tab\` para aceptar) y Corrección**:
-  - Protegido con **Vista previa de envío y ocultación automática de secretos** (enmascara API keys/tokens) y **Diff línea por línea** antes de aplicar cambios
+- [x] **Chat IA (con menciones \`@archivo\`), Autocompletado fantasma (\`Tab\` para aceptar, indicador de carga) y Corrección**:
+  - Protegido con ejecución en sandbox de solo lectura, **Vista previa de envío y ocultación automática de secretos** (enmascara API keys/tokens) y **Diff línea por línea** antes de aplicar cambios
 
 ### 🛡️ 3. Copias de seguridad, gestión de recursos y compatibilidad
 - [x] **Instantáneas automáticas y bloc rápido**:
@@ -227,7 +227,7 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Panel lateral Git** (stage/unstage/discard, diff en línea, **Mensaje de commit con IA**, Pull/Push) y **Comparar con Git HEAD**
   - **Múltiples pestañas y comparación lado a lado**, **Búsqueda y reemplazo Regex en carpetas (\`⌘ + ⇧ + G\`)**
   - **Terminal integrada**, **Lanzador multiservidor dev (compartir por QR / LAN y diagnóstico de logs con IA)** y **Navegador web integrado** (cierre \`✕\` en 1 clic)
-  - **Vista previa de tablas de datos (CSV / TSV / JSON / YAML)** con copia como tabla Markdown
+  - **Vista previa de tablas CSV / TSV (scroll virtual para archivos de varios MB y sincronización bidireccional)**: Desplazamiento fluido en CSV grandes, columna de línea fija, columnas numéricas alineadas a la derecha con estadísticas (\`Σ / Prom / Mín / Máx\`), selector de delimitador (Auto / , / Tab / ;), ajuste de línea, **resaltado bidireccional editor ⇔ celda/subcadena**, copia de celda con doble clic (configurable en Ajustes) y copia como tabla Markdown
 - [x] **Exportación y personalización**:
   - **Word (\`.docx\`)**, **PDF / HTML (configuración de página, temas de diseño y encabezados/pies)**, **exportación SVG/PNG y zoom para Mermaid y KaTeX**
   - **Macros de teclado (\`⌘ + ⇧ + M\` / \`F8\`)**, **4 temas (Claro / Oscuro / Sepia / Medianoche) + CSS personalizado** e **interfaz en 8 idiomas**

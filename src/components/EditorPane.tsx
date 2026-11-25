@@ -117,9 +117,17 @@ import {
   getEffectiveEditorFontSize,
 } from './editor/cmTheme';
 import type { AiCustomButton, EditorSettings, Locale, ThemeId } from '../types';
-import { createGhostTextExtension, setGhostTextEffect } from './editor/cmGhostText';
+import { createGhostTextExtension, ghostTextField, setGhostTextEffect } from './editor/cmGhostText';
 import { SelectionBubbleMenu } from './editor/SelectionBubbleMenu';
 import { MarkdownTableBar } from './editor/MarkdownTableBar';
+import {
+  buildSlashItems,
+  EditorInlinePopup,
+  filterInlinePopupItems,
+  type InlinePopupItem,
+  type InlinePopupState,
+} from './editor/EditorInlinePopup';
+import { runEditorContextAction } from './editor/editorContextActions';
 import {
   applyMarkdownTableOperation,
   detectMarkdownTableAtLine,
@@ -138,37 +146,9 @@ import {
 import { cleanAiMarkdown, htmlToMarkdown, upsertTocInMarkdown } from '../utils/markdown';
 import { buildMarkdownDropLink } from '../utils/paths';
 import { readClipboardText, writeClipboardText } from '../utils/platform';
-import {
-  delimitedToMarkdownTable,
-  formatEnvText,
-  formatJsonText,
-  jsonToYamlText,
-  minifyJsonText,
-  sortJsonKeysText,
-  yamlToJsonText,
-} from '../utils/structuredData';
+import { delimitedToMarkdownTable } from '../utils/structuredData';
 import type { CustomSnippetRecord } from '../utils/snippets';
-import {
-  convertHalfFullWidth,
-  dedupeLines,
-  indentLineSpaces,
-  indentLineTab,
-  insertCommentLine,
-  insertQuoteLine,
-  removeCommentLine,
-  removeEmptyLines,
-  removeLineBreaksText,
-  removeQuoteLine,
-  reverseLines,
-  sortLinesAsc,
-  sortLinesDesc,
-  spacesToTabsText,
-  tabsToSpacesText,
-  trimLeadingLine,
-  trimTrailingLine,
-  unindentLineSpaces,
-  unindentLineTab,
-} from '../utils/editorTransforms';
+import { insertQuoteLine, removeLineBreaksText, trimLeadingLine } from '../utils/editorTransforms';
 import {
   EditorContextMenu,
   type EditorContextAction,
@@ -315,6 +295,7 @@ interface EditorPaneProps {
   workspaceNotes?: WorkspaceNoteItem[];
   onOpenWikiLink?: (target: string) => void;
   syncHighlightRange?: LineRange | null;
+  syncCharRange?: TextRange | null;
   isRecordingMacro?: boolean;
   onRecordMacroStep?: (step: MacroStep) => void;
   tabSize?: number;
@@ -495,6 +476,30 @@ const syncLineHighlightField = StateField.define<DecorationSet>({
           builder.add(lineObj.from, lineObj.from, syncLineDeco);
         }
         return builder.finish();
+      }
+    }
+    return tr.docChanged ? Decoration.none : decos;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+const setSyncCharRangeEffect = StateEffect.define<TextRange | null>();
+const syncCharRangeMark = Decoration.mark({ class: 'cm-sync-marker-range' });
+
+const syncCharRangeField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decos, tr) {
+    for (const eff of tr.effects) {
+      if (eff.is(setSyncCharRangeEffect)) {
+        const range = eff.value;
+        if (!range) return Decoration.none;
+        const maxPos = tr.state.doc.length;
+        const from = Math.max(0, Math.min(range.from, maxPos));
+        const to = Math.max(from, Math.min(range.to, maxPos));
+        if (from >= to) return Decoration.none;
+        return Decoration.set([syncCharRangeMark.range(from, to)]);
       }
     }
     return tr.docChanged ? Decoration.none : decos;
@@ -1017,119 +1022,6 @@ function tryMarkdownTableTabNav(view: EditorView, direction: 1 | -1): boolean {
   return true;
 }
 
-interface SlashPopupItem {
-  id: string;
-  label: string;
-  hint: string;
-  keywords: string;
-  insertText?: string;
-  action?: 'toc';
-  isCustom?: boolean;
-}
-
-function buildSlashItems(locale: Locale, customSnippets: CustomSnippetRecord[]): SlashPopupItem[] {
-  const isJa = locale === 'ja';
-  const builtins: SlashPopupItem[] = [
-    {
-      id: 'h1',
-      label: isJa ? '見出し 1 (H1)' : 'Heading 1',
-      hint: '# Heading',
-      keywords: 'h1 heading 1 見出し',
-      insertText: '# ',
-    },
-    {
-      id: 'h2',
-      label: isJa ? '見出し 2 (H2)' : 'Heading 2',
-      hint: '## Heading',
-      keywords: 'h2 heading 2 見出し',
-      insertText: '## ',
-    },
-    {
-      id: 'h3',
-      label: isJa ? '見出し 3 (H3)' : 'Heading 3',
-      hint: '### Heading',
-      keywords: 'h3 heading 3 見出し',
-      insertText: '### ',
-    },
-    {
-      id: 'todo',
-      label: isJa ? 'タスクリスト / チェックボックス' : 'Task Checklist',
-      hint: '- [ ] Task',
-      keywords: 'todo task checklist チェック タスク',
-      insertText: '- [ ] ',
-    },
-    {
-      id: 'table',
-      label: isJa ? 'Markdown テーブル (3列)' : 'Markdown Table (3 cols)',
-      hint: '| Col1 | Col2 | Col3 |',
-      keywords: 'table grid 表 テーブル',
-      insertText: '| Column 1 | Column 2 | Column 3 |\n| :--- | :--- | :--- |\n|  |  |  |\n',
-    },
-    {
-      id: 'code',
-      label: isJa ? 'コードブロック' : 'Code Block',
-      hint: '```lang ... ```',
-      keywords: 'code block fence コード',
-      insertText: '```ts\n\n```\n',
-    },
-    {
-      id: 'mermaid',
-      label: isJa ? 'Mermaid フローチャート図' : 'Mermaid Flowchart',
-      hint: '```mermaid',
-      keywords: 'mermaid diagram chart 図 フロー',
-      insertText: '```mermaid\nflowchart TD\n  Start["Start"] --> End["Done"]\n```\n',
-    },
-    {
-      id: 'math',
-      label: isJa ? 'KaTeX 数式ブロック' : 'KaTeX Math Block',
-      hint: '$$ ... $$',
-      keywords: 'math katex latex 数式',
-      insertText: '$$\n\\sum_{i=1}^{n} x_i\n$$\n',
-    },
-    {
-      id: 'callout',
-      label: isJa ? 'コールアウト [!NOTE]' : 'Callout Block [!NOTE]',
-      hint: '> [!NOTE]',
-      keywords: 'callout note tip warning コールアウト 注記',
-      insertText: '> [!NOTE]\n> ',
-    },
-    {
-      id: 'toc',
-      label: isJa ? '目次 (TOC) を自動挿入 / 更新' : 'Insert / Update Table of Contents (TOC)',
-      hint: '<!-- TOC -->',
-      keywords: 'toc table of contents 目次',
-      action: 'toc',
-    },
-  ];
-  const customs: SlashPopupItem[] = customSnippets.map((cs) => ({
-    id: `custom:${cs.id}`,
-    label: cs.title,
-    hint: cs.description || 'Custom',
-    keywords: `${cs.title} ${cs.description} custom スニペット`,
-    insertText: cs.content,
-    isCustom: true,
-  }));
-  return [...customs, ...builtins];
-}
-
-type InlinePopupState =
-  | {
-      kind: 'slash';
-      from: number;
-      to: number;
-      query: string;
-      left: number;
-      top: number;
-    }
-  | {
-      kind: 'wiki';
-      from: number;
-      to: number;
-      query: string;
-      left: number;
-      top: number;
-    };
-
 export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
   (
     {
@@ -1168,6 +1060,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       workspaceNotes = [],
       onOpenWikiLink,
       syncHighlightRange,
+      syncCharRange,
       isRecordingMacro = false,
       onRecordMacroStep,
       tabSize = 2,
@@ -1306,6 +1199,10 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
         ghostAbortRef.current.abort();
         ghostAbortRef.current = null;
       }
+      const v = viewRef.current;
+      if (v && v.state.field(ghostTextField, false)?.loading) {
+        v.dispatch({ effects: setGhostTextEffect.of(null) });
+      }
     }, []);
 
     const scheduleGhostText = useCallback((view: EditorView) => {
@@ -1340,19 +1237,28 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
 
         const controller = new AbortController();
         ghostAbortRef.current = controller;
+        curView.dispatch({
+          effects: setGhostTextEffect.of({ pos: capturedPos, text: ' …', loading: true }),
+        });
         void requester(prefix, suffix, controller.signal)
           .then((suggestion) => {
-            if (controller.signal.aborted || !suggestion) return;
+            if (controller.signal.aborted) return;
             const activeView = viewRef.current;
             if (!activeView || currentDocIdRef.current !== capturedDocId) return;
             const nowSel = activeView.state.selection.main;
             if (!nowSel.empty || nowSel.head !== capturedPos) return;
             activeView.dispatch({
-              effects: setGhostTextEffect.of({ pos: capturedPos, text: suggestion }),
+              effects: setGhostTextEffect.of(
+                suggestion ? { pos: capturedPos, text: suggestion } : null
+              ),
             });
           })
           .catch(() => {
-            // Ignore aborted or transient ghost text errors
+            if (controller.signal.aborted) return;
+            const activeView = viewRef.current;
+            if (activeView && activeView.state.field(ghostTextField, false)?.loading) {
+              activeView.dispatch({ effects: setGhostTextEffect.of(null) });
+            }
           });
       }, delayMs);
     }, [cancelPendingGhostText]);
@@ -1532,6 +1438,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             bookmarkField,
             bookmarkGutter,
             syncLineHighlightField,
+            syncCharRangeField,
             findScopeField,
             findHighlightField,
             createGhostTextExtension(),
@@ -2247,6 +2154,16 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       });
     }, [syncHighlightRange, settings.activeLineSyncHighlight]);
 
+    // Sync exact character range marker from right preview pane (e.g. CSV table cell/text)
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      const effectiveChar = settings.activeLineSyncHighlight ? (syncCharRange ?? null) : null;
+      view.dispatch({
+        effects: setSyncCharRangeEffect.of(effectiveChar),
+      });
+    }, [syncCharRange, settings.activeLineSyncHighlight]);
+
     // Dynamic language mode based on active filename extension, auto-detection, or manual languageOverride
     useEffect(() => {
       const view = viewRef.current;
@@ -2440,238 +2357,37 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       async (action: EditorContextAction, shouldRecord: boolean) => {
         const view = viewRef.current;
         if (!view) return;
-
-        switch (action) {
-          case 'undo':
-            if (undo(view) && shouldRecord) {
-              recordMacroStep({ type: 'cmCommand', command: 'undo' });
-            }
-            break;
-          case 'redo':
-            if (redo(view) && shouldRecord) {
-              recordMacroStep({ type: 'cmCommand', command: 'redo' });
-            }
-            break;
-          case 'cut':
-            performCut(view);
-            if (shouldRecord) {
-              recordMacroStep({ type: 'clipboard', action: 'cut' });
-            }
-            break;
-          case 'copy':
-            performCopy(view);
-            if (shouldRecord) {
-              recordMacroStep({ type: 'clipboard', action: 'copy' });
-            }
-            break;
-          case 'copyRichText':
-            callbacksRef.current.onCopyRichText?.();
-            return;
-          case 'paste':
-            if (shouldRecord) {
-              recordMacroStep({ type: 'clipboard', action: 'paste' });
-            }
-            await performPaste();
-            return;
-          case 'delete':
-            if (view.state.selection.ranges.some((r) => !r.empty)) {
-              view.dispatch(view.state.replaceSelection(''));
-            }
-            if (shouldRecord) {
-              recordMacroStep({ type: 'contextAction', action: 'delete' });
-            }
-            break;
-          case 'selectAll':
-            selectAll(view);
-            if (shouldRecord) {
-              recordMacroStep({ type: 'cmCommand', command: 'selectAll' });
-            }
-            break;
-          case 'insertCitation':
-            callbacksRef.current.onOpenCitationModal?.();
-            return;
-          case 'aiEditSelection':
-            callbacksRef.current.onAiEditSelection?.();
-            return;
-          case 'rectangularSelection': {
-            const next = !rectModeRef.current;
-            if (next && view.state.selection.ranges.length === 1 && !view.state.selection.main.empty) {
-              convertSelectionToRectangle(view);
-            }
-            setRectMode(next);
-            callbacksRef.current.onStatusNotify?.(
-              next
-                ? callbacksRef.current.t.contextMenu.rectModeOnToast
-                : callbacksRef.current.t.contextMenu.rectModeOffToast
-            );
-            break;
-          }
-          case 'indentTab':
-            applyPerLineTransform(view, indentLineTab);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'unindentTab':
-            applyPerLineTransform(view, unindentLineTab);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'indentSpace':
-            applyPerLineTransform(view, indentLineSpaces);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'unindentSpace':
-            applyPerLineTransform(view, unindentLineSpaces);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'insertComment': {
-            const effName = resolveEffectiveFilename(
+        await runEditorContextAction(action, {
+          view,
+          shouldRecord,
+          effectiveFilename:
+            resolveEffectiveFilename(
               callbacksRef.current.fileName,
               callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
-            );
-            applyPerLineTransform(view, (line) => insertCommentLine(line, effName));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          }
-          case 'removeComment': {
-            const effName = resolveEffectiveFilename(
-              callbacksRef.current.fileName,
-              callbacksRef.current.languageOverride ?? callbacksRef.current.detectedLanguageId
-            );
-            applyPerLineTransform(view, (line) => removeCommentLine(line, effName));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          }
-          case 'spacesToTabs':
-            applySelectionOrLineTransform(view, (s) => spacesToTabsText(s, 4));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'tabsToSpaces':
-            applySelectionOrLineTransform(view, (s) => tabsToSpacesText(s, 4));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'toLowerCase':
-            applySelectionOrLineTransform(view, (s) => s.toLowerCase());
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'toUpperCase':
-            applySelectionOrLineTransform(view, (s) => s.toUpperCase());
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'reverseLines':
-            applyLineBlockTransform(view, reverseLines);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'sortLinesAsc':
-            applyLineBlockTransform(view, sortLinesAsc);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'sortLinesDesc':
-            applyLineBlockTransform(view, sortLinesDesc);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'dedupeLines':
-            applyLineBlockTransform(view, dedupeLines);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'removeEmptyLines':
-            applyLineBlockTransform(view, removeEmptyLines);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'trimLeading':
-            applyPerLineTransform(view, trimLeadingLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'trimTrailing':
-            applyPerLineTransform(view, trimTrailingLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'insertQuote':
-            applyPerLineTransform(view, insertQuoteLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'removeQuote':
-            applyPerLineTransform(view, removeQuoteLine);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'insertWrapLineBreaks':
-            insertWrapLineBreaks(view);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'removeLineBreaks':
-            removeLineBreaks(view);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'formatMarkdownTables':
-            applyLineBlockTransform(view, (lines) => {
-              const raw = lines.join('\n');
-              const hadTrailingEmpty = lines.length > 0 && lines[lines.length - 1] === '';
-              const cleaned = cleanAiMarkdown(raw, {
-                removeZeroWidth: false,
-                trimTrailingSpaces: false,
-                collapseBlankLines: false,
-                formatTables: true,
-                normalizeBullets: false,
-                fixHeadingSpacing: false,
-                normalizeQuotes: false,
-              }).replace(/\n$/, '');
-              const outLines = cleaned.split('\n');
-              if (hadTrailingEmpty && outLines[outLines.length - 1] !== '') {
-                outLines.push('');
-              }
-              return outLines;
-            });
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'formatJson':
-            applyDocOrSelectionTransform(view, formatJsonText);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'minifyJson':
-            applyDocOrSelectionTransform(view, minifyJsonText);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'sortJsonKeys':
-            applyDocOrSelectionTransform(view, sortJsonKeysText);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'jsonToYaml':
-            applyDocOrSelectionTransform(view, jsonToYamlText);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'yamlToJson':
-            applyDocOrSelectionTransform(view, yamlToJsonText);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'formatEnv':
-            applyDocOrSelectionTransform(view, formatEnvText);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'to-full':
-          case 'to-full-kana':
-          case 'to-full-alnum':
-          case 'to-half':
-          case 'to-half-kana':
-          case 'to-half-alnum':
-            applySelectionOrLineTransform(view, (s) => convertHalfFullWidth(s, action));
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'toggleBookmark':
-            toggleBookmarkAtCursor(view);
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'nextBookmark':
-            jumpToBookmark(view, 'next');
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'prevBookmark':
-            jumpToBookmark(view, 'prev');
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-          case 'clearBookmarks':
-            view.dispatch({ effects: clearBookmarksEffect.of(undefined) });
-            if (shouldRecord) recordMacroStep({ type: 'contextAction', action });
-            break;
-        }
-        view.focus();
+            ) || '',
+          rectMode: rectModeRef.current,
+          rectModeOnToast: callbacksRef.current.t.contextMenu.rectModeOnToast,
+          rectModeOffToast: callbacksRef.current.t.contextMenu.rectModeOffToast,
+          setRectMode,
+          recordMacroStep,
+          performCut,
+          performCopy,
+          performPaste,
+          onCopyRichText: callbacksRef.current.onCopyRichText,
+          onOpenCitationModal: callbacksRef.current.onOpenCitationModal,
+          onAiEditSelection: callbacksRef.current.onAiEditSelection,
+          onStatusNotify: callbacksRef.current.onStatusNotify,
+          convertSelectionToRectangle,
+          applyPerLineTransform,
+          applySelectionOrLineTransform,
+          applyLineBlockTransform,
+          applyDocOrSelectionTransform,
+          insertWrapLineBreaks,
+          removeLineBreaks,
+          toggleBookmarkAtCursor,
+          jumpToBookmark,
+          clearBookmarks: (v) => v.dispatch({ effects: clearBookmarksEffect.of(undefined) }),
+        });
       },
       [recordMacroStep]
     );
@@ -2946,41 +2662,15 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       },
     }));
 
-    type InlinePopupItem =
-      | { kind: 'slash'; item: SlashPopupItem }
-      | { kind: 'wiki'; item: WorkspaceNoteItem };
-
     const slashCandidates = useMemo(
       () => buildSlashItems(locale, customSnippets),
       [locale, customSnippets]
     );
 
-    const popupItems = useMemo<InlinePopupItem[]>(() => {
-      if (!inlinePopup) return [];
-      const q = inlinePopup.query.trim().toLowerCase();
-      if (inlinePopup.kind === 'slash') {
-        return slashCandidates
-          .filter((item) => {
-            if (!q) return true;
-            return (
-              item.label.toLowerCase().includes(q) ||
-              item.keywords.toLowerCase().includes(q) ||
-              item.hint.toLowerCase().includes(q)
-            );
-          })
-          .map((item) => ({ kind: 'slash' as const, item }));
-      }
-      return workspaceNotes
-        .filter((note) => {
-          if (!q) return true;
-          return (
-            note.name.toLowerCase().includes(q) ||
-            note.relPath.toLowerCase().includes(q)
-          );
-        })
-        .slice(0, 20)
-        .map((item) => ({ kind: 'wiki' as const, item }));
-    }, [inlinePopup, slashCandidates, workspaceNotes]);
+    const popupItems = useMemo<InlinePopupItem[]>(
+      () => filterInlinePopupItems(inlinePopup, slashCandidates, workspaceNotes),
+      [inlinePopup, slashCandidates, workspaceNotes]
+    );
 
     const applyInlinePopupItem = useCallback((entry: InlinePopupItem) => {
       const popup = inlinePopupRef.current;
@@ -3186,56 +2876,15 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             }
           />
         )}
-        {inlinePopup && popupItems.length > 0 && (
-          <div
-            ref={popupRef}
-            className="editor-inline-popup"
-            style={{ left: inlinePopup.left, top: inlinePopup.top }}
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <div className="editor-inline-popup-header">
-              {inlinePopup.kind === 'slash'
-                ? locale === 'ja'
-                  ? 'スラッシュコマンド'
-                  : 'Slash Commands'
-                : locale === 'ja'
-                ? 'Wiki リンク (ノート)'
-                : 'Wiki Link Note'}
-            </div>
-            <div className="editor-inline-popup-list">
-              {popupItems.map((entry, idx) => {
-                const isActive = idx === popupActiveIndex;
-                const key =
-                  entry.kind === 'slash' ? `slash:${entry.item.id}` : `wiki:${entry.item.path}`;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    className={`editor-inline-popup-item ${isActive ? 'is-active' : ''}`}
-                    onMouseEnter={() => setPopupActiveIndex(idx)}
-                    onClick={() => applyInlinePopupItem(entry)}
-                  >
-                    <span className="editor-inline-popup-title">
-                      {entry.kind === 'slash' ? (
-                        <>
-                          {entry.item.isCustom && (
-                            <span className="editor-inline-popup-badge">★</span>
-                          )}
-                          {entry.item.label}
-                        </>
-                      ) : (
-                        entry.item.name
-                      )}
-                    </span>
-                    <span className="editor-inline-popup-hint">
-                      {entry.kind === 'slash' ? entry.item.hint : entry.item.relPath}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <EditorInlinePopup
+          popup={inlinePopup}
+          items={popupItems}
+          activeIndex={popupActiveIndex}
+          locale={locale}
+          popupRef={popupRef}
+          onHoverIndex={setPopupActiveIndex}
+          onSelectItem={applyInlinePopupItem}
+        />
         <EditorContextMenu
           t={t}
           menu={contextMenu}

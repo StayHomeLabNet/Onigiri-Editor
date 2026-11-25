@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'katex/dist/katex.min.css';
 import {
   AlertTriangle,
@@ -131,6 +131,7 @@ import {
   resolveAiProviderCallOptions,
   syncDefaultAiTranslateButtonLocale,
 } from './utils/aiCustomButtons';
+import { formatAiErrorHint } from './utils/aiErrorHint';
 import { buildExportPageCss, DEFAULT_EXPORT_PAGE_SETTINGS } from './utils/exportPresets';
 import { formatFileSizeShort, optimizeImageDataUrl } from './utils/imageOptimizer';
 import { clipHtmlToMarkdown } from './utils/webClipper';
@@ -216,11 +217,9 @@ import {
 } from './utils/session';
 import { TopBar } from './components/TopBar';
 import { TooltipLayer } from './components/TooltipLayer';
-import { ExportOptionsModal } from './components/ExportOptionsModal';
-import { ScratchpadModal } from './components/ScratchpadModal';
 import { TerminalDrawer } from './components/TerminalDrawer';
-import { AiSendPreviewModal, type AiSendPreviewRequest } from './components/AiSendPreviewModal';
-import { FeatureGuideModal } from './components/FeatureGuideModal';
+import { type AiSendPreviewRequest } from './components/AiSendPreviewModal';
+import { AppModals } from './components/AppModals';
 import { FormatToolbar } from './components/FormatToolbar';
 import { TabBar } from './components/TabBar';
 import { Sidebar } from './components/Sidebar';
@@ -266,64 +265,7 @@ function formatErrorMessage(err: unknown): string {
   return String(err);
 }
 
-const CommandPalette = lazy(() =>
-  import('./components/CommandPalette').then((m) => ({ default: m.CommandPalette }))
-);
-const QuickOpenModal = lazy(() =>
-  import('./components/QuickOpenModal').then((m) => ({ default: m.QuickOpenModal }))
-);
-const AboutModal = lazy(() =>
-  import('./components/AboutModal').then((m) => ({ default: m.AboutModal }))
-);
-const ImageModal = lazy(() =>
-  import('./components/ImageModal').then((m) => ({ default: m.ImageModal }))
-);
-const SettingsModal = lazy(() =>
-  import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal }))
-);
-const EncodingModal = lazy(() =>
-  import('./components/EncodingModal').then((m) => ({ default: m.EncodingModal }))
-);
-const GoToLineModal = lazy(() =>
-  import('./components/GoToLineModal').then((m) => ({ default: m.GoToLineModal }))
-);
-const InlineAiEditModal = lazy(() =>
-  import('./components/InlineAiEditModal').then((m) => ({ default: m.InlineAiEditModal }))
-);
-const FolderSwitchGuardModal = lazy(() =>
-  import('./components/FolderSwitchGuardModal').then((m) => ({ default: m.FolderSwitchGuardModal }))
-);
-const WorkspaceImageModal = lazy(() =>
-  import('./components/WorkspaceImageModal').then((m) => ({ default: m.WorkspaceImageModal }))
-);
-const AiDiffPreviewModal = lazy(() =>
-  import('./components/AiDiffPreviewModal').then((m) => ({ default: m.AiDiffPreviewModal }))
-);
-const SlidePresentationModal = lazy(() =>
-  import('./components/SlidePresentationModal').then((m) => ({ default: m.SlidePresentationModal }))
-);
-const WorkspaceGrepModal = lazy(() =>
-  import('./components/WorkspaceGrepModal').then((m) => ({ default: m.WorkspaceGrepModal }))
-);
-const TemplatePickerModal = lazy(() =>
-  import('./components/TemplatePickerModal').then((m) => ({ default: m.TemplatePickerModal }))
-);
-const WebClipModal = lazy(() =>
-  import('./components/WebClipModal').then((m) => ({ default: m.WebClipModal }))
-);
-const UnusedAssetsModal = lazy(() =>
-  import('./components/UnusedAssetsModal').then((m) => ({ default: m.UnusedAssetsModal }))
-);
-const CitationModal = lazy(() =>
-  import('./components/CitationModal').then((m) => ({ default: m.CitationModal }))
-);
-const KnowledgeGraphModal = lazy(() =>
-  import('./components/KnowledgeGraphModal').then((m) => ({ default: m.KnowledgeGraphModal }))
-);
-import {
-  UpdateModal,
-  shouldShowAutoUpdateNotification,
-} from './components/UpdateModal';
+import { shouldShowAutoUpdateNotification } from './components/UpdateModal';
 import { useAppUpdates } from './hooks/useAppUpdates';
 import { useProjectServer } from './hooks/useProjectServer';
 
@@ -656,10 +598,14 @@ export function App() {
 
   const [activePane, setActivePane] = useState<'code' | 'visual'>('code');
   const [previewSyncLineRange, setPreviewSyncLineRange] = useState<LineRange | null>(null);
+  const [dataPreviewSyncRange, setDataPreviewSyncRange] = useState<{ from: number; to: number; line: number } | null>(null);
   const [editorSelectionRange, setEditorSelectionRange] = useState<{ from: number; to: number } | null>(null);
+  const [editorCaretOffset, setEditorCaretOffset] = useState<number | null>(null);
 
   const handleEditorSelectionUpdate = useCallback((range: { from: number; to: number }) => {
     findBarRef.current?.onEditorSelection(range);
+    setEditorCaretOffset(range.from);
+    setDataPreviewSyncRange(null);
     setEditorSelectionRange((prev) => {
       if (range.from >= range.to) {
         return prev === null ? null : null;
@@ -673,6 +619,8 @@ export function App() {
 
   useEffect(() => {
     setEditorSelectionRange(null);
+    setEditorCaretOffset(null);
+    setDataPreviewSyncRange(null);
   }, [activeTabId]);
 
   // Suppress browser default context menu (Back, Refresh, Save as, Print, Inspect)
@@ -3646,6 +3594,8 @@ export function App() {
     formatErrorMessage,
   });
 
+  const lastGhostErrorAtRef = useRef<number>(0);
+
   const handleRequestGhostText = useCallback(
     async (prefix: string, suffix: string, signal: AbortSignal): Promise<string | null> => {
       if (signal.aborted) return null;
@@ -3689,13 +3639,24 @@ export function App() {
       } catch (err) {
         if (!signal.aborted) {
           console.warn('[GhostText] AI request failed:', err);
+          const now = Date.now();
+          if (now - lastGhostErrorAtRef.current > 30000) {
+            lastGhostErrorAtRef.current = now;
+            const isJa = locale === 'ja';
+            const info = formatAiErrorHint(err, callOpts.provider, isJa);
+            notify(
+              isJa
+                ? `AI 補完エラー (${callOpts.provider}): ${info.hint || info.message.slice(0, 80)}`
+                : `AI autocomplete error (${callOpts.provider}): ${info.hint || info.message.slice(0, 80)}`
+            );
+          }
         }
         return null;
       } finally {
         signal.removeEventListener('abort', onAbort);
       }
     },
-    [aiConfig]
+    [aiConfig, locale, notify]
   );
 
   const handleOpenInlineAiEdit = useCallback(() => {
@@ -6469,6 +6430,11 @@ export function App() {
                     onFindScopeChange={(scope) => findBarRef.current?.onScopeMapped(scope)}
                     onEditorSelectionChange={handleEditorSelectionUpdate}
                     syncHighlightRange={activePane === 'visual' ? previewSyncLineRange : null}
+                    syncCharRange={
+                      activePane === 'visual' && previewKind === 'data' && dataPreviewSyncRange
+                        ? { from: dataPreviewSyncRange.from, to: dataPreviewSyncRange.to }
+                        : null
+                    }
                     theme={theme}
                     settings={effectiveSettings}
                     tabSize={resolvedProjectConfig?.tabSize}
@@ -6661,6 +6627,16 @@ export function App() {
                       languageOverride={activeTab.languageOverride}
                       content={activeTab.content}
                       activeLine={activeTab.cursorLine}
+                      editorSelection={editorSelectionRange}
+                      editorCursorOffset={editorCaretOffset}
+                      copyCellEnabled={settings.dataPreviewCellCopyEnabled ?? true}
+                      onSyncEditorRange={(range) => {
+                        setActivePane('visual');
+                        setDataPreviewSyncRange(range);
+                        setPreviewSyncLineRange(
+                          range ? { start: range.line, end: range.line } : null
+                        );
+                      }}
                       onJumpToLine={(ln) => handleGoToLine(ln)}
                       onCopyNotify={() => notify(t.toasts.copiedMarkdown)}
                     />
@@ -6954,11 +6930,27 @@ export function App() {
         />
       )}
 
-      <UpdateModal
+      <AppModals
         t={t}
         locale={locale}
-        open={showUpdateModal}
-        onClose={() => setShowUpdateModal(false)}
+        onLocaleChange={setLocale}
+        theme={theme}
+        onThemeChange={setTheme}
+        settings={settings}
+        effectiveSettings={effectiveSettings}
+        onSettingsChange={setSettings}
+        aiConfig={aiConfig}
+        tabs={tabs}
+        activeTab={activeTab}
+        onSelectTab={setActiveTabId}
+        workspaceRoot={workspaceRoot}
+        workspaceEntries={workspaceEntries}
+        recentFiles={recentFiles}
+        headings={headings}
+        totalLines={stats.lines}
+        languageLabel={languageLabel}
+        showUpdateModal={showUpdateModal}
+        onCloseUpdateModal={() => setShowUpdateModal(false)}
         updateInfo={updateInfo}
         checkingUpdates={checkingUpdates}
         onCheckUpdates={() => void handleCheckUpdates(false)}
@@ -6969,13 +6961,13 @@ export function App() {
         isApplyingUpdate={isApplyingUpdate}
         dirtyTabCount={dirtyTabCount}
         pendingRestartFilePath={pendingRestartFilePath}
-        onCancelDownload={() => void handleCancelUpdateDownload()}
+        onCancelUpdateDownload={() => void handleCancelUpdateDownload()}
         onToggleApplyOnQuit={(fp) => void handleToggleApplyOnQuit(fp)}
         onConfirmSaveAllAndUpdate={() => void handleConfirmSaveAllAndUpdate()}
         onConfirmRestartWithoutSaving={() => void handleConfirmRestartWithoutSaving()}
         onCancelPendingRestart={handleCancelPendingRestart}
         onAutoUpdateNow={() => void handleAutoUpdateNow()}
-        onDownloadInstaller={(url, fileName) =>
+        onDownloadUpdateInstaller={(url, fileName) =>
           void handleDownloadUpdateInstaller(url, fileName, false)
         }
         onApplyDownloadedUpdate={(fp, restart) => void handleApplyDownloadedUpdate(fp, restart)}
@@ -6983,282 +6975,117 @@ export function App() {
         onOpenReleaseNotesInTab={handleOpenReleaseNotesInTab}
         onOpenInBuiltinBrowser={(url) => void handleOpenProjectUrl(url, 'builtin')}
         onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
-        onCopyUrl={(url) => {
+        onCopyUpdateUrl={(url) => {
           void writeClipboardText(url);
           notify(t.updates.copiedDownloadUrlToast);
         }}
-        onSkipVersion={handleSkipUpdateVersion}
-        onUnskipVersion={handleUnskipUpdateVersion}
-        onRemindLater={() => setUpdateBannerDismissed(true)}
-        settings={settings}
-        onSettingsChange={setSettings}
-      />
-
-      <Suspense fallback={null}>
-        <QuickOpenModal
-          t={t}
-          open={showQuickOpen}
-          onClose={() => setShowQuickOpen(false)}
-          tabs={tabs}
-          activeTabId={activeTab.id}
-          workspaceEntries={workspaceEntries}
-          recentFiles={recentFiles}
-          headings={headings}
-          onSelectTab={setActiveTabId}
-          onOpenFilePath={(fp) => void openPathInTab(fp)}
-          onJumpToLine={(ln) => handleGoToLine(ln)}
-        />
-
-        <CommandPalette
-          t={t}
-          open={showPalette}
-          onClose={() => setShowPalette(false)}
-          commands={paletteCommands}
-        />
-
-        <AboutModal
-          t={t}
-          open={showAbout}
-          onClose={() => setShowAbout(false)}
-          updateInfo={updateInfo}
-          checkingUpdates={checkingUpdates}
-          onCheckUpdates={() => void handleCheckUpdates(false)}
-          onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
-          onOpenUpdateModal={() => setShowUpdateModal(true)}
-          onAutoUpdateNow={() => void handleAutoUpdateNow()}
-          isUpdatingApp={isDownloadingUpdate || isApplyingUpdate}
-        />
-
-        <SettingsModal
-          t={t}
-          open={showSettings}
-          initialTab={settingsInitialTab}
-          onClose={() => setShowSettings(false)}
-          locale={locale}
-          onLocaleChange={setLocale}
-          theme={theme}
-          onThemeChange={setTheme}
-          settings={settings}
-          onSettingsChange={setSettings}
-          aiConfig={aiConfig}
-          externalPreviewUrl={externalPreviewUrl}
-          externalPreviewLanUrls={externalPreviewLanUrls}
-          onToggleExternalPreview={handleToggleExternalPreview}
-          onCopyLanUrl={handleCopyLanUrl}
-          projectServer={projectServer}
-          dataSummary={storedDataSummary}
-          onResetSelectedSettings={handleResetSelectedSettings}
-          onClearSelectedUserData={handleClearSelectedUserData}
-          customKeybindings={customKeybindings}
-          onCustomKeybindingsChange={setCustomKeybindings}
-          onExportBackupJson={handleExportBackupJson}
-          onReadBackupJsonFile={handleReadBackupJsonFile}
-          onApplyBackupImport={handleApplyBackupImport}
-          backupCounts={backupCounts}
-          workspaceRoot={workspaceRoot}
-          projectConfigInfo={projectConfigInfo}
-          onCreateOnigiriJson={handleCreateOnigiriJson}
-          onOpenProjectConfigFile={(p) => void openPathInTab(p)}
-          updateInfo={updateInfo}
-          checkingUpdates={checkingUpdates}
-          onCheckUpdates={() => void handleCheckUpdates(false)}
-          onOpenExternalUrl={(url) => void openInExternalBrowser(url)}
-          onOpenUpdateModal={() => {
-            setShowSettings(false);
-            setShowUpdateModal(true);
-          }}
-          onAutoUpdateNow={() => void handleAutoUpdateNow()}
-          isUpdatingApp={isDownloadingUpdate || isApplyingUpdate}
-        />
-
-        <ImageModal
-          t={t}
-          open={showImageModal}
-          docPath={activeTab.filePath}
-          workspaceRoot={workspaceRoot}
-          imageAssetFolder={effectiveSettings.imageAssetFolder}
-          onClose={() => setShowImageModal(false)}
-          onInsert={(src, alt) => insertImageIntoActivePane(src, alt)}
-        />
-
-        <AiDiffPreviewModal
-          t={t}
-          request={diffPreview}
-          onClose={() => setDiffPreview(null)}
-        />
-
-        <EncodingModal
-          t={t}
-          locale={locale}
-          mode={encodingModalMode}
-          currentEncoding={activeTab.encoding ?? 'utf-8'}
-          currentEol={activeTab.eol ?? '\n'}
-          onClose={() => setEncodingModalMode(null)}
-          onCreateNewWithEncoding={(encoding, eol) => handleNewFile({ encoding, eol })}
-          onReopenWithEncoding={handleReopenWithEncoding}
-          onChangeSaveEncoding={handleChangeSaveEncoding}
-        />
-
-        <GoToLineModal
-          t={t}
-          open={showGoToLine}
-          currentLine={activeTab.cursorLine}
-          totalLines={stats.lines}
-          onClose={() => setShowGoToLine(false)}
-          onJump={handleGoToLine}
-        />
-
-        <InlineAiEditModal
-          t={t}
-          open={Boolean(inlineAiState)}
-          selectedText={inlineAiState?.selectedText ?? ''}
-          fileName={activeTab.title}
-          languageLabel={languageLabel}
-          aiConfig={aiConfig}
-          workspaceRoot={workspaceRoot}
-          onClose={() => setInlineAiState(null)}
-          onResultReady={handleInlineAiResultReady}
-        />
-
-        <FolderSwitchGuardModal
-          t={t}
-          mode={folderSwitchGuardMode}
-          externalServer={Boolean(projectServer?.external)}
-          commandLabel={projectInfo?.devCommandLabel || projectServer?.kind || null}
-          serverUrl={projectServer?.url || null}
-          rootPath={projectServer?.rootPath || workspaceRoot || null}
-          stopping={stoppingServerForSwitch}
-          onClose={() => {
-            if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
-          }}
-          onConfirmStopAndSwitch={handleConfirmStopAndSwitchFolder}
-        />
-
-        <WorkspaceImageModal
-          t={t}
-          imagePath={previewWorkspaceImagePath}
-          workspaceRoot={workspaceRoot}
-          entries={workspaceEntries}
-          activeDocPath={activeTab.filePath}
-          onSelectImagePath={setPreviewWorkspaceImagePath}
-          onClose={() => setPreviewWorkspaceImagePath(null)}
-          onInsertToEditor={(src, alt) => insertImageIntoActivePane(src, alt)}
-        />
-
-        <SlidePresentationModal
-          t={t}
-          open={showSlideModal}
-          title={activeTab.title}
-          markdown={activeTab.content}
-          docPath={activeTab.filePath}
-          workspaceRoot={workspaceRoot}
-          theme={theme}
-          onClose={() => setShowSlideModal(false)}
-        />
-
-        <WorkspaceGrepModal
-          t={t}
-          open={showWorkspaceGrep}
-          workspaceRoot={workspaceRoot}
-          onClose={() => setShowWorkspaceGrep(false)}
-          onOpenFileAtLine={(fp, ln) => void handleOpenFileAtLine(fp, ln)}
-          onAfterReplace={(paths, count) => void handleAfterWorkspaceGrepReplace(paths, count)}
-        />
-
-        <TemplatePickerModal
-          t={t}
-          locale={locale}
-          open={showTemplateModal}
-          onClose={() => setShowTemplateModal(false)}
-          onOpenDailyNote={() => void handleOpenDailyNote()}
-          onCreateFromTemplate={(payload) => void handleCreateFromTemplate(payload)}
-        />
-
-        <WebClipModal
-          t={t}
-          open={showWebClipModal}
-          onClose={() => setShowWebClipModal(false)}
-          onOpenClippedNote={handleOpenClippedNote}
-        />
-
-        <UnusedAssetsModal
-          t={t}
-          locale={locale}
-          open={showUnusedAssetsModal}
-          workspaceRoot={workspaceRoot}
-          workspaceEntries={workspaceEntries}
-          extraContents={unusedAssetExtraContents}
-          onClose={() => setShowUnusedAssetsModal(false)}
-          onDeleted={(count) => {
-            notify(t.unusedAssetsModal.deletedToast.replace('{count}', String(count)));
-            if (workspaceRoot) void refreshWorkspace(workspaceRoot);
-          }}
-        />
-
-        <CitationModal
-          t={t}
-          open={showCitationModal}
-          currentMarkdown={activeTab.content}
-          selectedText={citationSelectedText}
-          onClose={() => setShowCitationModal(false)}
-          onInsertInline={(text) => {
-            const ed = getActiveEditorTarget();
-            if (ed) {
-              ed.insertText(text);
-            } else {
-              updateActiveContent(activeTab.content + text);
-            }
-          }}
-          onInsertFootnote={handleInsertFootnote}
-        />
-
-        <KnowledgeGraphModal
-          t={t}
-          open={showKnowledgeGraphModal}
-          report={workspaceKnowledgeReport}
-          activeFilePath={activeTab.filePath}
-          onOpenFile={(fp, ln) => {
-            if (ln) {
-              void handleOpenFileAtLine(fp, ln);
-            } else {
-              void openPathInTab(fp);
-            }
-          }}
-          onClose={() => setShowKnowledgeGraphModal(false)}
-        />
-      </Suspense>
-
-      {isDraggingFile && (
-        <div className="drop-overlay">
-          <div className="drop-card">{t.status.dropHint}</div>
-        </div>
-      )}
-
-      {toast && <div className="toast-banner">{toast}</div>}
-
-      <ExportOptionsModal
-        open={exportOptionsModalMode !== null}
-        locale={locale}
-        initialMode={exportOptionsModalMode ?? 'pdf'}
-        settings={settings.exportPageSettings ?? DEFAULT_EXPORT_PAGE_SETTINGS}
-        onSaveSettings={(next) =>
-          setSettings((s) => ({ ...s, exportPageSettings: next }))
+        onSkipUpdateVersion={handleSkipUpdateVersion}
+        onUnskipUpdateVersion={handleUnskipUpdateVersion}
+        onDismissUpdateBanner={() => setUpdateBannerDismissed(true)}
+        showQuickOpen={showQuickOpen}
+        onCloseQuickOpen={() => setShowQuickOpen(false)}
+        onOpenFilePath={(fp) => void openPathInTab(fp)}
+        onJumpToLine={(ln) => handleGoToLine(ln)}
+        showPalette={showPalette}
+        onClosePalette={() => setShowPalette(false)}
+        paletteCommands={paletteCommands}
+        showAbout={showAbout}
+        onCloseAbout={() => setShowAbout(false)}
+        onOpenUpdateModal={() => setShowUpdateModal(true)}
+        showSettings={showSettings}
+        settingsInitialTab={settingsInitialTab}
+        onCloseSettings={() => setShowSettings(false)}
+        externalPreviewUrl={externalPreviewUrl}
+        externalPreviewLanUrls={externalPreviewLanUrls}
+        onToggleExternalPreview={handleToggleExternalPreview}
+        onCopyLanUrl={handleCopyLanUrl}
+        projectServer={projectServer}
+        storedDataSummary={storedDataSummary}
+        onResetSelectedSettings={handleResetSelectedSettings}
+        onClearSelectedUserData={handleClearSelectedUserData}
+        customKeybindings={customKeybindings}
+        onCustomKeybindingsChange={setCustomKeybindings}
+        onExportBackupJson={handleExportBackupJson}
+        onReadBackupJsonFile={handleReadBackupJsonFile}
+        onApplyBackupImport={handleApplyBackupImport}
+        backupCounts={backupCounts}
+        projectConfigInfo={projectConfigInfo}
+        onCreateOnigiriJson={handleCreateOnigiriJson}
+        showImageModal={showImageModal}
+        onCloseImageModal={() => setShowImageModal(false)}
+        onInsertImage={(src, alt) => insertImageIntoActivePane(src, alt)}
+        diffPreview={diffPreview}
+        onCloseDiffPreview={() => setDiffPreview(null)}
+        encodingModalMode={encodingModalMode}
+        onCloseEncodingModal={() => setEncodingModalMode(null)}
+        onCreateNewWithEncoding={(encoding, eol) => handleNewFile({ encoding, eol })}
+        onReopenWithEncoding={handleReopenWithEncoding}
+        onChangeSaveEncoding={handleChangeSaveEncoding}
+        showGoToLine={showGoToLine}
+        onCloseGoToLine={() => setShowGoToLine(false)}
+        inlineAiSelectedText={inlineAiState?.selectedText ?? null}
+        onCloseInlineAi={() => setInlineAiState(null)}
+        onInlineAiResultReady={handleInlineAiResultReady}
+        folderSwitchGuardMode={folderSwitchGuardMode}
+        projectCommandLabel={projectInfo?.devCommandLabel || projectServer?.kind || null}
+        stoppingServerForSwitch={stoppingServerForSwitch}
+        onCloseFolderSwitchGuard={() => {
+          if (!stoppingServerForSwitch) setFolderSwitchGuardMode(null);
+        }}
+        onConfirmStopAndSwitchFolder={handleConfirmStopAndSwitchFolder}
+        previewWorkspaceImagePath={previewWorkspaceImagePath}
+        onSelectWorkspaceImagePath={setPreviewWorkspaceImagePath}
+        onCloseWorkspaceImage={() => setPreviewWorkspaceImagePath(null)}
+        showSlideModal={showSlideModal}
+        onCloseSlideModal={() => setShowSlideModal(false)}
+        showWorkspaceGrep={showWorkspaceGrep}
+        onCloseWorkspaceGrep={() => setShowWorkspaceGrep(false)}
+        onOpenFileAtLine={(fp, ln) => void handleOpenFileAtLine(fp, ln)}
+        onAfterWorkspaceGrepReplace={(paths, count) =>
+          void handleAfterWorkspaceGrepReplace(paths, count)
         }
+        showTemplateModal={showTemplateModal}
+        onCloseTemplateModal={() => setShowTemplateModal(false)}
+        onOpenDailyNote={() => void handleOpenDailyNote()}
+        onCreateFromTemplate={(payload) => void handleCreateFromTemplate(payload)}
+        showWebClipModal={showWebClipModal}
+        onCloseWebClipModal={() => setShowWebClipModal(false)}
+        onOpenClippedNote={handleOpenClippedNote}
+        showUnusedAssetsModal={showUnusedAssetsModal}
+        unusedAssetExtraContents={unusedAssetExtraContents}
+        onCloseUnusedAssetsModal={() => setShowUnusedAssetsModal(false)}
+        onUnusedAssetsDeleted={(count) => {
+          notify(t.unusedAssetsModal.deletedToast.replace('{count}', String(count)));
+          if (workspaceRoot) void refreshWorkspace(workspaceRoot);
+        }}
+        showCitationModal={showCitationModal}
+        citationSelectedText={citationSelectedText}
+        onCloseCitationModal={() => setShowCitationModal(false)}
+        onInsertCitationInline={(text) => {
+          const ed = getActiveEditorTarget();
+          if (ed) {
+            ed.insertText(text);
+          } else {
+            updateActiveContent(activeTab.content + text);
+          }
+        }}
+        onInsertFootnote={handleInsertFootnote}
+        showKnowledgeGraphModal={showKnowledgeGraphModal}
+        workspaceKnowledgeReport={workspaceKnowledgeReport}
+        onCloseKnowledgeGraphModal={() => setShowKnowledgeGraphModal(false)}
+        exportOptionsModalMode={exportOptionsModalMode}
+        defaultExportPageSettings={DEFAULT_EXPORT_PAGE_SETTINGS}
+        onCloseExportOptionsModal={() => setExportOptionsModalMode(null)}
         onExportHtml={(opts) => void handleExportHtml(opts)}
         onExportPdf={(opts) => handleExportPdf(opts)}
-        onClose={() => setExportOptionsModalMode(null)}
-      />
-
-      <ScratchpadModal
-        open={showScratchpad}
-        locale={locale}
-        content={scratchpadContent}
-        onChange={setScratchpadContent}
-        onCopy={(txt) => {
+        showScratchpad={showScratchpad}
+        scratchpadContent={scratchpadContent}
+        onScratchpadChange={setScratchpadContent}
+        onCopyScratchpad={(txt) => {
           void writeClipboardText(txt);
           notify(locale === 'ja' ? 'スクラッチパッドをコピーしました' : 'Scratchpad copied');
         }}
-        onPromoteToTab={(txt) => {
+        onPromoteScratchpadToTab={(txt) => {
           const title = locale === 'ja' ? 'スクラッチメモ.md' : 'Scratchpad.md';
           const created = makeTab(title, txt, undefined, undefined, {
             encoding: effectiveSettings.defaultNewFileEncoding ?? 'utf-8',
@@ -7268,20 +7095,11 @@ export function App() {
           setTabs((prev) => [...prev, created]);
           setActiveTabId(created.id);
         }}
-        onClose={() => setShowScratchpad(false)}
-      />
-
-      <AiSendPreviewModal
-        request={aiSendPreviewRequest}
-        locale={locale}
-        defaultAutoRedact={settings.aiAutoRedactSecrets ?? true}
-        onClose={() => setAiSendPreviewRequest(null)}
-      />
-
-      <FeatureGuideModal
-        open={showFeatureGuideModal}
-        locale={locale}
-        onRunAction={(actionId) => {
+        onCloseScratchpad={() => setShowScratchpad(false)}
+        aiSendPreviewRequest={aiSendPreviewRequest}
+        onCloseAiSendPreview={() => setAiSendPreviewRequest(null)}
+        showFeatureGuideModal={showFeatureGuideModal}
+        onRunFeatureGuideAction={(actionId) => {
           switch (actionId) {
             case 'insert-image':
               setShowImageModal(true);
@@ -7318,8 +7136,16 @@ export function App() {
               break;
           }
         }}
-        onClose={() => setShowFeatureGuideModal(false)}
+        onCloseFeatureGuideModal={() => setShowFeatureGuideModal(false)}
       />
+
+      {isDraggingFile && (
+        <div className="drop-overlay">
+          <div className="drop-card">{t.status.dropHint}</div>
+        </div>
+      )}
+
+      {toast && <div className="toast-banner">{toast}</div>}
 
       <TooltipLayer enabled={settings.customTooltipsEnabled ?? true} />
 

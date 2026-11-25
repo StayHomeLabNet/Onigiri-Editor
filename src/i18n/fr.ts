@@ -3,7 +3,7 @@ import type { Translations } from './types';
 
 export const fr: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.2',
+  versionLabel: 'v1.5.3',
   modes: {
     simple: 'Simple',
     basic: 'Standard',
@@ -201,15 +201,15 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Transformations par clic droit et outils de données** : Majuscules/Minuscules/Titre, suppression des espaces de début, ajout de citations, **Formater / Minifier / Trier les clés JSON**, **JSON ⇔ YAML**, **Formateur \`.env\`**, **Copier en texte enrichi**
   - **Gestion de l'encodage et des fins de ligne** : Ouvrir/créer en UTF-8 / Shift_JIS / EUC-JP, bascule LF/CRLF, compteurs en direct de caractères, mots et temps de lecture
 
-### 🤖 2. IA multi-fournisseurs et confidentialité
-- [x] **IA multi-fournisseurs (\`⌘ + ⇧ + E\` pour l'édition en ligne de la sélection)** :
-  - Compatible **Apple Foundation Models (sur l'appareil, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **API OpenAI / Anthropic / Gemini**, **Ollama** et **LM Studio**
+### 🤖 2. AI Harness, multi-fournisseurs et confidentialité
+- [x] **AI Harness unifié (\`⌘ + ⇧ + E\` pour l'édition en ligne de la sélection)** :
+  - Orchestrez **Apple Foundation Models (sur l'appareil, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **API OpenAI / Anthropic / Gemini**, **Ollama** et **LM Studio** depuis un seul espace avec suivi de progression, annulation et diagnostic d'erreurs
 - [x] **Nettoyage des sorties IA (bouton \`Nettoyer IA\`)** :
   - Nettoyage en un clic du texte collé depuis une IA : aligne les **largeurs de colonnes GFM**, normalise puces et espacement des titres, supprime les caractères de largeur nulle/NBSP et normalise les guillemets tout en préservant les blocs de code. Convertit aussi **le HTML collé en Markdown**
 - [x] **Boutons IA personnalisés et sous-menus dans la barre** :
   - Enregistrez jusqu'à 5 boutons principaux + 10 sous-éléments chacun, avec **modèle dédié par bouton/élément (CLI d'abonnement / API Cloud / IA locale)** et variables de prompt (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\`, etc.), incluant le préréglage **Traduction IA**
-- [x] **Chat IA (avec mentions \`@fichier\`), Saisie prédictive fantôme (\`Tab\` pour accepter) et Relecture** :
-  - Protégé par **Aperçu avant envoi et masquage des secrets** (masque clés API/tokens) et **Diff ligne par ligne** avant application
+- [x] **Chat IA (avec mentions \`@fichier\`), Saisie prédictive fantôme (\`Tab\` pour accepter, indicateur de chargement) et Relecture** :
+  - Protégé par exécution en bac à sable en lecture seule, **Aperçu avant envoi et masquage des secrets** (masque clés API/tokens) et **Diff ligne par ligne** avant application
 
 ### 🛡️ 3. Sécurité, gestion des ressources et compatibilité
 - [x] **Instantanés automatiques et bloc-notes rapide** :
@@ -227,7 +227,7 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Onglet latéral Git** (stage/unstage/discard, diff en ligne, **Message de commit IA**, Pull/Push) et **Comparer avec Git HEAD**
   - **Multi-onglets et comparaison côte à côte**, **Recherche & remplacement Regex multi-dossiers (\`⌘ + ⇧ + G\`)**
   - **Terminal intégré**, **Lanceur multi-serveurs dev (partage QR / LAN et diagnostic de logs par IA)** et **Navigateur web intégré** (fermeture \`✕\` en 1 clic)
-  - **Aperçu de tableaux de données (CSV / TSV / JSON / YAML)** avec copie en tableau Markdown
+  - **Aperçu de tableaux CSV / TSV (défilement virtuel multi-Mo et surlignage bidirectionnel)** : Défilement fluide sur gros CSV, colonne de numéros figée, colonnes numériques alignées à droite avec statistiques (\`Σ / Moy / Min / Max\`), sélecteur de délimiteur (Auto / , / Tab / ;), retour à la ligne, **surlignage bidirectionnel éditeur ⇔ cellule/sous-chaîne**, copie de cellule par double-clic (activable dans Paramètres) et copie en tableau Markdown
 - [x] **Export et personnalisation** :
   - **Word (\`.docx\`)**, **PDF / HTML (mise en page, thèmes et en-têtes/pieds de page)**, **export SVG/PNG et zoom pour Mermaid et KaTeX**
   - **Macros clavier (\`⌘ + ⇧ + M\` / \`F8\`)**, **4 thèmes (Clair / Sombre / Sépia / Minuit) + CSS personnalisé** et **interface en 8 langues**

@@ -2,7 +2,7 @@ import type { Translations } from './types';
 
 export const ja: Translations = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.2',
+  versionLabel: 'v1.5.3',
   modes: {
     simple: 'シンプル',
     basic: '標準',
@@ -1585,15 +1585,15 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **右クリック変換・データ整形**: 大文字/小文字/タイトルケース変換、行頭空白削除、引用符追加、**JSON 整形/圧縮/キーソート**、**JSON ⇔ YAML 変換**、**\`.env\` 整形**、**リッチテキストコピー**
   - **文字コード＆改行コード管理**: UTF-8 / Shift_JIS / EUC-JP 等の文字コード指定新規作成・再オープン、LF / CRLF 切替、文字数・単語数・読了時間のリアルタイム表示
 
-### 🤖 2. AI 連携 ＆ 安全設計
-- [x] **マルチ AI プロバイダー対応（\`⌘ + ⇧ + E\` で選択範囲をインライン編集）**:
-  - **Apple Foundation Models（macOS 26+ オンデバイス）** / **Codex CLI** / **Claude Code CLI** / **Gemini CLI** / **Antigravity CLI** / **OpenAI・Anthropic・Gemini API** / **Ollama** / **LM Studio**
+### 🤖 2. AI ハーネス ＆ 安全設計
+- [x] **マルチ AI エンジン統合ハーネス（\`⌘ + ⇧ + E\` で選択範囲をインライン編集）**:
+  - **Apple Foundation Models（macOS 26+ オンデバイス）** / **Codex CLI** / **Claude Code CLI** / **Gemini CLI** / **Antigravity CLI** / **OpenAI・Anthropic・Gemini API** / **Ollama** / **LM Studio** を単一 UI から安全に呼び出し・進捗確認・中断・エラー診断まで完結できます
 - [x] **AI 出力クリーンアップ（\`AI出力を整形\` ボタン）**:
   - ChatGPT 等から貼り付けた Markdown の **テーブル列幅・箇条書き記号・見出し前の空行・ゼロ幅スペース・スマートクォート** をコードブロックを保護したままワンクリックで整えます。Web ページの **HTML 貼り付け時の Markdown 自動変換**にも対応
 - [x] **ツールバー AI カスタムボタン＆サブメニュー**:
   - 最大 5 ボタン × 各 10 サブメニューを登録でき、**ボタン／項目ごとにサブスク CLI・クラウド API・ローカル AI のモデルを個別指定**可能。\`{{selection}}\` \`{{clipboard}}\` \`{{date}}\` 等の変数に対応し、初期プリセット **「AI翻訳」** を同梱
-- [x] **AI チャット（\`@ファイル参照\` 対応）・ゴーストテキスト補完（\`Tab\` 確定）・ルール＆AI 校正**:
-  - 送信前に **AI 送信内容プレビュー＆機密情報（API キー等）自動マスキング** が働き、適用前には **1行単位の Diff プレビュー** で確認できます
+- [x] **AI チャット（\`@ファイル参照\` 対応）・ゴーストテキスト補完（\`Tab\` 確定・生成中表示）・ルール＆AI 校正**:
+  - 読み取り専用サンドボックス実行や送信前の **AI 送信内容プレビュー＆機密情報（API キー等）自動マスキング**、適用前の **1行単位 Diff プレビュー** により安全に AI 出力を検証・反映できます
 
 ### 🛡️ 3. バックアップ・画像管理・互換性診断
 - [x] **自動スナップショット ＆ クイックメモ**:
@@ -1611,7 +1611,7 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
   - **Git パネル**（ステージ / 戻す / インライン Diff / **AIコミットメッセージ生成** / Pull・Push）・**Git HEAD との差分比較**
   - **マルチタブ＆2ペイン並列比較**・**フォルダー横断正規表現 Grep 置換（\`⌘ + ⇧ + G\`）**
   - **軽量統合ターミナル**・**開発サーバー自動検出（モノレポ複数同時起動・QR/LAN 共有・AI ログ診断）**・**内蔵 Web ブラウザ（\`✕\` でワンクリック終了可）**
-  - **データプレビュー（CSV / TSV / JSON / YAML）** のテーブル表示＆Markdown テーブル変換コピー
+  - **CSV / TSV テーブルプレビュー（大容量仮想スクロール＆双方向ハイライト対応）**: 数 MB 級の CSV も軽快に描画し、行番号列固定・数値列の自動右寄せ＆統計（合計/平均/最小/最大）・区切り文字切替（自動 / , / Tab / ;）・折り返し表示・**エディタ ⇔ テーブル間のセル／部分文字列双方向ハイライト**・ダブルクリック値コピー（設定で ON/OFF 可）・Markdown テーブル変換コピーに対応
 - [x] **書き出し ＆ カスタマイズ**:
   - **Word（\`.docx\`）**・**PDF / HTML（ページ設定・デザインテーマ・ヘッダー/フッター対応）**・**Mermaid / KaTeX の SVG・PNG 保存＆拡大ズーム**
   - **キーボードマクロ記録・再生（\`⌘ + ⇧ + M\` / \`F8\`）**・**4種のテーマ（Light / Dark / Sepia / Midnight）＋カスタム CSS**・**8言語 UI 切替**
