@@ -40,6 +40,8 @@ export const CitationModal: React.FC<CitationModalProps> = ({
   const [linkTitle, setLinkTitle] = useState('');
   const [linkDesc, setLinkDesc] = useState('');
   const [linkSite, setLinkSite] = useState('');
+  const [linkImageUrl, setLinkImageUrl] = useState('');
+  const [includeThumbnail, setIncludeThumbnail] = useState(true);
   const [fetchingUrl, setFetchingUrl] = useState(false);
 
   // BibTeX tab state
@@ -106,6 +108,7 @@ export const CitationModal: React.FC<CitationModalProps> = ({
       setLinkTitle(meta.title);
       setLinkDesc(meta.description);
       setLinkSite(meta.siteName || meta.domain);
+      setLinkImageUrl(meta.imageUrl || '');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
@@ -149,8 +152,11 @@ export const CitationModal: React.FC<CitationModalProps> = ({
       description: linkDesc.trim(),
       siteName: linkSite.trim() || domain,
       domain,
+      imageUrl: linkImageUrl.trim() || undefined,
     };
   };
+
+  const isJa = t.actions.close === '閉じる';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -272,6 +278,47 @@ export const CitationModal: React.FC<CitationModalProps> = ({
                 />
               </div>
 
+              <div className="field-row">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <label>{isJa ? 'サムネイル画像 URL（任意）' : 'Thumbnail Image URL (optional)'}</label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={includeThumbnail}
+                      onChange={(e) => setIncludeThumbnail(e.target.checked)}
+                    />
+                    <span>{isJa ? 'リンクカードにサムネイルを挿入' : 'Include thumbnail in link card'}</span>
+                  </label>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="url"
+                    className="text-input"
+                    value={linkImageUrl}
+                    onChange={(e) => setLinkImageUrl(e.target.value)}
+                    placeholder="https://example.com/og-image.png"
+                    disabled={!includeThumbnail}
+                  />
+                  {includeThumbnail && /^https?:\/\//i.test(linkImageUrl.trim()) && (
+                    <img
+                      src={linkImageUrl.trim()}
+                      alt=""
+                      style={{
+                        width: 44,
+                        height: 44,
+                        objectFit: 'cover',
+                        borderRadius: 6,
+                        border: '1px solid var(--border)',
+                        flexShrink: 0,
+                      }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+
               <div className="citation-actions-row">
                 <button
                   type="button"
@@ -303,7 +350,7 @@ export const CitationModal: React.FC<CitationModalProps> = ({
                   disabled={!url.trim()}
                   onClick={() => {
                     const meta = buildUrlMetaObj();
-                    onInsertInline(formatMarkdownLinkCard(meta));
+                    onInsertInline(formatMarkdownLinkCard(meta, { includeThumbnail }));
                     onClose();
                   }}
                 >

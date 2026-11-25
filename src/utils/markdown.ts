@@ -237,7 +237,7 @@ const editableSanitizeSchema = {
       'data-latex',
     ],
     code: [...(defaultSchema.attributes?.code || []), 'className'],
-    img: ['src', 'alt', 'title', 'width', 'height'],
+    img: ['src', 'alt', 'title', 'width', 'height', 'align'],
   },
 };
 
@@ -615,6 +615,14 @@ visualTurndown.addRule('tiptapParagraphInList', {
   },
 });
 
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 visualTurndown.addRule('tiptapImage', {
   filter: 'img',
   replacement(_content, node) {
@@ -624,6 +632,16 @@ visualTurndown.addRule('tiptapImage', {
     const alt = el.getAttribute('alt') || '';
     const title = el.getAttribute('title');
     if (!src) return '';
+    const rawAlign = (el.getAttribute('align') || '').trim().toLowerCase();
+    const align = rawAlign === 'left' || rawAlign === 'right' ? rawAlign : '';
+    const width = (el.getAttribute('width') || '').trim();
+    if (align || width) {
+      const attrs = [`src="${escapeHtmlAttr(src)}"`, `alt="${escapeHtmlAttr(alt)}"`];
+      if (title) attrs.push(`title="${escapeHtmlAttr(title)}"`);
+      if (align) attrs.push(`align="${align}"`);
+      if (width) attrs.push(`width="${escapeHtmlAttr(width)}"`);
+      return `<img ${attrs.join(' ')} />`;
+    }
     return formatMarkdownImageSyntax(src, alt, title);
   },
 });
@@ -1007,13 +1025,19 @@ export function exportStandaloneHtml(
       line-height: 1.75;
     }
     .markdown-body { max-width: 820px; margin: 0 auto; }
+    .markdown-body::after { content: ''; display: table; clear: both; }
+    h1, h2, h3, h4, h5, h6, hr { clear: both; }
     h1, h2, h3, h4 { line-height: 1.3; margin-top: 1.6em; }
     h1, h2 { border-bottom: 1px solid ${border}; padding-bottom: 0.3em; }
+    img { max-width: 100%; height: auto; border-radius: 6px; }
+    img[align="left"] { float: left; margin: 0.25em 1.25em 0.85em 0; max-width: 58%; }
+    img[align="right"] { float: right; margin: 0.25em 0 0.85em 1.25em; max-width: 58%; }
     a { color: #6366f1; }
     code { font-family: 'JetBrains Mono', 'Cascadia Mono', 'SF Mono', Consolas, Menlo, 'Ubuntu Mono', 'Noto Sans Mono', monospace; background: ${codeBg}; padding: 0.18em 0.4em; border-radius: 5px; font-size: 0.9em; }
     pre { background: ${codeBg}; padding: 14px 16px; border-radius: 10px; overflow-x: auto; border: 1px solid ${border}; }
     pre code { background: transparent; padding: 0; }
     blockquote { margin: 1em 0; padding: 0.4em 1em; border-left: 4px solid #6366f1; color: ${muted}; }
+    blockquote::after { content: ''; display: table; clear: both; }
     table { border-collapse: collapse; width: 100%; margin: 1.2em 0; }
     th, td { border: 1px solid ${border}; padding: 8px 12px; text-align: left; }
     th { background: ${codeBg}; }

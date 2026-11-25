@@ -14,13 +14,141 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, Manager, Runtime, State};
 use walkdir::WalkDir;
 
 struct OpenedFilesState(Mutex<Vec<String>>);
 
 struct GlobalHotkeyState(Mutex<Option<String>>);
+
+static NEXT_WINDOW_SEQ: AtomicUsize = AtomicUsize::new(1);
+
+pub(crate) fn focused_or_primary_window_label<R: Runtime>(app: &tauri::AppHandle<R>) -> Option<String> {
+    let windows = app.webview_windows();
+    if let Some((label, _)) = windows.iter().find(|(_, w)| w.is_focused().unwrap_or(false)) {
+        return Some(label.clone());
+    }
+    if windows.contains_key(window_state::MAIN_WINDOW_LABEL) {
+        return Some(window_state::MAIN_WINDOW_LABEL.to_string());
+    }
+    windows.keys().next().cloned()
+}
+
+fn percent_encode_query_value(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                out.push_str(&format!("%{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+fn apply_release_webview_hardening<R: Runtime>(_win: &tauri::WebviewWindow<R>) {
+    #[cfg(all(target_os = "windows", not(debug_assertions)))]
+    {
+        let _ = _win.with_webview(|pwv| unsafe {
+            if let Ok(core) = pwv.controller().CoreWebView2() {
+                if let Ok(settings) = core.Settings() {
+                    let _ = settings.SetAreDevToolsEnabled(false);
+                }
+            }
+        });
+    }
+    #[cfg(all(target_os = "macos", not(debug_assertions)))]
+    {
+        let _ = _win.with_webview(|pwv| unsafe {
+            use objc2::msg_send;
+            use objc2::runtime::AnyObject;
+            use objc2_foundation::NSString;
+            let wk = pwv.inner() as *mut AnyObject;
+            if !wk.is_null() {
+                let config: *mut AnyObject = msg_send![wk, configuration];
+                if !config.is_null() {
+                    let prefs: *mut AnyObject = msg_send![config, preferences];
+                    if !prefs.is_null() {
+                        let key = NSString::from_str("developerExtrasEnabled");
+                        let no_val: *mut AnyObject =
+                            msg_send![objc2::class!(NSNumber), numberWithBool: false];
+                        let () = msg_send![prefs, setValue: no_val, forKey: &*key];
+                    }
+                }
+            }
+        });
+    }
+}
+
+pub(crate) fn create_new_window_impl<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    workspace_root: Option<String>,
+    file_path: Option<String>,
+) -> Result<String, String> {
+    let seq = NEXT_WINDOW_SEQ.fetch_add(1, Ordering::Relaxed);
+    let label = format!("win-{}", seq);
+
+    let mut url = format!("index.html?window={}", label);
+    if let Some(ws) = workspace_root.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        url.push_str("&workspace=");
+        url.push_str(&percent_encode_query_value(ws));
+    }
+    if let Some(fp) = file_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        url.push_str("&file=");
+        url.push_str(&percent_encode_query_value(fp));
+    }
+
+    let ref_win = focused_or_primary_window_label(app).and_then(|l| app.get_webview_window(&l));
+    let (mut width, mut height, mut pos) = (1360.0_f64, 860.0_f64, None::<(f64, f64)>);
+    if let Some(win) = ref_win {
+        if let Ok(scale) = win.scale_factor() {
+            let scale = scale.max(0.1);
+            if let Ok(inner) = win.inner_size() {
+                let logical = inner.to_logical::<f64>(scale);
+                width = logical.width.max(820.0);
+                height = logical.height.max(560.0);
+            }
+            if let Ok(outer) = win.outer_position() {
+                let logical = outer.to_logical::<f64>(scale);
+                pos = Some((logical.x + 28.0, logical.y + 28.0));
+            }
+        }
+    }
+
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        app,
+        &label,
+        tauri::WebviewUrl::App(url.into()),
+    )
+    .title("Onigiri Editor")
+    .inner_size(width, height)
+    .min_inner_size(820.0, 560.0)
+    .resizable(true)
+    .visible(true);
+
+    if let Some((px, py)) = pos {
+        builder = builder.position(px, py);
+    }
+
+    let win = builder.build().map_err(|e| format!("Failed to open window: {}", e))?;
+    apply_release_webview_hardening(&win);
+    let _ = win.set_focus();
+    Ok(label)
+}
+
+#[tauri::command]
+fn create_new_window(
+    app: tauri::AppHandle,
+    workspace_root: Option<String>,
+    file_path: Option<String>,
+) -> Result<String, String> {
+    create_new_window_impl(&app, workspace_root, file_path)
+}
 
 #[tauri::command]
 fn set_global_hotkey(
@@ -458,6 +586,9 @@ fn read_clipboard_text() -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
         let out = std::process::Command::new("pbpaste")
+            .env_remove("LC_ALL")
+            .env("LC_CTYPE", "UTF-8")
+            .env("LANG", "en_US.UTF-8")
             .output()
             .map_err(|e| format!("pbpaste failed: {}", e))?;
         return Ok(String::from_utf8_lossy(&out.stdout).to_string());
@@ -502,6 +633,9 @@ fn write_clipboard_text(text: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let mut child = std::process::Command::new("pbcopy")
+            .env_remove("LC_ALL")
+            .env("LC_CTYPE", "UTF-8")
+            .env("LANG", "en_US.UTF-8")
             .stdin(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| format!("pbcopy failed: {}", e))?;
@@ -2786,12 +2920,18 @@ pub fn run() {
                     let mut guard = state.0.lock().unwrap();
                     guard.extend(new_paths.clone());
                 }
-                let _ = app.emit("open-files", new_paths);
+                if let Some(target_label) = focused_or_primary_window_label(app) {
+                    let _ = app.emit_to(&target_label, "open-files", new_paths);
+                } else {
+                    let _ = app.emit("open-files", new_paths);
+                }
             }
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.unminimize();
-                let _ = win.show();
-                let _ = win.set_focus();
+            if let Some(target_label) = focused_or_primary_window_label(app) {
+                if let Some(win) = app.get_webview_window(&target_label) {
+                    let _ = win.unminimize();
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
             }
         }));
     }
@@ -2810,36 +2950,8 @@ pub fn run() {
         .manage(updates::UpdateManagerState::new())
         .setup(|app| {
             window_state::restore_main_window_state(app.handle());
-            #[cfg(all(target_os = "windows", not(debug_assertions)))]
             if let Some(main_win) = app.get_webview_window("main") {
-                let _ = main_win.with_webview(|pwv| unsafe {
-                    if let Ok(core) = pwv.controller().CoreWebView2() {
-                        if let Ok(settings) = core.Settings() {
-                            let _ = settings.SetAreDevToolsEnabled(false);
-                        }
-                    }
-                });
-            }
-            #[cfg(all(target_os = "macos", not(debug_assertions)))]
-            if let Some(main_win) = app.get_webview_window("main") {
-                let _ = main_win.with_webview(|pwv| unsafe {
-                    use objc2::msg_send;
-                    use objc2::runtime::AnyObject;
-                    use objc2_foundation::NSString;
-                    let wk = pwv.inner() as *mut AnyObject;
-                    if !wk.is_null() {
-                        let config: *mut AnyObject = msg_send![wk, configuration];
-                        if !config.is_null() {
-                            let prefs: *mut AnyObject = msg_send![config, preferences];
-                            if !prefs.is_null() {
-                                let key = NSString::from_str("developerExtrasEnabled");
-                                let no_val: *mut AnyObject =
-                                    msg_send![objc2::class!(NSNumber), numberWithBool: false];
-                                let () = msg_send![prefs, setValue: no_val, forKey: &*key];
-                            }
-                        }
-                    }
-                });
+                apply_release_webview_hardening(&main_win);
             }
             let initial_locale = detect_os_locale_impl();
             let menu = menu::build_app_menu(app.handle(), initial_locale)?;
@@ -2928,7 +3040,8 @@ pub fn run() {
             terminal::terminal_kill_command,
             set_global_hotkey,
             clear_app_caches,
-            reset_window_state
+            reset_window_state,
+            create_new_window
         ])
         .build(tauri::generate_context!())
         .expect("error while building Onigiri Editor");
@@ -2948,7 +3061,9 @@ pub fn run() {
                 }
                 tauri::WindowEvent::Destroyed => {
                     window_state::flush_window_state(app_handle);
-                    project::stop_project_dev_server_sync(app_handle);
+                    if app_handle.webview_windows().is_empty() {
+                        project::stop_project_dev_server_sync(app_handle);
+                    }
                 }
                 _ => {}
             },
@@ -2956,7 +3071,9 @@ pub fn run() {
                 event: tauri::WindowEvent::Destroyed,
                 ..
             } => {
-                project::stop_project_dev_server_sync(app_handle);
+                if app_handle.webview_windows().is_empty() {
+                    project::stop_project_dev_server_sync(app_handle);
+                }
             }
             tauri::RunEvent::Exit => {
                 window_state::capture_main_window_state(app_handle, true);
@@ -2983,7 +3100,11 @@ pub fn run() {
                     let mut guard = state.0.lock().unwrap();
                     guard.extend(paths.clone());
                 }
-                let _ = app_handle.emit("open-files", paths);
+                if let Some(target_label) = focused_or_primary_window_label(app_handle) {
+                    let _ = app_handle.emit_to(&target_label, "open-files", paths);
+                } else {
+                    let _ = app_handle.emit("open-files", paths);
+                }
             }
         }
         #[cfg(not(target_os = "macos"))]

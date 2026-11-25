@@ -2,6 +2,7 @@ import type { DocumentTab, Snapshot, TextEncodingId } from '../types';
 import { isTauri } from './platform';
 
 export const SESSION_STORAGE_KEY = 'onigiri-markdown.session.v1';
+export const WINDOW_SESSION_STORAGE_PREFIX = 'onigiri-markdown.window-session.';
 export const WORKSPACE_SESSIONS_KEY = 'onigiri-markdown.workspace-sessions.v1';
 export const RECENT_FILES_KEY = 'onigiri-markdown.recentFiles.v1';
 export const RECENT_FOLDERS_KEY = 'onigiri-markdown.recentFolders.v1';
@@ -9,6 +10,28 @@ export const INLINE_AI_PRESETS_KEY = 'onigiri-markdown.inline-ai-presets.v1';
 export const MAX_RECENT_FILES = 12;
 export const MAX_RECENT_FOLDERS = 10;
 export const MAX_WORKSPACE_SESSIONS = 15;
+
+export interface WindowLaunchParams {
+  windowId: string | null;
+  workspacePath: string | null;
+  filePath: string | null;
+}
+
+export function getInitialWindowParams(): WindowLaunchParams {
+  if (typeof window === 'undefined') {
+    return { windowId: null, workspacePath: null, filePath: null };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const windowId = params.get('window')?.trim() || null;
+  const workspacePath = params.get('workspace')?.trim() || null;
+  const filePath = params.get('file')?.trim() || null;
+  return { windowId, workspacePath, filePath };
+}
+
+export function getActiveSessionStorageKey(): string {
+  const { windowId } = getInitialWindowParams();
+  return windowId ? `${WINDOW_SESSION_STORAGE_PREFIX}${windowId}` : SESSION_STORAGE_KEY;
+}
 
 export function loadStringList(key: string, maxItems: number): string[] {
   try {
@@ -252,8 +275,11 @@ export function buildInitialSessionState(
   pendingHydrationIds: string[];
   restoredSession: boolean;
 } {
+  const { windowId, workspacePath } = getInitialWindowParams();
+  const storageKey = getActiveSessionStorageKey();
+
   try {
-    const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (raw) {
       const parsed = JSON.parse(raw) as PersistedSession;
       if (parsed && Array.isArray(parsed.tabs) && parsed.tabs.length > 0) {
@@ -288,12 +314,12 @@ export function buildInitialSessionState(
   } catch {
     // ignore corrupt session storage
   }
-  const fallback = makeTab(welcomeTitle, welcomeContent);
+  const fallback = makeTab(welcomeTitle, windowId ? '' : welcomeContent);
   return {
     tabs: [fallback],
     activeTabId: fallback.id,
     sideTabId: null,
-    workspaceRoot: null,
+    workspaceRoot: windowId && workspacePath && isTauri() ? workspacePath : null,
     pendingHydrationIds: [],
     restoredSession: false,
   };

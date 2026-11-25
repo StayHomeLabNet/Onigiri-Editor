@@ -60,6 +60,7 @@ export const DEFAULT_KEYBINDING_DEFS: KeybindingDef[] = [
   // File
   { id: 'quick-open', category: 'File', defaultBinding: 'Mod+P' },
   { id: 'new-file', category: 'File', defaultBinding: 'Mod+N' },
+  { id: 'new-window', category: 'File', defaultBinding: 'Mod+Shift+N' },
   { id: 'open-file', category: 'File', defaultBinding: 'Mod+O' },
   { id: 'save-file', category: 'File', defaultBinding: 'Mod+S' },
   { id: 'save-as', category: 'File', defaultBinding: 'Mod+Shift+S' },

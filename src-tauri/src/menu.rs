@@ -35,6 +35,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
         quit: &'static str,
         file: &'static str,
         new_file: &'static str,
+        new_window: &'static str,
         new_encoding: &'static str,
         open: &'static str,
         quick_open: &'static str,
@@ -96,6 +97,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "Onigiri Editor を終了",
             file: "ファイル",
             new_file: "新規作成",
+            new_window: "新しいウィンドウ",
             new_encoding: "新規作成（文字コード指定）…",
             open: "ファイルを開く…",
             quick_open: "クイックオープン…",
@@ -155,6 +157,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "退出 Onigiri Editor",
             file: "文件",
             new_file: "新建文件",
+            new_window: "新建窗口",
             new_encoding: "使用指定编码新建…",
             open: "打开文件…",
             quick_open: "快速打开…",
@@ -214,6 +217,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "結束 Onigiri Editor",
             file: "檔案",
             new_file: "新增檔案",
+            new_window: "新增視窗",
             new_encoding: "以指定編碼新增…",
             open: "開啟檔案…",
             quick_open: "快速開啟…",
@@ -273,6 +277,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "Onigiri Editor 종료",
             file: "파일",
             new_file: "새 파일",
+            new_window: "새 창",
             new_encoding: "인코딩 지정하여 새로 만들기…",
             open: "파일 열기…",
             quick_open: "빠른 열기…",
@@ -332,6 +337,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "Salir de Onigiri Editor",
             file: "Archivo",
             new_file: "Nuevo archivo",
+            new_window: "Nueva ventana",
             new_encoding: "Nuevo archivo con codificación...",
             open: "Abrir archivo...",
             quick_open: "Apertura rápida...",
@@ -391,6 +397,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "Quitter Onigiri Editor",
             file: "Fichier",
             new_file: "Nouveau fichier",
+            new_window: "Nouvelle fenêtre",
             new_encoding: "Nouveau fichier avec encodage...",
             open: "Ouvrir un fichier...",
             quick_open: "Ouverture rapide...",
@@ -450,6 +457,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "Onigiri Editor beenden",
             file: "Datei",
             new_file: "Neue Datei",
+            new_window: "Neues Fenster",
             new_encoding: "Neue Datei mit Kodierung...",
             open: "Datei öffnen...",
             quick_open: "Schnell öffnen...",
@@ -509,6 +517,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             quit: "Quit Onigiri Editor",
             file: "File",
             new_file: "New File",
+            new_window: "New Window",
             new_encoding: "New File with Encoding...",
             open: "Open File...",
             quick_open: "Quick Open...",
@@ -570,6 +579,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
 
     let file_title = lbl.file;
     let new_label = lbl.new_file;
+    let new_window_label = lbl.new_window;
     let new_encoding_label = lbl.new_encoding;
     let open_label = lbl.open;
     let quick_open_label = lbl.quick_open;
@@ -626,6 +636,9 @@ pub fn build_app_menu_with_state<R: Runtime>(
 
     let file_new = MenuItemBuilder::with_id("new-file", new_label)
         .accelerator("CmdOrCtrl+N")
+        .build(app)?;
+    let file_new_window = MenuItemBuilder::with_id("new-window", new_window_label)
+        .accelerator("CmdOrCtrl+Shift+N")
         .build(app)?;
     let file_new_encoding =
         MenuItemBuilder::with_id("new-file-with-encoding", new_encoding_label).build(app)?;
@@ -711,6 +724,12 @@ pub fn build_app_menu_with_state<R: Runtime>(
     }
     let recent_submenu = recent_builder.build()?;
 
+    let edit_undo = MenuItemBuilder::with_id("edit-undo", undo_label)
+        .accelerator("CmdOrCtrl+Z")
+        .build(app)?;
+    let edit_redo = MenuItemBuilder::with_id("edit-redo", redo_label)
+        .accelerator("CmdOrCtrl+Shift+Z")
+        .build(app)?;
     let edit_find = MenuItemBuilder::with_id("find", find_label)
         .accelerator("CmdOrCtrl+F")
         .build(app)?;
@@ -768,6 +787,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
     #[cfg_attr(target_os = "macos", allow(unused_mut))]
     let mut file_builder = SubmenuBuilder::new(app, file_title)
         .item(&file_new)
+        .item(&file_new_window)
         .item(&file_new_encoding)
         .item(&file_open)
         .item(&file_quick_open)
@@ -796,8 +816,8 @@ pub fn build_app_menu_with_state<R: Runtime>(
     let file_submenu = file_builder.build()?;
 
     let edit_submenu = SubmenuBuilder::new(app, edit_title)
-        .item(&PredefinedMenuItem::undo(app, Some(undo_label))?)
-        .item(&PredefinedMenuItem::redo(app, Some(redo_label))?)
+        .item(&edit_undo)
+        .item(&edit_redo)
         .separator()
         .item(&PredefinedMenuItem::cut(app, Some(cut_label))?)
         .item(&PredefinedMenuItem::copy(app, Some(copy_label))?)
@@ -863,11 +883,19 @@ pub fn build_app_menu_with_state<R: Runtime>(
 }
 
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
+    if id == "new-window" {
+        let _ = crate::create_new_window_impl(app, None, None);
+        return;
+    }
     let normalized = match id {
         "open-about-help" => "open-about",
         other => other,
     };
-    let _ = app.emit("menu-action", normalized);
+    if let Some(target) = crate::focused_or_primary_window_label(app) {
+        let _ = app.emit_to(&target, "menu-action", normalized);
+    } else {
+        let _ = app.emit("menu-action", normalized);
+    }
 }
 
 #[tauri::command]

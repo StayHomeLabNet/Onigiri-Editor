@@ -1,10 +1,39 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, BookmarkPlus, Loader2, RotateCcw, SlidersHorizontal, Sparkles, Square, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, BookmarkPlus, Loader2, Maximize2, Minimize2, RotateCcw, SlidersHorizontal, Sparkles, Square, Trash2, X } from 'lucide-react';
 import type { AiProviderConfig, AiProviderId, InlineAiPresetItem } from '../types';
 import type { Translations } from '../i18n/types';
 import { cancelAiChat, sendAiChat } from '../utils/platform';
 
 export const INLINE_AI_PRESETS_KEY = 'onigiri-markdown.inline-ai-presets.v1';
+const INLINE_AI_MODAL_SIZE_KEY = 'onigiri-markdown.inline-ai-modal-size.v1';
+
+interface ModalSize {
+  width: number;
+  height: number;
+}
+
+function loadSavedModalSize(): ModalSize | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(INLINE_AI_MODAL_SIZE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ModalSize>;
+    if (
+      typeof parsed.width === 'number' &&
+      Number.isFinite(parsed.width) &&
+      typeof parsed.height === 'number' &&
+      Number.isFinite(parsed.height)
+    ) {
+      return {
+        width: Math.max(420, Math.round(parsed.width)),
+        height: Math.max(360, Math.round(parsed.height)),
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
 
 const DEFAULT_BASE_URLS: Partial<Record<AiProviderId, string>> = {
   'openai-api': 'https://api.openai.com/v1',
@@ -95,10 +124,20 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
   const [managingPresets, setManagingPresets] = useState(false);
   const [addingPreset, setAddingPreset] = useState(false);
   const [newPresetLabel, setNewPresetLabel] = useState('');
+  const [customSize, setCustomSize] = useState<ModalSize | null>(() => loadSavedModalSize());
+  const [expanded, setExpanded] = useState(false);
   const requestIdRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
   const skipNextPersistRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      resizeCleanupRef.current?.();
+    };
+  }, []);
 
   useEffect(() => {
     const onReset = () => {
@@ -260,22 +299,103 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
     setBusy(false);
   };
 
+  const startResize = (axis: 'x' | 'y' | 'xy', e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const el = modalRef.current;
+    if (!el) return;
+    resizeCleanupRef.current?.();
+    const rect = el.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = rect.width;
+    const startH = rect.height;
+    let latest: ModalSize = { width: Math.round(startW), height: Math.round(startH) };
+    setExpanded(false);
+
+    const onMove = (ev: MouseEvent) => {
+      const maxW = Math.floor(window.innerWidth * 0.94);
+      const maxH = Math.floor(window.innerHeight * 0.88);
+      const nextW = axis.includes('x')
+        ? Math.round(Math.max(420, Math.min(maxW, startW + (ev.clientX - startX) * 2)))
+        : latest.width;
+      const nextH = axis.includes('y')
+        ? Math.round(Math.max(360, Math.min(maxH, startH + (ev.clientY - startY))))
+        : latest.height;
+      latest = { width: nextW, height: nextH };
+      setCustomSize(latest);
+    };
+
+    const cleanup = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      resizeCleanupRef.current = null;
+    };
+
+    const onUp = () => {
+      cleanup();
+      try {
+        localStorage.setItem(INLINE_AI_MODAL_SIZE_KEY, JSON.stringify(latest));
+      } catch {
+        // ignore
+      }
+    };
+
+    resizeCleanupRef.current = cleanup;
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  const isJa = t.actions.close === '閉じる';
+  const modalStyle: React.CSSProperties | undefined = expanded
+    ? { width: 'min(1040px, 94vw)', height: '84vh' }
+    : customSize
+      ? {
+          width: `min(${customSize.width}px, 94vw)`,
+          height: `min(${customSize.height}px, 88vh)`,
+        }
+      : undefined;
+  const isResized = expanded || customSize !== null;
+
   return (
     <div className="modal-backdrop" onClick={() => !busy && onClose()}>
-      <div className="inline-ai-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        className={`inline-ai-modal ${isResized ? 'is-resized' : ''}`}
+        style={modalStyle}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="ai-diff-modal-header">
           <div className="ai-diff-modal-title-row">
             <Sparkles size={17} />
             <h3>{t.inlineAiModal.title}</h3>
           </div>
-          <button
-            type="button"
-            className="modal-close-btn"
-            onClick={() => !busy && onClose()}
-            title={t.actions.close}
-          >
-            <X size={16} />
-          </button>
+          <div className="ai-diff-modal-header-actions">
+            <button
+              type="button"
+              className="modal-close-btn"
+              onClick={() => setExpanded((v) => !v)}
+              title={
+                expanded
+                  ? isJa
+                    ? '元のサイズに戻す'
+                    : 'Restore size'
+                  : isJa
+                    ? 'ウィンドウを拡大'
+                    : 'Expand size'
+              }
+            >
+              {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            </button>
+            <button
+              type="button"
+              className="modal-close-btn"
+              onClick={() => !busy && onClose()}
+              title={t.actions.close}
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="inline-ai-body">
@@ -438,6 +558,22 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
             <span>{busy ? t.inlineAiModal.runningBtn : t.inlineAiModal.runBtn}</span>
           </button>
         </div>
+
+        <div
+          className="inline-ai-resize-edge-r"
+          onMouseDown={(e) => startResize('x', e)}
+          aria-hidden="true"
+        />
+        <div
+          className="inline-ai-resize-edge-b"
+          onMouseDown={(e) => startResize('y', e)}
+          aria-hidden="true"
+        />
+        <div
+          className="inline-ai-resize-corner"
+          onMouseDown={(e) => startResize('xy', e)}
+          aria-hidden="true"
+        />
       </div>
     </div>
   );

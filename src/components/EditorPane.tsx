@@ -1308,6 +1308,55 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
       }
     }, []);
 
+    const scheduleGhostText = useCallback((view: EditorView) => {
+      cancelPendingGhostText();
+      const sel = view.state.selection.main;
+      if (
+        !sel.empty ||
+        !callbacksRef.current.settings.aiGhostTextEnabled ||
+        !callbacksRef.current.onRequestGhostText ||
+        view.composing
+      ) {
+        return;
+      }
+      const delayMs = Math.max(
+        300,
+        Math.min(3000, callbacksRef.current.settings.aiGhostTextDelayMs ?? 900)
+      );
+      const capturedPos = sel.head;
+      const capturedDocId = currentDocIdRef.current;
+      ghostTimerRef.current = window.setTimeout(() => {
+        ghostTimerRef.current = null;
+        const curView = viewRef.current;
+        const requester = callbacksRef.current.onRequestGhostText;
+        if (!curView || !requester || currentDocIdRef.current !== capturedDocId) return;
+        const curSel = curView.state.selection.main;
+        if (!curSel.empty || curSel.head !== capturedPos) return;
+
+        const fullText = curView.state.doc.toString();
+        const prefix = fullText.slice(Math.max(0, capturedPos - 1500), capturedPos);
+        const suffix = fullText.slice(capturedPos, Math.min(fullText.length, capturedPos + 400));
+        if (prefix.trim().length < 8) return;
+
+        const controller = new AbortController();
+        ghostAbortRef.current = controller;
+        void requester(prefix, suffix, controller.signal)
+          .then((suggestion) => {
+            if (controller.signal.aborted || !suggestion) return;
+            const activeView = viewRef.current;
+            if (!activeView || currentDocIdRef.current !== capturedDocId) return;
+            const nowSel = activeView.state.selection.main;
+            if (!nowSel.empty || nowSel.head !== capturedPos) return;
+            activeView.dispatch({
+              effects: setGhostTextEffect.of({ pos: capturedPos, text: suggestion }),
+            });
+          })
+          .catch(() => {
+            // Ignore aborted or transient ghost text errors
+          });
+      }, delayMs);
+    }, [cancelPendingGhostText]);
+
     useEffect(() => () => cancelPendingGhostText(), [cancelPendingGhostText]);
 
     useEffect(() => {
@@ -1695,7 +1744,7 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 }
                 return false;
               },
-              compositionend() {
+              compositionend(_event, editorView) {
                 const base = composingBaseRef.current;
                 composingBaseRef.current = null;
                 const scheduledDocId = currentDocIdRef.current;
@@ -1720,6 +1769,14 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                     }
                   }, 0);
                 }
+                // Schedule AI Ghost Text after IME composition commits
+                window.setTimeout(() => {
+                  if (scheduledDocId !== currentDocIdRef.current) return;
+                  const currentView = viewRef.current ?? editorView;
+                  if (currentView && !currentView.composing) {
+                    scheduleGhostText(currentView);
+                  }
+                }, 0);
                 return false;
               },
               contextmenu(event, editorView) {
@@ -2043,50 +2100,10 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
                 }
 
                 // AI Ghost Text debounced autocomplete
-                cancelPendingGhostText();
-                if (
-                  update.docChanged &&
-                  sel.empty &&
-                  callbacksRef.current.settings.aiGhostTextEnabled &&
-                  callbacksRef.current.onRequestGhostText &&
-                  !update.view.composing
-                ) {
-                  const delayMs = Math.max(
-                    300,
-                    Math.min(3000, callbacksRef.current.settings.aiGhostTextDelayMs ?? 900)
-                  );
-                  const capturedPos = head;
-                  const capturedDocId = currentDocIdRef.current;
-                  ghostTimerRef.current = window.setTimeout(() => {
-                    ghostTimerRef.current = null;
-                    const curView = viewRef.current;
-                    const requester = callbacksRef.current.onRequestGhostText;
-                    if (!curView || !requester || currentDocIdRef.current !== capturedDocId) return;
-                    const curSel = curView.state.selection.main;
-                    if (!curSel.empty || curSel.head !== capturedPos) return;
-
-                    const fullText = curView.state.doc.toString();
-                    const prefix = fullText.slice(Math.max(0, capturedPos - 1500), capturedPos);
-                    const suffix = fullText.slice(capturedPos, Math.min(fullText.length, capturedPos + 400));
-                    if (prefix.trim().length < 8) return;
-
-                    const controller = new AbortController();
-                    ghostAbortRef.current = controller;
-                    void requester(prefix, suffix, controller.signal)
-                      .then((suggestion) => {
-                        if (controller.signal.aborted || !suggestion) return;
-                        const activeView = viewRef.current;
-                        if (!activeView || currentDocIdRef.current !== capturedDocId) return;
-                        const nowSel = activeView.state.selection.main;
-                        if (!nowSel.empty || nowSel.head !== capturedPos) return;
-                        activeView.dispatch({
-                          effects: setGhostTextEffect.of({ pos: capturedPos, text: suggestion }),
-                        });
-                      })
-                      .catch(() => {
-                        // Ignore aborted or transient ghost text errors
-                      });
-                  }, delayMs);
+                if (update.docChanged) {
+                  scheduleGhostText(update.view);
+                } else {
+                  cancelPendingGhostText();
                 }
                 const isMd = isMarkdownFilename(
                   callbacksRef.current.fileName,
@@ -3137,7 +3154,11 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             onOp={handleTableOp}
           />
         )}
-        <div ref={hostRef} className="editor-codemirror-host" />
+        <div
+          ref={hostRef}
+          className="editor-codemirror-host"
+          onBlur={() => setSelectionBubble(null)}
+        />
         {(settings.selectionBubbleMenuEnabled ?? true) && selectionBubble && (
           <SelectionBubbleMenu
             top={selectionBubble.top}
@@ -3147,8 +3168,22 @@ export const EditorPane = forwardRef<EditorHandle, EditorPaneProps>(
             aiCustomButtons={aiCustomButtons}
             runningAiCustomId={runningAiCustomId}
             onFormat={handleBubbleFormat}
-            onInlineAiEdit={onAiEditSelection}
-            onRunAiCustomButton={onRunAiCustomButton}
+            onInlineAiEdit={
+              onAiEditSelection
+                ? () => {
+                    setSelectionBubble(null);
+                    onAiEditSelection();
+                  }
+                : undefined
+            }
+            onRunAiCustomButton={
+              onRunAiCustomButton
+                ? (btn) => {
+                    setSelectionBubble(null);
+                    onRunAiCustomButton(btn);
+                  }
+                : undefined
+            }
           />
         )}
         {inlinePopup && popupItems.length > 0 && (

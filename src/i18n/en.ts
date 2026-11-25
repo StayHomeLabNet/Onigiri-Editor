@@ -78,6 +78,7 @@ export const en: Translations = {
     onlineManual: 'Online Manual',
     copyLanUrl: 'Copy LAN URL',
     newFileWithEncoding: 'New File with Encoding...',
+    newWindow: 'New Window',
     reopenWithEncoding: 'Reopen with Encoding...',
     changeEncoding: 'Change File Encoding...',
     macroRecord: 'Record Macro',
@@ -491,6 +492,7 @@ export const en: Translations = {
         // File
         'quick-open': 'Quick Open File / Outline (@)',
         'new-file': 'New Document',
+        'new-window': 'New Window',
         'open-file': 'Open File',
         'save-file': 'Save',
         'save-as': 'Save As',
@@ -1569,25 +1571,50 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
 
 ## Highlights
 
+### ✍️ 1. Writing, Visual Editing & Preview
 - [x] **Bidirectional Live Editing & Real-Time Sync Highlights**: Edit in CodeMirror 6 (left) or TipTap visual preview (right) with live sync. Both **cursor-line block highlight** and **character-level inline selection sync** highlight matching content in the preview (toggleable in **Settings → Editor**)
-- [x] **Modern Markdown Writing & Citations**:
+- [x] **Rich Authoring Assistants**:
   - Floating **Selection Bubble Menu** above selected text (Bold, Italic, Code, Link, Inline AI Edit, quick AI Custom buttons)
   - Automatic **Markdown Table GUI Toolbar** when the cursor is inside a table (add/remove rows & columns, align, numeric sort, format)
+  - Interactive **Preview Image Controls**: float left/right with text wrap, cycle widths (200 / 280 / 380px), edit Alt text, or delete directly in preview
   - Line-start \`/\` **Slash Commands**, **Custom Snippets**, **Auto TOC**, **Single-Line-Break (\`<br>\`) preview**
-  - **Citations / Link Cards / BibTeX & DOI Lookup / Footnotes**, **URL auto-title paste**, **Daily Notes & Templates**, **URL Web Clipper**, and **Slide Presentation Mode**
-- [x] **Multi-Provider AI & Customizable Toolbar Actions (\`⌘ + ⇧ + E\` for Inline Edit)**:
+  - **Citations / Link Cards (with optional thumbnails) / BibTeX & DOI Lookup / Footnotes**, **URL auto-title paste**, **Daily Notes & Templates**, **URL Web Clipper**, and **Slide Presentation Mode**
+- [x] **Pro Code & Text Utilities (including Context Menu)**:
+  - **Multi-Cursor (\`⌘ + D\` / \`Option + Click\`)**, **Box Selection (\`Option + Drag\` / \`Alt + Drag\`)**, **Line Bookmarks (\`⌘ + F2\` / \`F2\`)**, **Go to Line (\`⌘ + L\`)**
+  - **Find & Regex Replace** (with in-selection scope & fold-unfold support), **Code Folding**, **Whitespace / Ideographic Space / EOL Symbols**, **Column Ruler**, **Focus Mode**, and **Typewriter Scroll**
+  - **Right-Click Transforms & Data Tools**: Upper/Lower/Title case, trim leading spaces, insert quotes, **JSON Format / Minify / Sort Keys**, **JSON ⇔ YAML**, **\`.env\` Formatter**, **Copy as Rich Text**
+  - **Encoding & Line Ending Control**: New/reopen with UTF-8 / Shift_JIS / EUC-JP, LF/CRLF toggle, live character/word/reading-time counters
+
+### 🤖 2. Multi-Provider AI & Privacy Guardrails
+- [x] **Multi-Provider AI (\`⌘ + ⇧ + E\` for Inline Selection Edit)**:
   - Supports **Apple Foundation Models (on-device, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama**, and **LM Studio**
-  - **Toolbar AI Custom Buttons & Submenus**: Register up to 5 primary buttons + 10 submenu items each, with **per-button / per-item model overrides (Subscription CLI / Cloud API / Local AI)** and prompt variables (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\`, etc.), preloaded with an **AI Translate** preset
-  - Includes **AI Ghost Text Autocomplete (\`Tab\` to accept)**, **AI Send Content Preview & Secret Redaction**, **line-by-line Diff Preview**, and **Rule & AI Proofreading**
-- [x] **Safety & Compatibility Tools**:
+- [x] **AI Output Cleanup (\`AI Cleanup\` button)**:
+  - One-click rule-based cleanup for pasted AI output: aligns **GFM table column widths**, normalizes bullets & heading spacing, strips zero-width/NBSP characters, normalizes smart quotes—all while preserving fenced code blocks. Also supports **auto-converting pasted HTML to Markdown**
+- [x] **Toolbar AI Custom Buttons & Submenus**:
+  - Register up to 5 primary buttons + 10 submenu items each, with **per-button / per-item model overrides (Subscription CLI / Cloud API / Local AI)** and prompt variables (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\`, etc.), preloaded with an **AI Translate** preset
+- [x] **AI Chat (with \`@file\` mentions), AI Ghost Text Autocomplete (\`Tab\` to accept) & Proofreading**:
+  - Protected by **AI Send Content Preview & Secret Redaction** (masks API keys/tokens) and **line-by-line Diff Preview** before applying edits
+
+### 🛡️ 3. Safety, Asset Management & Compatibility
+- [x] **Auto Snapshots & Quick Scratchpad**:
   - **Auto Snapshot Timeline & Partial Chunk Restore** (on save & periodic intervals)
+  - **Quick Scratchpad** (no-save-needed notes) with **Global Summon Hotkey (\`⌘ + ⇧ + Space\`)**
+  - **Session Restore** across restarts & external file change detection
+- [x] **Image Optimization & Dialect Diagnostics**:
+  - Auto-resize & compress pasted/dropped images into \`assets/\`, **All Images Size Inventory**, and **Unused Image Cleaner**
   - **Markdown Compatibility Check** (diagnose dialect differences for GitHub / Zenn / Qiita / Notion / Obsidian)
-  - **Image Auto-Optimization (\`assets/\`) & All Images Size Inventory**, plus **Unused Image Cleaner**
-- [x] **Knowledge Graph, Git Source Control & Dev Tools**:
+
+### 🕸️ 4. Knowledge Graph, Git, Dev Tools & Export
+- [x] **PKM & Knowledge Graph**:
   - \`[[WikiLinks]]\`, Backlinks, \`#tag\` browser, and **interactive Knowledge Graph & broken-link diagnostics**
-  - **Git Sidebar Tab** (stage/unstage/discard, inline diff, **AI Commit Message**, Pull/Push), **Cross-Folder Regex Grep Replace (\`⌘ + ⇧ + G\`)**, and external file change detection
-  - **Integrated Terminal Drawer (Advanced Mode)**, **Multi-Server Dev Launcher (QR / LAN sharing & AI log diagnosis)**, and **Built-in Web Browser** (with 1-click \`✕\` close button)
-- [x] **Flexible Export & Productivity Extras**: **Word (\`.docx\`)**, **PDF / HTML (with Page Setup, Design Themes & Headers/Footers)**, **Mermaid & KaTeX SVG/PNG export**, **Copy as Rich Text**, **Quick Scratchpad**, and **Keyboard Macros (\`⌘ + ⇧ + M\` / \`F8\`)**
+- [x] **Git Source Control & Dev Workspace (Advanced Mode)**:
+  - **Git Sidebar Tab** (stage/unstage/discard, inline diff, **AI Commit Message**, Pull/Push) & **Compare with Git HEAD**
+  - **Multi-Tab & Side-by-Side Split Compare**, **Cross-Folder Regex Grep Replace (\`⌘ + ⇧ + G\`)**
+  - **Integrated Terminal Drawer**, **Multi-Server Dev Launcher (QR / LAN sharing & AI log diagnosis)**, and **Built-in Web Browser** (with 1-click \`✕\` close)
+  - **Data Table Preview (CSV / TSV / JSON / YAML)** with Copy-as-Markdown-Table
+- [x] **Export & Customization**:
+  - **Word (\`.docx\`)**, **PDF / HTML (Page Setup, Design Themes & Headers/Footers)**, **Mermaid & KaTeX SVG/PNG export & zoom**
+  - **Keyboard Macros (\`⌘ + ⇧ + M\` / \`F8\`)**, **4 Themes (Light / Dark / Sepia / Midnight) + Custom CSS**, and **8-Language UI**
 
 ---
 
@@ -1631,6 +1658,7 @@ flowchart LR
 | Cross-Folder Grep & Replace | \`⌘ + ⇧ + G\` | \`Ctrl + Shift + G\` |
 | Inline AI Edit on Selection | \`⌘ + ⇧ + E\` | \`Ctrl + Shift + E\` |
 | Toggle / Jump Line Bookmark | \`⌘ + F2\` / \`F2\` | \`Ctrl + F2\` / \`F2\` |
+| Record / Play Keyboard Macro | \`⌘ + ⇧ + M\` / \`F8\` | \`Ctrl + Shift + M\` / \`F8\` |
 | Zen Mode / Box Selection | \`⌘ + ⇧ + F\` / \`Option + Drag\` | \`Ctrl + Shift + F\` / \`Alt + Drag\` |
 | Global Summon Hotkey (opt-in in Settings) | \`⌘ + ⇧ + Space\` | \`Ctrl + Shift + Space\` |
 

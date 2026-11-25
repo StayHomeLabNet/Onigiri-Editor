@@ -1,9 +1,16 @@
-Onigiri Editor `v1.5.1` is a maintenance and architecture modularization release that splits `SettingsModal` into 7 focused tab components and extracts 7 domain custom hooks from `App.tsx` for improved maintainability with zero behavior regressions.
+Onigiri Editor `v1.5.2` introduces multi-window support, interactive preview image controls, link-card thumbnails, a resizable Inline AI Edit modal, Japanese IME support for AI Ghost Text autocomplete, and expanded Welcome guides across all 8 languages.
 
-### Highlights (`v1.5.1`)
-- **Architecture Modularization & Maintainability**:
-  - **Settings Modal Tab Decomposition (`src/components/settings/`)**: Split `SettingsModal.tsx` (4,094 → 439 lines) into `GeneralTab`, `EditorTab`, `SyntaxTab`, `KeybindingsTab`, `AiCustomTab`, `IntegrationsTab`, and `DataTab`.
-  - **Custom Hooks Extraction (`src/hooks/`)**: Extracted `useGitPanelActions`, `useMacroRecorder`, `useAiCustomRunner`, `useExportActions`, `useBackupAndReset`, `useExternalPreview`, and `useWorkspaceActions` from `App.tsx` (8,739 → 7,283 lines), and consolidated clean-tab reload logic after workspace replace operations.
+### Highlights (`v1.5.2`)
+- **Multi-Window Support (`⌘ + ⇧ + N` / `Ctrl + Shift + N`) & Release Hardening**:
+  - Open independent editor windows from the **File → New Window** menu or shortcut with per-window scoped session state, focused-window menu action routing, and release-build WebView DevTools hardening.
+- **Interactive Preview Images & Link Card Thumbnails**:
+  - Float images left/right with text wrap, cycle widths (`200 / 280 / 380px`), and edit Alt text or delete directly inside the visual preview.
+  - Add optional thumbnail image URLs (with toggle) to Markdown link cards in the Citation / Link Card modal.
+- **Resizable Inline AI Edit Modal & AI Ghost Text IME Fix**:
+  - Resize the Inline AI Edit modal by dragging edges/corners (persisted across sessions) or expand it to fill the viewport.
+  - Fixed AI Ghost Text autocomplete to trigger properly after Japanese IME composition commits (`compositionend`), handle leading newlines in AI responses, and added `cmGhostText` unit tests.
+- **Expanded Welcome Document Across All 8 Languages**:
+  - Updated `ようこそ.md` / `Welcome.md` across all 8 languages (`en`, `ja`, `zh-CN`, `zh-TW`, `ko`, `es`, `fr`, `de`) to cover the full feature set, shortcuts, Mermaid workflows, and interactive examples.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel, includes Apple Foundation Models support on macOS 26+)**: `.dmg` / `.app.tar.gz`
@@ -12,12 +19,19 @@ Onigiri Editor `v1.5.1` is a maintenance and architecture modularization release
 
 ---
 
-Onigiri Editor `v1.5.1` は、`SettingsModal` のタブ別コンポーネント分割と `App.tsx` からのカスタムフック抽出による保守性向上・メンテナンスリリースです（既存の動作・テストはすべて維持されています）。
+Onigiri Editor `v1.5.2` では、マルチウィンドウ対応、プレビュー上の画像インタラクティブ操作、リンクカードサムネイル対応、インライン AI 編集モーダルのリサイズ対応、AI ゴーストテキスト補完の日本語 IME 対応、および全 8 言語でのウェルカムドキュメント拡充を行いました。
 
-### 主な変更点（`v1.5.1`）
-- **フロントエンド構成のモジュール分割＆保守性向上**:
-  - **設定モーダルのタブ別分割（`src/components/settings/`）**: `SettingsModal.tsx`（4,094 行 → 439 行）を `GeneralTab` / `EditorTab` / `SyntaxTab` / `KeybindingsTab` / `AiCustomTab` / `IntegrationsTab` / `DataTab` の 7 コンポーネントへ分割しました。
-  - **カスタムフック抽出（`src/hooks/`）**: `App.tsx`（8,739 行 → 7,283 行）から `useGitPanelActions` / `useMacroRecorder` / `useAiCustomRunner` / `useExportActions` / `useBackupAndReset` / `useExternalPreview` / `useWorkspaceActions` を抽出し、ワークスペース一括置換後のクリーンタブ再読み込み処理も共通化しました。
+### 主な変更点（`v1.5.2`）
+- **マルチウィンドウ対応（`⌘ + ⇧ + N` / `Ctrl + Shift + N`）＆リリースビルド強化**:
+  - **ファイル → 新しいウィンドウ** またはショートカットから独立したウィンドウを開けるようになり、ウィンドウごとのセッション分離、フォーカス中ウィンドウへのメニューイベント振り分け、リリースビルド時の WebView DevTools 無効化を実装しました。
+- **プレビュー上の画像操作＆リンクカードサムネイル対応**:
+  - ビジュアルプレビュー上で画像の左寄せ／右寄せ（テキスト回り込み）、幅切替（`200 / 280 / 380px`）、Alt テキスト編集、削除を直接操作できるようになりました。
+  - 引用／リンクカードモーダルで任意のサムネイル画像 URL（表示 ON/OFF 切替付き）を指定できるようになりました。
+- **インライン AI 編集モーダルのリサイズ対応＆AI ゴーストテキスト日本語 IME 修正**:
+  - インライン AI 編集モーダルの端・角ドラッグによる自由リサイズ（サイズ自動保存）および拡大表示トグルを追加しました。
+  - AI ゴーストテキスト補完が日本語 IME 変換確定（`compositionend`）後にも正しく発火し、AI 応答の先頭空行で破棄されないよう修正するとともに、単体テスト（`ghostText.test.ts`）を追加しました。
+- **全 8 言語のウェルカムドキュメント拡充**:
+  - `ようこそ.md` / `Welcome.md` を全 8 言語（`en` / `ja` / `zh-CN` / `zh-TW` / `ko` / `es` / `fr` / `de`）で拡充し、最新機能・ショートカット・Mermaid ワークフロー図・インタラクティブ体験を網羅しました。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応・macOS 26+ Apple Foundation Models 対応）**: `.dmg` / `.app.tar.gz`

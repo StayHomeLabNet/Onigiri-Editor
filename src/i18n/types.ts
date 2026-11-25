@@ -76,6 +76,7 @@ export interface Translations {
     onlineManual: string;
     copyLanUrl: string;
     newFileWithEncoding: string;
+    newWindow: string;
     reopenWithEncoding: string;
     changeEncoding: string;
     macroRecord: string;

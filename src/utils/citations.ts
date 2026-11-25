@@ -7,12 +7,35 @@ export interface UrlMetadata {
   description: string;
   siteName: string;
   domain: string;
+  imageUrl?: string;
 }
 
 export interface BibtexEntry {
   entryType: string;
   citeKey: string;
   fields: Record<string, string>;
+}
+
+function resolveHttpImageUrl(raw: string, baseUrl: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  try {
+    const resolved = new URL(trimmed, baseUrl);
+    if (resolved.protocol === 'http:' || resolved.protocol === 'https:') {
+      return resolved.toString();
+    }
+  } catch {
+    // ignore invalid image URL
+  }
+  return '';
+}
+
+function escapeHtmlAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 export function extractUrlMetadataFromHtml(html: string, url: string): UrlMetadata {
@@ -44,12 +67,19 @@ export function extractUrlMetadataFromHtml(html: string, url: string): UrlMetada
       url;
     const description = getMeta(['og:description', 'description', 'twitter:description']);
     const siteName = getMeta(['og:site_name']) || domain;
+    const rawImage =
+      getMeta(['og:image:secure_url', 'og:image', 'twitter:image', 'twitter:image:src']) ||
+      doc.querySelector('link[rel="image_src"]')?.getAttribute('href')?.trim() ||
+      doc.querySelector('link[rel="apple-touch-icon"]')?.getAttribute('href')?.trim() ||
+      '';
+    const imageUrl = resolveHttpImageUrl(rawImage, url);
     return {
       url,
       title: rawTitle.replace(/\s+/g, ' ').trim(),
       description: description.replace(/\s+/g, ' ').trim(),
       siteName: siteName.trim(),
       domain,
+      ...(imageUrl ? { imageUrl } : {}),
     };
   } catch {
     return {
@@ -72,9 +102,18 @@ export function formatMarkdownLink(title: string, url: string): string {
   return `[${safeTitle}](${url})`;
 }
 
-export function formatMarkdownLinkCard(meta: UrlMetadata): string {
+export function formatMarkdownLinkCard(
+  meta: UrlMetadata,
+  options?: { includeThumbnail?: boolean }
+): string {
   const title = meta.title.replace(/[\[\]]/g, '').trim() || meta.url;
-  const lines = [`> **[${title}](${meta.url})**`];
+  const lines: string[] = [];
+  if (options?.includeThumbnail && meta.imageUrl) {
+    lines.push(
+      `> <img src="${escapeHtmlAttr(meta.imageUrl)}" alt="${escapeHtmlAttr(title)}" align="left" width="120" />`
+    );
+  }
+  lines.push(`> **[${title}](${meta.url})**`);
   if (meta.description) {
     const trimmed =
       meta.description.length > 180

@@ -49,6 +49,7 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
   const stashedTitleElRef = useRef<HTMLElement | null>(null);
   const showTimerRef = useRef<number | null>(null);
   const lastHiddenAtRef = useRef<number>(0);
+  const lastPointerYRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -112,13 +113,19 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
       const centerX = rect.left + rect.width / 2;
       const placementHost = target.closest('[data-tooltip-placement]');
       const requestedPlacement = placementHost?.getAttribute('data-tooltip-placement');
+      const pointerY = lastPointerYRef.current;
+      const bottomBaseY =
+        pointerY !== null && pointerY >= rect.top - 4 && pointerY <= rect.bottom + 4
+          ? Math.max(rect.bottom + 16, pointerY + 30)
+          : rect.bottom + 12;
+
       const preferTop =
         requestedPlacement === 'top'
           ? rect.top >= 36
           : requestedPlacement === 'bottom'
             ? false
-            : rect.bottom + 36 > window.innerHeight;
-      const y = preferTop ? rect.top - 7 : rect.bottom + 7;
+            : bottomBaseY + 32 > window.innerHeight && rect.top >= 36;
+      const y = preferTop ? rect.top - 7 : bottomBaseY;
 
       setTooltip({
         text: payload.text,
@@ -164,7 +171,12 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
       return el.closest('[data-tooltip], [title], [data-onigiri-orig-title]') as HTMLElement | null;
     };
 
+    const onMouseMove = (e: MouseEvent) => {
+      lastPointerYRef.current = e.clientY;
+    };
+
     const onMouseOver = (e: MouseEvent) => {
+      lastPointerYRef.current = e.clientY;
       const el = findTooltipHost(e.target);
       if (el) {
         scheduleShow(el);
@@ -186,6 +198,7 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
       if (
         target?.matches?.(':focus-visible[data-tooltip], :focus-visible[title]')
       ) {
+        lastPointerYRef.current = null;
         scheduleShow(target);
       }
     };
@@ -193,6 +206,7 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
     const onFocusOut = () => hide(false);
     const onDismiss = () => hide(false);
 
+    document.addEventListener('mousemove', onMouseMove, true);
     document.addEventListener('mouseover', onMouseOver, true);
     document.addEventListener('mouseout', onMouseOut, true);
     document.addEventListener('focusin', onFocusIn, true);
@@ -206,6 +220,7 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
     return () => {
       clearTimer();
       restoreStashedTitle();
+      document.removeEventListener('mousemove', onMouseMove, true);
       document.removeEventListener('mouseover', onMouseOver, true);
       document.removeEventListener('mouseout', onMouseOut, true);
       document.removeEventListener('focusin', onFocusIn, true);

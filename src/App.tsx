@@ -203,12 +203,13 @@ import {
   makeTab,
   MAX_RECENT_FILES,
   MAX_RECENT_FOLDERS,
+  getActiveSessionStorageKey,
+  getInitialWindowParams,
   normalizeWorkspaceKey,
   RECENT_FILES_KEY,
   RECENT_FOLDERS_KEY,
   saveWorkspaceSessionEntry,
   serializeTabRecord,
-  SESSION_STORAGE_KEY,
   WORKSPACE_SESSIONS_KEY,
   type PersistedSession,
   type PersistedTabRecord,
@@ -1392,15 +1393,16 @@ export function App() {
       workspaceRoot: workspaceRootRef.current,
       tabs: records,
     };
+    const storageKey = getActiveSessionStorageKey();
     try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(payload));
+      localStorage.setItem(storageKey, JSON.stringify(payload));
     } catch {
       try {
         const compact: PersistedSession = {
           ...payload,
           tabs: records.map((r) => ({ ...r, snapshots: [], savedContent: undefined })),
         };
-        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(compact));
+        localStorage.setItem(storageKey, JSON.stringify(compact));
       } catch {
         // ignore quota errors
       }
@@ -1412,6 +1414,25 @@ export function App() {
       sideTabIdRef.current
     );
   }, []);
+
+  const handleNewWindow = useCallback(
+    async (opts?: { workspaceRoot?: string; filePath?: string }) => {
+      if (isTauri()) {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('create_new_window', {
+            workspaceRoot: opts?.workspaceRoot ?? null,
+            filePath: opts?.filePath ?? null,
+          });
+        } catch (err) {
+          console.error('Failed to open new window:', err);
+        }
+      } else {
+        window.open(window.location.href, '_blank');
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(persistSessionNow, 450);
@@ -2181,10 +2202,17 @@ export function App() {
         const { listen } = await import('@tauri-apps/api/event');
         const { getCurrentWebview } = await import('@tauri-apps/api/webview');
 
-        const initial = await invoke<string[]>('take_initial_files');
-        if (initial.length > 0) {
-          for (const p of initial) {
-            await dropHelpersRef.current.openPathInTab(p);
+        const launchParams = getInitialWindowParams();
+        if (launchParams.windowId) {
+          if (launchParams.filePath) {
+            await dropHelpersRef.current.openPathInTab(launchParams.filePath);
+          }
+        } else {
+          const initial = await invoke<string[]>('take_initial_files');
+          if (initial.length > 0) {
+            for (const p of initial) {
+              await dropHelpersRef.current.openPathInTab(p);
+            }
           }
         }
 
@@ -3651,13 +3679,17 @@ export function App() {
         });
         if (signal.aborted) return null;
         const cleaned = (res.content || '')
-          .replace(/^```[^\n]*\n?/, '')
-          .replace(/\n?```$/, '')
+          .replace(/^```[^\n]*\r?\n?/, '')
+          .replace(/\r?\n?```$/, '')
           .replace(/<CURSOR>/g, '')
-          .split('\n')[0]
+          .replace(/^\r?\n+/, '')
+          .split(/\r?\n/)[0]
           .slice(0, 140);
         return cleaned.trim().length > 0 ? cleaned : null;
-      } catch {
+      } catch (err) {
+        if (!signal.aborted) {
+          console.warn('[GhostText] AI request failed:', err);
+        }
         return null;
       } finally {
         signal.removeEventListener('abort', onAbort);
@@ -4365,6 +4397,7 @@ export function App() {
     // File
     'quick-open': () => setShowQuickOpen((v) => !v),
     'new-file': () => handleNewFile(),
+    'new-window': () => void handleNewWindow(),
     'open-file': () => handleOpenFile(),
     'save-file': () => handleSave(false),
     'save-as': () => handleSave(true),
@@ -4728,14 +4761,41 @@ export function App() {
     openFindBar,
   ]);
 
+  const handleMenuUndoRedo = (kind: 'undo' | 'redo') => {
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (activeEl?.closest('.cm-editor')) {
+      const ed = getActiveEditorTarget();
+      if (kind === 'undo') ed?.undoAction();
+      else ed?.redoAction();
+      return;
+    }
+    if (activeEl?.closest('.ProseMirror, .mf-tiptap-editor') || previewRef.current?.isFocused()) {
+      previewRef.current?.applyFormat(kind);
+      return;
+    }
+    if (
+      activeEl &&
+      (activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl.isContentEditable)
+    ) {
+      document.execCommand(kind);
+      return;
+    }
+    handleToolbarAction(kind);
+  };
+
   // Listen to native macOS/Win/Linux menu bar actions
   const menuActionsRef = useRef<Record<string, () => void>>({});
   menuActionsRef.current = {
+    'edit-undo': () => handleMenuUndoRedo('undo'),
+    'edit-redo': () => handleMenuUndoRedo('redo'),
     'open-about': () => setShowAbout(true),
     'open-online-manual': handleOpenOnlineManual,
     'check-updates': () => void handleCheckUpdates(false),
     'open-settings': () => openSettingsModal('general'),
     'new-file': () => handleNewFile(),
+    'new-window': () => void handleNewWindow(),
     'new-file-with-encoding': () => setEncodingModalMode('new'),
     'reopen-with-encoding': () => {
       if (activeTab.filePath) {
@@ -5063,6 +5123,13 @@ export function App() {
         label: t.actions.newFile,
         shortcut: shortcutDisplay('new-file'),
         action: () => handleNewFile(),
+      },
+      {
+        id: 'new-window',
+        category: 'File',
+        label: t.actions.newWindow,
+        shortcut: shortcutDisplay('new-window'),
+        action: () => void handleNewWindow(),
       },
       {
         id: 'new-file-with-encoding',

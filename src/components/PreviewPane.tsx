@@ -164,6 +164,11 @@ const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttribut
   const origSrc = String(node.attrs.src || '');
   const alt = String(node.attrs.alt || '');
   const title = node.attrs.title ? String(node.attrs.title) : '';
+  const rawAlign = String(node.attrs.align || '').trim().toLowerCase();
+  const align: 'left' | 'right' | '' =
+    rawAlign === 'left' || rawAlign === 'right' ? rawAlign : '';
+  const rawWidth = node.attrs.width ? String(node.attrs.width).trim() : '';
+  const cssWidth = rawWidth ? (/^\d+$/.test(rawWidth) ? `${rawWidth}px` : rawWidth) : undefined;
 
   const [resolvedSrc, setResolvedSrc] = useState<string>(() =>
     /^(https?:|data:|blob:)/i.test(origSrc) ? origSrc : ''
@@ -195,10 +200,26 @@ const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttribut
     };
   }, [origSrc, baseDir]);
 
+  const floatClass =
+    align === 'left' ? 'is-float-left' : align === 'right' ? 'is-float-right' : '';
+  const figureStyle: React.CSSProperties | undefined = align
+    ? { width: cssWidth || '280px' }
+    : cssWidth
+      ? { width: cssWidth, maxWidth: '100%', marginLeft: 'auto', marginRight: 'auto' }
+      : undefined;
+
+  const cycleWidth = () => {
+    const presets = ['200', '280', '380'];
+    const curIdx = presets.indexOf(rawWidth);
+    const next = presets[(curIdx + 1) % presets.length];
+    updateAttributes({ width: next });
+  };
+
   return (
     <NodeViewWrapper
       as="figure"
-      className={`mf-image-figure ${selected ? 'is-selected' : ''}`}
+      className={`mf-image-figure ${floatClass} ${selected ? 'is-selected' : ''}`}
+      style={figureStyle}
       data-drag-handle=""
     >
       {resolvedSrc && !loadFailed ? (
@@ -207,6 +228,7 @@ const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttribut
           data-orig-src={origSrc}
           alt={alt}
           title={title || undefined}
+          width={rawWidth || undefined}
           className="mf-preview-img"
           onError={() => setLoadFailed(true)}
         />
@@ -257,6 +279,44 @@ const ImageNodeView: React.FC<NodeViewProps> = ({ node, selected, updateAttribut
               {alt || origSrc}
             </span>
             <div className="mf-image-actions">
+              <button
+                type="button"
+                className={`mf-mini-btn ${align === 'left' ? 'is-active' : ''}`}
+                title="左寄せ（テキスト回り込み）"
+                onClick={() =>
+                  updateAttributes(
+                    align === 'left'
+                      ? { align: null }
+                      : { align: 'left', width: rawWidth || '280' }
+                  )
+                }
+              >
+                ◧
+              </button>
+              <button
+                type="button"
+                className={`mf-mini-btn ${align === 'right' ? 'is-active' : ''}`}
+                title="右寄せ（テキスト回り込み）"
+                onClick={() =>
+                  updateAttributes(
+                    align === 'right'
+                      ? { align: null }
+                      : { align: 'right', width: rawWidth || '280' }
+                  )
+                }
+              >
+                ◨
+              </button>
+              {(align || rawWidth) && (
+                <button
+                  type="button"
+                  className="mf-mini-btn"
+                  title="画像幅を切り替え (200 / 280 / 380px)"
+                  onClick={cycleWidth}
+                >
+                  {rawWidth || '280'}px
+                </button>
+              )}
               <button
                 type="button"
                 className="mf-mini-btn"
@@ -821,6 +881,16 @@ const OnigiriImage = ImageExtension.extend({
       title: {
         default: null,
       },
+      align: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('align'),
+        renderHTML: (attributes) => (attributes.align ? { align: attributes.align } : {}),
+      },
+      width: {
+        default: null,
+        parseHTML: (element) => element.getAttribute('width'),
+        renderHTML: (attributes) => (attributes.width ? { width: attributes.width } : {}),
+      },
     };
   },
   renderHTML({ HTMLAttributes }) {
@@ -1106,6 +1176,9 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
     const lastDocIdRef = useRef<string>(docId);
     const lastEmittedMdRef = useRef<string>('');
     const lastSyncedMdRef = useRef<string>('');
+    const breaksEnabledRef = useRef<boolean>(Boolean(settings.previewSingleLineBreak));
+    breaksEnabledRef.current = Boolean(settings.previewSingleLineBreak);
+    const editorRef = useRef<ReturnType<typeof useEditor> | null>(null);
     const suppressingUpdateRef = useRef<boolean>(false);
     const isComposingRef = useRef<boolean>(false);
     const emitTimerRef = useRef<number | null>(null);
@@ -1191,9 +1264,10 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
     const emitMarkdownFromEditor = useCallback((html: string, expectedDocId: string) => {
       if (expectedDocId !== currentDocIdRef.current) return;
       const nextMd = editableHtmlToMarkdown(html, frontmatterBlockRef.current);
-      if (nextMd === lastSyncedMdRef.current) return;
+      const nextSyncKey = `${breaksEnabledRef.current ? '1' : '0'}:${nextMd}`;
+      if (nextSyncKey === lastSyncedMdRef.current) return;
       lastEmittedMdRef.current = nextMd;
-      lastSyncedMdRef.current = nextMd;
+      lastSyncedMdRef.current = nextSyncKey;
       callbacksRef.current.onMarkdownChange(nextMd, expectedDocId);
     }, []);
 
@@ -1247,9 +1321,15 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
           compositionend: (view) => {
             isComposingRef.current = false;
             const scheduledDocId = currentDocIdRef.current;
+            if (emitTimerRef.current) {
+              window.clearTimeout(emitTimerRef.current);
+              emitTimerRef.current = null;
+            }
             window.setTimeout(() => {
               if (!suppressingUpdateRef.current && scheduledDocId === currentDocIdRef.current) {
-                emitMarkdownFromEditor(view.dom.innerHTML, scheduledDocId);
+                const ed = editorRef.current;
+                const html = ed && !ed.isDestroyed ? ed.getHTML() : view.dom.innerHTML;
+                emitMarkdownFromEditor(html, scheduledDocId);
               }
             }, 0);
             return false;
@@ -1349,6 +1429,7 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
         }, 70);
       },
     });
+    editorRef.current = editor;
 
     const applyPreviewSelectionHighlight = useCallback(
       (edInstance: ReturnType<typeof useEditor>) => {
@@ -1376,6 +1457,10 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
           }
         }
         try {
+          const currentDeco = previewSelectionSyncPluginKey.getState(edInstance.state);
+          if (decoSet === DecorationSet.empty && (!currentDeco || currentDeco === DecorationSet.empty)) {
+            return;
+          }
           edInstance.view.dispatch(
             edInstance.state.tr.setMeta(previewSelectionSyncPluginKey, decoSet)
           );
@@ -1433,10 +1518,10 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
       const breaksEnabled = Boolean(settings.previewSingleLineBreak);
       const syncKey = `${breaksEnabled ? '1' : '0'}:${markdown}`;
 
-      if (!docSwitched && markdown === lastEmittedMdRef.current && lastSyncedMdRef.current === syncKey) {
+      if (!docSwitched && syncKey === lastSyncedMdRef.current) {
         return;
       }
-      if (!docSwitched && syncKey === lastSyncedMdRef.current) {
+      if (!docSwitched && (isComposingRef.current || emitTimerRef.current !== null)) {
         return;
       }
 
@@ -1451,8 +1536,10 @@ export const PreviewPane = forwardRef<PreviewHandle, PreviewPaneProps>(
           if (cancelled || !editor || editor.isDestroyed || targetDocId !== currentDocIdRef.current) {
             return;
           }
-          // If the user is actively composing IME in preview, defer sync
-          if (!docSwitched && isComposingRef.current) return;
+          // If the user is actively composing IME or has pending visual edits in preview, defer sync
+          if (!docSwitched && (isComposingRef.current || emitTimerRef.current !== null)) {
+            return;
+          }
 
           suppressingUpdateRef.current = true;
           editor.commands.setContent(html, { emitUpdate: false });

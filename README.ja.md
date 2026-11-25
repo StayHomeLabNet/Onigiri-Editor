@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v151-の更新内容">v1.5.1 の更新内容</a> ・
+    <a href="#v152-の更新内容">v1.5.2 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.1-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.2-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、**8言語**（**English** / **日本語** / **简体中文** / **繁體中文** / **한국어** / **Español** / **Français** / **Deutsch**）の中から最適な UI とネイティブメニューバーで起動します。
 
-現在のバージョン: `v1.5.1`
+現在のバージョン: `v1.5.2`
 
 ## 主な機能
 
@@ -100,11 +100,25 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.5.1 の更新内容
+## v1.5.2 の更新内容
+
+- **マルチウィンドウ対応（`⌘⇧N` / `Ctrl+Shift+N`）＆リリースビルド強化**:
+  - **ファイル → 新しいウィンドウ** から独立したウィンドウを起動可能にし、ウィンドウ単位のセッション分離、フォーカス中ウィンドウへのメニューイベント振り分け、リリースビルド時の WebView DevTools 無効化を実装しました。
+- **プレビュー上の画像操作＆リンクカードサムネイル対応**:
+  - ビジュアルプレビュー上で画像の左寄せ／右寄せ（回り込み）・幅切替（`200 / 280 / 380px`）・Alt 編集・削除を直接行えるようになり、引用／リンクカードへのサムネイル画像 URL 指定にも対応しました。
+- **インライン AI 編集モーダルのリサイズ対応＆AI ゴーストテキスト日本語 IME 修正**:
+  - インライン AI 編集モーダルのドラッグリサイズ（サイズ記憶）と拡大トグルを追加し、AI ゴーストテキスト補完が日本語 IME 確定（`compositionend`）後や先頭空行を含む応答でも確実に動作するよう改善しました。
+- **全 8 言語のウェルカムドキュメント拡充**:
+  - `ようこそ.md` / `Welcome.md` を全 8 言語（`en` / `ja` / `zh-CN` / `zh-TW` / `ko` / `es` / `fr` / `de`）で最新機能・ショートカット・Mermaid 図・体験サンプルまで拡充しました。
+
+<details>
+<summary>以前のリリース: v1.5.1</summary>
 
 - **フロントエンド構成のモジュール分割＆保守性向上リファクタリング**:
   - **設定モーダルのタブ別分割（`src/components/settings/`）**: `SettingsModal.tsx` を 7 つの単一責務タブコンポーネント（`GeneralTab` / `EditorTab` / `SyntaxTab` / `KeybindingsTab` / `AiCustomTab` / `IntegrationsTab` / `DataTab`）へ分割し、本体を 4,094 行から 439 行へ整理しました。
   - **カスタムフック抽出（`src/hooks/`）**: `App.tsx` から 7 つのドメイン別フック（`useGitPanelActions` / `useMacroRecorder` / `useAiCustomRunner` / `useExportActions` / `useBackupAndReset` / `useExternalPreview` / `useWorkspaceActions`）を切り出し（8,739 行 → 7,283 行）、ワークスペース一括置換後のクリーンタブ再読み込みロジックも共通化しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.5.0</summary>

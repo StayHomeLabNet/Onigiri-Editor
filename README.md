@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v151">What's New in v1.5.1</a> ・
+    <a href="#whats-new-in-v152">What's New in v1.5.2</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.1-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.2-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.5.1`
+Current version: `v1.5.2`
 
 ## Key Features
 
@@ -100,11 +100,25 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.5.1
+## What's New in v1.5.2
+
+- **Multi-Window Support (`⌘⇧N` / `Ctrl+Shift+N`) & Release Hardening**:
+  - Open independent editor windows via **File → New Window** with per-window isolated session state, focused-window menu routing, and release-build WebView hardening.
+- **Interactive Preview Images & Link Card Thumbnails**:
+  - Float images left/right with text wrap, cycle widths (`200 / 280 / 380px`), and edit Alt text or delete directly in the visual preview; attach optional thumbnail URLs to link cards.
+- **Resizable Inline AI Edit Modal & AI Ghost Text IME Fix**:
+  - Drag edges/corners to resize the Inline AI Edit modal (persisted across sessions) or expand it, and trigger AI Ghost Text autocomplete reliably after Japanese IME commits (`compositionend`).
+- **Expanded Welcome Document Across All 8 Languages**:
+  - Updated `Welcome.md` / `ようこそ.md` across all 8 languages (`en`, `ja`, `zh-CN`, `zh-TW`, `ko`, `es`, `fr`, `de`) with the full feature guide, shortcuts, Mermaid workflow, and interactive examples.
+
+<details>
+<summary>Previous release: v1.5.1</summary>
 
 - **Architecture Modularization & Maintainability Refactoring**:
   - **Settings Modal Tab Decomposition (`src/components/settings/`)**: Split `SettingsModal.tsx` into 7 focused tab components (`GeneralTab`, `EditorTab`, `SyntaxTab`, `KeybindingsTab`, `AiCustomTab`, `IntegrationsTab`, `DataTab`), reducing `SettingsModal.tsx` from 4,094 lines to 439 lines.
   - **Custom Hooks Extraction (`src/hooks/`)**: Extracted cohesive domain hooks (`useGitPanelActions`, `useMacroRecorder`, `useAiCustomRunner`, `useExportActions`, `useBackupAndReset`, `useExternalPreview`, `useWorkspaceActions`) out of `App.tsx` (reducing it from 8,739 lines to 7,283 lines) and unified workspace clean-tab reload logic with zero behavior regressions.
+
+</details>
 
 <details>
 <summary>Previous release: v1.5.0</summary>

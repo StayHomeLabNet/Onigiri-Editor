@@ -175,25 +175,124 @@ tags: [Onigiri Editor, AI, Markdown, KnowledgeGraph, Git, DevPreview]
 
 # Willkommen bei Onigiri Editor 🍙
 
-**Onigiri Editor** vereint **bidirektionale visuelle Markdown-Bearbeitung**, **KI-Chat & benutzerdefinierte Aktionen**, **Wissensgraph**, **Git-Verwaltung**, **100+ Programmiersprachen** und einen **integrierten Webbrowser mit Dev-Server-Erkennung**.
+**Onigiri Editor** vereint in einem plattformübergreifenden Arbeitsbereich **bidirektionale visuelle Markdown-Bearbeitung**, **KI-Chat & benutzerdefinierte Aktionen**, **PKM & Wissensgraph**, **Git-Versionsverwaltung**, **Code-Bearbeitung in über 100 Sprachen** sowie **automatische Dev-Server-Erkennung mit integriertem Webbrowser**.
 
 > [!TIP]
-> - **Modus wechseln (\`⌘ + \\\` / \`Ctrl + \\\`)**: Wechseln Sie jederzeit zwischen **Einfach**, **Standard** und **Erweitert**.
-> - **Funktionsführer (\`?\`)**: Klicken Sie auf **\`?\`** oder öffnen Sie die **Befehlspalette (\`⌘ + K\` / \`Ctrl + K\`)**.
-> - **Schnell öffnen (\`⌘ + P\` / \`Ctrl + P\`)**: Springen Sie zu Dateien oder mit \`@\` zu Überschriften.
+> - **Modus jederzeit wechseln (\`⌘ + \\\` / \`Ctrl + \\\`)**: Wechseln Sie zwischen **Einfach** (fokussiertes Schreiben mit Formatleiste), **Standard** (bidirektionale Live-Vorschau & KI) und **Erweitert** (Multi-Tab, Datei-Explorer, Git und integriertes Terminal).
+> - **Funktionsführer (\`?\`)**: Klicken Sie auf **\`?\`** in der oberen Leiste oder öffnen Sie die **Befehlspalette (\`⌘ + K\` / \`Ctrl + K\`)**, um Funktionen auf Englisch oder Japanisch zu suchen und direkt zu starten.
+> - **Schnell öffnen (\`⌘ + P\` / \`Ctrl + P\`)**: Springen Sie zu Dateien oder tippen Sie \`@\`, um direkt zu einer Überschrift zu wechseln.
+> - **Einstellungen (\`⌘ + ,\` / \`Ctrl + ,\`)**: Passen Sie über 112 Tastenkürzel, KI-Schaltflächen, Snapshots und JSON-Einstellungs-Backups an.
+
+---
 
 ## Highlights
 
-- [x] **Bidirektionales Bearbeiten & Sync-Markierung**: Hebt sowohl die aktuelle Cursor-Zeile als auch **exakt markierten Text** in der Live-Vorschau hervor.
-- [x] **KI-Schaltflächen mit eigener Modellwahl**: Unterstützt Apple Foundation Models, Codex / Claude / Gemini / Antigravity CLI, Cloud-APIs sowie Ollama / LM Studio.
-- [x] **Sicherheit & Produktivität**: Automatische Snapshots, Markdown-Kompatibilitätsprüfung, Bildoptimierung, Git-Panel und Word/HTML/PDF-Export.
+### ✍️ 1. Schreiben, visuelle Bearbeitung & Vorschau
+- [x] **Bidirektionale Live-Bearbeitung & Echtzeit-Sync-Markierung**: Bearbeiten Sie in CodeMirror 6 (links) oder in der visuellen TipTap-Vorschau (rechts). Sowohl **aktuelle Cursor-Zeile** als auch **zeichenweise Auswahl-Synchronisation** werden in der Vorschau hervorgehoben (umschaltbar unter **Einstellungen → Editor**)
+- [x] **Umfangreiche Schreibassistenten**:
+  - Schwebendes **Auswahl-Bubble-Menü** über markiertem Text (Fett, Kursiv, Code, Link, Inline-KI-Bearbeitung, KI-Schnellaktionen)
+  - Automatische **Markdown-Tabellen-GUI-Leiste** innerhalb von Tabellen (Zeilen/Spalten hinzufügen & löschen, ausrichten, numerisch sortieren, formatieren)
+  - **Interaktive Bildsteuerung in der Vorschau**: links/rechts umfließend ausrichten, Breite umschalten (200 / 280 / 380px), Alt-Text bearbeiten oder direkt löschen
+  - **Slash-Befehle \`/\`** am Zeilenanfang, **Eigene Snippets**, **Automatisches Inhaltsverzeichnis (TOC)** und **Einzelzeilenumbruch-Vorschau (\`<br>\`)**
+  - **Zitate / Link-Karten (mit optionalen Vorschaubildern) / BibTeX & DOI-Abfrage / Fußnoten**, **URL-Auto-Titel beim Einfügen**, **Tagesnotizen & Vorlagen**, **Web Clipper** und **Präsentationsmodus**
+- [x] **Profi-Code- & Textwerkzeuge (inkl. Kontextmenü)**:
+  - **Multi-Cursor (\`⌘ + D\` / \`Option + Klick\`)**, **Rechteckauswahl (\`Option + Ziehen\` / \`Alt + Ziehen\`)**, **Zeilen-Lesezeichen (\`⌘ + F2\` / \`F2\`)**, **Gehe zu Zeile (\`⌘ + L\`)**
+  - **Suchen & Regex-Ersetzen** (mit Auswahlbereich und automatischem Aufklappen), **Code-Faltung**, **Leerzeichen / Vollbreite-Leerzeichen / Zeilenenden anzeigen**, **Spaltenlineal**, **Fokusmodus** und **Schreibmaschinen-Scroll**
+  - **Rechtsklick-Transformationen & Datenwerkzeuge**: Groß-/Kleinschreibung/Titelformat, führende Leerzeichen entfernen, Zitatzeichen einfügen, **JSON Formatieren / Minifizieren / Schlüssel sortieren**, **JSON ⇔ YAML**, **\`.env\`-Formatierer**, **Als Rich-Text kopieren**
+  - **Kodierung & Zeilenenden**: Neu/Erneut öffnen mit UTF-8 / Shift_JIS / EUC-JP, LF/CRLF-Umschaltung, Live-Zähler für Zeichen, Wörter und Lesezeit
+
+### 🤖 2. Multi-Provider-KI & Datenschutz
+- [x] **Multi-Provider-KI (\`⌘ + ⇧ + E\` für Inline-Bearbeitung der Auswahl)**:
+  - Unterstützt **Apple Foundation Models (lokal auf dem Gerät, macOS 26+)**, **Codex CLI**, **Claude Code CLI**, **Gemini CLI**, **Antigravity CLI**, **OpenAI / Anthropic / Gemini APIs**, **Ollama** und **LM Studio**
+- [x] **KI-Ausgabe bereinigen (Schaltfläche \`KI bereinigen\`)**:
+  - Regelbasierte Ein-Klick-Bereinigung eingefügter KI-Texte: richtet **GFM-Tabellenspalten** aus, vereinheitlicht Aufzählungen und Überschriftenabstände, entfernt Nullbreiten-Zeichen/NBSP und normalisiert Anführungszeichen unter Beibehaltung von Codeblöcken. Wandelt auch **eingefügtes HTML automatisch in Markdown** um
+- [x] **KI-Schaltflächen & Untermenüs in der Symbolleiste**:
+  - Bis zu 5 Hauptschaltflächen + je 10 Untermenüpunkte mit **eigener Modellwahl pro Schaltfläche/Eintrag (Abo-CLI / Cloud-API / Lokale KI)** und Prompt-Variablen (\`{{selection}}\`, \`{{clipboard}}\`, \`{{date}}\` usw.), inklusive **KI-Übersetzen**-Preset
+- [x] **KI-Chat (mit \`@Datei\`-Erwähnungen), KI-Ghost-Text-Autovervollständigung (\`Tab\`) & Korrekturlesen**:
+  - Geschützt durch **Sendeinhalt-Vorschau & Geheimnis-Maskierung** (verbirgt API-Keys/Tokens) sowie **zeilenweise Diff-Vorschau** vor dem Übernehmen
+
+### 🛡️ 3. Sicherheit, Asset-Verwaltung & Kompatibilität
+- [x] **Automatische Snapshots & Schnellnotizblock**:
+  - **Automatische Snapshot-Zeitleiste & partielle Block-Wiederherstellung** (beim Speichern und periodisch)
+  - **Schnellnotizblock (Scratchpad)** (ohne Speichern) mit **globalem Aufruf-Kürzel (\`⌘ + ⇧ + Space\`)**
+  - **Sitzungswiederherstellung** nach Neustart & Erkennung externer Dateiänderungen
+- [x] **Bildoptimierung & Dialekt-Diagnose**:
+  - Automatische Skalierung & Komprimierung eingefügter/abgelegter Bilder nach \`assets/\`, **Größenübersicht aller Bilder** und **Bereinigung ungenutzter Bilder**
+  - **Markdown-Kompatibilitätsprüfung** (erkennt Dialektunterschiede für GitHub / Zenn / Qiita / Notion / Obsidian)
+
+### 🕸️ 4. Wissensgraph, Git, Dev-Tools & Export
+- [x] **PKM & Wissensgraph**:
+  - \`[[WikiLinks]]\`, Backlinks, \`#Tag\`-Browser und **interaktiver Wissensgraph mit Prüfung auf defekte Links**
+- [x] **Git-Versionsverwaltung & Dev-Arbeitsbereich (Erweitert)**:
+  - **Git-Seitenleiste** (Stage/Unstage/Discard, Inline-Diff, **KI-Commit-Nachricht**, Pull/Push) & **Mit Git HEAD vergleichen**
+  - **Multi-Tab & Side-by-Side-Vergleich**, **Ordnerübergreifendes Regex-Grep-Ersetzen (\`⌘ + ⇧ + G\`)**
+  - **Integriertes Terminal**, **Multi-Server-Dev-Launcher (QR-/LAN-Freigabe & KI-Log-Diagnose)** und **Integrierter Webbrowser** (1-Klick-\`✕\`-Schließen)
+  - **Datentabellen-Vorschau (CSV / TSV / JSON / YAML)** mit Kopieren als Markdown-Tabelle
+- [x] **Export & Anpassung**:
+  - **Word (\`.docx\`)**, **PDF / HTML (Seiteneinrichtung, Design-Themes & Kopf-/Fußzeilen)**, **SVG/PNG-Export & Zoom für Mermaid und KaTeX**
+  - **Tastaturmakros (\`⌘ + ⇧ + M\` / \`F8\`)**, **4 Themes (Hell / Dunkel / Sepia / Mitternacht) + eigenes CSS** und **8-sprachige Oberfläche**
+
+---
+
+### 1. Interaktive Funktionen direkt hier testen
+
+1. **Inline-Auswahl-Sync & Bubble-Menü testen**: Markieren Sie im **Editor links** einen beliebigen Teil des Zitats unten — das schwebende Bubble-Menü erscheint und der Text wird in der Vorschau hervorgehoben!
+   > こんにちは！下の「AI翻訳」ボタンや選択メニューを使って、この文章を英語に翻訳してみてください。
+2. **Markdown-Tabellen-GUI-Leiste testen**: Klicken Sie in eine beliebige Zelle der Tabelle unten, um die Bearbeitungsleiste über dem Editor einzublenden.
+
+| Modus | Ideal für | Layout & Funktionen |
+| :--- | :--- | :--- |
+| **Einfach** | Schnelle Notizen & Fokus | Schlichter Einzel-Editor mit ausgeblendeter Kopfzeile & sichtbarer Formatleiste |
+| **Standard** | Tägliches Schreiben & Visual-Edit | Editor + bidirektionale Live-Vorschau + Formatleiste + KI-Chat |
+| **Erweitert** | Dev-Workflows, PKM & Git | Multi-Tab & Split-Diff, Wiki-Graph, Git-Panel, Dev-Server & Terminal |
+
+---
+
+### 2. Workflow-Übersicht (Mermaid)
+
+> [!NOTE]
+> GitHub-Hinweise (\`[!NOTE]\`, \`[!TIP]\`, \`[!IMPORTANT]\`, \`[!WARNING]\`, \`[!CAUTION]\`), Mermaid-Diagramme und KaTeX-Blöcke lassen sich direkt aus der Vorschau als **SVG oder PNG** exportieren.
 
 \`\`\`mermaid
 flowchart LR
-  Write["✍️ Schreiben / Slash / Bilder"] --> Knowledge["🕸️ WikiLinks & Wissensgraph"]
-  Knowledge --> AI["🤖 KI-Aktionen & Korrektur"]
-  AI --> Git["🌿 Git & Snapshots"]
+  Write["✍️ Schreiben / Slash / Bilder optimieren"] --> Knowledge["🕸️ WikiLinks & Wissensgraph"]
+  Knowledge --> AI["🤖 KI-Aktionen / Ghost-Text / Korrektur"]
+  AI --> Check["🛡️ Kompatibilität & Snapshots"]
+  Check --> Git["🌿 Git-Panel & Inline-Diff"]
   Git --> Export["📦 Word / HTML / PDF / Folien"]
+\`\`\`
+
+---
+
+### 3. Praktische Tastenkürzel (112+ Befehle anpassbar unter Einstellungen → Tastenkürzel)
+
+| Aktion | macOS | Windows / Linux |
+| :--- | :--- | :--- |
+| Modus wechseln (Einfach / Standard / Erweitert) | \`⌘ + \\\` | \`Ctrl + \\\` |
+| Schnell öffnen (Dateien / \`@Überschriften\`) | \`⌘ + P\` | \`Ctrl + P\` |
+| Befehlspalette | \`⌘ + K\` | \`Ctrl + K\` |
+| Ordnerübergreifendes Grep & Ersetzen | \`⌘ + ⇧ + G\` | \`Ctrl + Shift + G\` |
+| Inline-KI-Bearbeitung der Auswahl | \`⌘ + ⇧ + E\` | \`Ctrl + Shift + E\` |
+| Zeilen-Lesezeichen umschalten / anspringen | \`⌘ + F2\` / \`F2\` | \`Ctrl + F2\` / \`F2\` |
+| Tastaturmakro aufnehmen / abspielen | \`⌘ + ⇧ + M\` / \`F8\` | \`Ctrl + Shift + M\` / \`F8\` |
+| Zen-Modus / Rechteckauswahl | \`⌘ + ⇧ + F\` / \`Option + Ziehen\` | \`Ctrl + Shift + F\` / \`Alt + Ziehen\` |
+| Globales Aufruf-Kürzel (in Einstellungen aktivieren) | \`⌘ + ⇧ + Space\` | \`Ctrl + Shift + Space\` |
+
+---
+
+### 4. LaTeX-Mathematik & mehrsprachiges Syntax-Highlighting
+
+Scaled Dot-Product Attention:
+
+$$
+\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}}\\right)V
+$$
+
+\`\`\`typescript
+export function greetOnigiri(name: string): string {
+  return \`Hello, \${name} 🍙\`;
+}
+console.log(greetOnigiri('Onigiri Editor'));
 \`\`\`
 `,
 };

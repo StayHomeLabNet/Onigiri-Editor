@@ -41,6 +41,7 @@ export const SelectionBubbleMenu: React.FC<SelectionBubbleMenuProps> = ({
       className="selection-bubble-menu"
       style={{ top, left }}
       role="toolbar"
+      data-tooltip-placement="top"
       aria-label={ja ? '選択範囲クイックメニュー' : 'Selection Quick Menu'}
     >
       {isMarkdown && (

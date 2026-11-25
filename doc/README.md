@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.1)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.2)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -79,7 +79,7 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 ### `[[WikiLinks]]`, Citations, Footnotes, Daily Notes & Web Clipper
 
 - **`[[WikiLinks]]`**: Type `[[` in a workspace to autocomplete note names. Ctrl/Cmd-click (or follow the link in preview) to jump to or create the linked note.
-- **Citations, Link Cards, BibTeX / DOI Lookup & Footnotes**: Open **Insert Citation / Link Card / Footnote** from the Format Toolbar, Command Palette, or a custom shortcut to insert inline links, formatted link cards, auto-numbered footnotes (`[^N]`), parsed BibTeX entries (APA or Markdown styles), or Crossref DOI lookups.
+- **Citations, Link Cards, BibTeX / DOI Lookup & Footnotes**: Open **Insert Citation / Link Card / Footnote** from the Format Toolbar, Command Palette, or a custom shortcut to insert inline links, formatted link cards (with optional thumbnail image URLs), auto-numbered footnotes (`[^N]`), parsed BibTeX entries (APA or Markdown styles), or Crossref DOI lookups.
 - **Smart URL Paste & Auto-Title**: Pasting a URL over selected text automatically wraps it as `[selection](url)`. When pasting a bare URL with no selection and **Auto-fetch webpage title** (`autoTitleOnUrlPaste`) is enabled, Onigiri Editor asynchronously fetches the webpage `<title>` and replaces the URL with `[Title](url)`.
 - **Daily Notes**: Click the **Daily Note** button in the TopBar/Sidebar (or run **Open / Create Today's Daily Note** in the Command Palette) to open or create `YYYY-MM-DD.md` inside your configured **Daily Notes Folder**.
 - **Document Templates**: Open **Templates & Daily Notes** from the TopBar (`+` / Template menu), Sidebar, or Command Palette. Supports built-in templates (**Meeting Notes**, **Technical Design Doc**, **ADR**, **Weekly/Daily Report**) and **Custom Templates** with `{{date}}`, `{{time}}`, and `{{title}}` variables.
@@ -103,7 +103,8 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 - **Single Line Break Preview, Selection Bubble Menu, AI Ghost Text Autocomplete & Markdown Table GUI Toolbar (`v1.4.0`, toggleable in Settings → Editor)**:
   - **Single Line Break (`<br>`) Preview**: Renders single Enter line breaks directly as `<br>` in Live Preview, HTML Export, and External Live Preview while preserving code blocks (on by default; disable for strict CommonMark behavior).
   - **Selection Floating Bubble Menu**: Selecting text displays a floating mini bar right above the selection for Bold, Italic, Inline Code, Link, Inline AI Edit (`⌘⇧E`), and up to 3 quick AI Custom buttons.
-  - **AI Ghost Text Autocomplete**: Pausing while typing displays a muted inline AI continuation suggestion (`Tab` to accept, `Esc` to dismiss; opt-in with configurable `400–2500ms` delay).
+  - **AI Ghost Text Autocomplete**: Pausing while typing (including after Japanese IME commits) displays a muted inline AI continuation suggestion (`Tab` to accept, `Esc` to dismiss; opt-in with configurable `400–2500ms` delay).
+  - **Interactive Preview Image Controls**: In the visual preview, click an image to float left/right with text wrap, cycle widths (`200 / 280 / 380px`), edit Alt text, or delete directly.
   - **Markdown Table GUI Toolbar**: Automatically appears when the cursor is inside a Markdown table for 1-click row/column insertion & deletion, alignment, numeric-aware ascending/descending sort, and column width formatting.
 - **AI Prompt Variables, Export Page Setup, Quick Scratchpad & Global Hotkey, Integrated Terminal (`v1.4.0`)**:
   - **AI Custom Prompt Variables**: Use `{{selection}}`, `{{clipboard}}`, `{{fileName}}`, `{{filePath}}`, `{{language}}`, `{{date}}`, and `{{time}}` inside any AI Custom button or submenu prompt (1-click variable insertion chips in **Settings → AI Custom**).
@@ -258,7 +259,7 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
   - Sends the active selection when highlighted or the entire document otherwise, replaces immediately with single-step Undo (`⌘Z` / `Ctrl+Z`), and lets you click the spinner (or press its shortcut again) while running to cancel.
 - **Per-Tab vs. Shared Threads**: Switch between keeping an isolated AI conversation per active tab or using a shared workspace thread.
 - **Save Chat as `.md` Note**: Export the current AI conversation directly into a new Markdown tab for archiving or further editing.
-- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets, with **Diff Preview** confirmation before applying.
+- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets in a resizable/expandable modal, with **Diff Preview** confirmation before applying.
 - **AI Folder Access (Advanced Mode)**: Switch between **Disabled**, **Read-Only**, **Read + Write (Diff Preview approval)**, and **CLI Direct Workspace Write**.
 
 ### Proofread & Document Review, Formatter & Stats
