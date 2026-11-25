@@ -19,10 +19,15 @@ import {
 } from '../utils/aiCustomButtons';
 import {
   cancelAiChat,
+  listenAiChatProgress,
   readClipboardText,
   sendAiChat,
   writeClipboardText,
 } from '../utils/platform';
+import { formatAiErrorHint } from '../utils/aiErrorHint';
+import { loadWorkspaceAiRules } from '../utils/aiProjectRules';
+import { buildAiMemoryPromptBlock } from '../utils/aiMemory';
+import { appendAiAuditEntry } from '../utils/aiAuditLog';
 
 interface UseAiCustomRunnerParams {
   t: Translations;
@@ -140,11 +145,26 @@ export function useAiCustomRunner({
         button.aiProvider,
         button.aiModel
       );
-      const systemPrompt = [
+      const projectRules = await loadWorkspaceAiRules(
+        workspaceRootRef.current,
+        settingsRef.current.aiProjectRulesEnabled ?? true
+      );
+      const pinnedMemory = buildAiMemoryPromptBlock(
+        workspaceRootRef.current,
+        settingsRef.current.aiMemoryEnabled ?? true
+      );
+      const systemParts = [
         'You are an AI assistant invoked from a custom toolbar button inside a Markdown editor.',
         'Follow the user instruction faithfully and return ONLY the resulting text.',
         'Do not add explanations, greetings, <input_text> tags, or surrounding Markdown code fences unless explicitly asked.',
-      ].join('\n');
+      ];
+      if (pinnedMemory) {
+        systemParts.push(pinnedMemory);
+      }
+      if (projectRules) {
+        systemParts.push(projectRules.promptBlock);
+      }
+      const systemPrompt = systemParts.join('\n\n');
       const hasSelectionPlaceholder = /\{\{\s*selection\s*\}\}/i.test(rawPromptText);
       const shouldAppendInputBlock =
         inputText.length > 0 && !(hasSelection && hasSelectionPlaceholder);
@@ -186,6 +206,19 @@ export function useAiCustomRunner({
       aiCustomRequestRef.current = reqState;
       setRunningAiCustom({ buttonId: toolbarButtonId, label: buttonName });
       notify(t.toasts.aiCustomRunning.replace('{name}', buttonName));
+      const startedAt = Date.now();
+      let lastProgressNotifyAt = 0;
+      const unlistenProgress = await listenAiChatProgress((ev) => {
+        if (ev.requestId !== requestId || reqState.cancelled) return;
+        const now = Date.now();
+        if (now - lastProgressNotifyAt > 3500) {
+          lastProgressNotifyAt = now;
+          const line = ev.text.trim().split(/\r?\n/).pop()?.trim().slice(0, 60);
+          if (line) {
+            notify(`${buttonName} (${ev.elapsedSecs}s): ${line}`);
+          }
+        }
+      });
 
       try {
         const res = await sendAiChat({
@@ -203,6 +236,19 @@ export function useAiCustomRunner({
 
         if (reqState.cancelled) return;
         const resultText = cleanAiCustomResponse(res.content, inputText, promptText);
+        appendAiAuditEntry(
+          {
+            source: 'custom-button',
+            label: buttonName,
+            provider: callOpts.provider,
+            model: res.modelUsed || callOpts.model,
+            promptPreview: userPrompt,
+            responsePreview: resultText,
+            durationMs: Date.now() - startedAt,
+            applied: Boolean(button.replaceContent && resultText.trim()),
+          },
+          settingsRef.current.aiAuditLogEnabled ?? true
+        );
         if (!resultText.trim()) {
           notify(t.toasts.aiCustomEmptyResponse.replace('{name}', buttonName));
           return;
@@ -263,15 +309,23 @@ export function useAiCustomRunner({
         if (reqState.cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
         if (msg === 'CLI_CANCELLED') return;
-        if (
-          !aiConfig.apiKeys[callOpts.provider] &&
-          ['openai-api', 'anthropic-api', 'gemini-api'].includes(callOpts.provider)
-        ) {
-          notify(t.gitPanel.noAiProviderToast);
-        } else {
-          notify(`${t.toasts.errorPrefix} ${msg}`);
-        }
+        appendAiAuditEntry(
+          {
+            source: 'custom-button',
+            label: buttonName,
+            provider: callOpts.provider,
+            model: callOpts.model,
+            promptPreview: userPrompt,
+            responsePreview: '',
+            durationMs: Date.now() - startedAt,
+            error: msg,
+          },
+          settingsRef.current.aiAuditLogEnabled ?? true
+        );
+        const info = formatAiErrorHint(err, callOpts.provider, locale === 'ja');
+        notify(`${t.toasts.errorPrefix} ${info.message}${info.hint ? ` — ${info.hint}` : ''}`);
       } finally {
+        unlistenProgress();
         if (aiCustomRequestRef.current?.requestId === requestId) {
           aiCustomRequestRef.current = null;
           setRunningAiCustom(null);

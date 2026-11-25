@@ -412,6 +412,9 @@ export const AppModals: React.FC<AppModalsProps> = (props) => {
           languageLabel={props.languageLabel}
           aiConfig={props.aiConfig}
           workspaceRoot={workspaceRoot}
+          aiProjectRulesEnabled={settings.aiProjectRulesEnabled ?? true}
+          aiMemoryEnabled={settings.aiMemoryEnabled ?? true}
+          aiAuditLogEnabled={settings.aiAuditLogEnabled ?? true}
           onClose={props.onCloseInlineAi}
           onResultReady={props.onInlineAiResultReady}
         />

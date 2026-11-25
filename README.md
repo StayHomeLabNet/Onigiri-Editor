@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v153">What's New in v1.5.3</a> ・
+    <a href="#whats-new-in-v154">What's New in v1.5.4</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.3-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.4-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.5.3`
+Current version: `v1.5.4`
 
 ## Key Features
 
@@ -100,7 +100,21 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.5.3
+## What's New in v1.5.4
+
+- **AI Harness Architecture Upgrades (All Toggleable in Settings → General)**:
+  - **Auto-Load Project Rules (`AGENTS.md` / `CLAUDE.md` / `.onigiri-rules.md`)**: Automatically detects workspace-root rule files and injects them into AI Chat, Inline AI Edit, Toolbar AI Custom Buttons, and AI Document Review prompts.
+  - **Unified Progress & Error Diagnostics**: Extended `listenAiChatProgress` live streaming status and categorized `aiErrorHint.ts` troubleshooting hints to Toolbar AI Custom Buttons and AI Document Review.
+  - **2-Model Parallel A/B Comparison**: Run a primary model and a secondary comparison model in parallel inside **Inline AI Edit (`⌘⇧E`)** and **AI Chat** to inspect outputs side-by-side before applying.
+  - **`cli-direct` Pre-Execution Checkpoint & Changed-File Guard**: Captures workspace state before `cli-direct` writes and surfaces modified files after execution.
+  - **AI Execution Audit Log**: Records masked prompt previews, provider/model, elapsed time, and apply status with 1-click re-run support.
+- **AI Memory & Context Intelligence**:
+  - **Pinned AI Memory (Global / Workspace)**: Manage persistent rules in **Settings → General** or pin directly from any chat message (`Pin`) for automatic injection across all AI pathways.
+  - **Long Thread Compaction & Save Rule to `AGENTS.md`**: Compact older chat turns into a persistent summary pill (keeping the latest 6 messages) and save effective instructions straight into `AGENTS.md` / `.onigiri-rules.md`.
+  - **Context Visibility Bar & Knowledge Index Suggestions**: Inspect and temporarily mute active context chips (`Doc`, `Folder`, `AGENTS.md`, `Memory (N)`, `History`) above the chat composer, and attach up to 3 relevant workspace notes suggested from the Knowledge Index (`@relativePath`).
+
+<details>
+<summary>Previous release: v1.5.3</summary>
 
 - **AI Harness Wait-Time Visibility & Error Guidance**:
   - **AI Ghost Text Loading & Error Hints**: Shows a subtle pulsing `…` indicator while completions are generating and surfaces throttled, actionable provider hints on failure.
@@ -110,6 +124,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Bidirectional Editor ⇔ Table Highlight**: Selecting or clicking cells/substrings syncs highlights between the editor and table preview, paired with sticky `#` row numbers, numeric column stats (`Σ / Avg / Min / Max`), delimiter selector, wrap toggle, and a **Settings → Editor** toggle for double-click cell copy.
 - **Welcome Guide Updates & Modularization**:
   - Updated `Welcome.md` / `ようこそ.md` across all 8 languages to highlight AI Harness and CSV/TSV Table Preview features, and extracted `AppModals.tsx`, `EditorInlinePopup.tsx`, and `editorContextActions.ts`.
+
+</details>
 
 <details>
 <summary>Previous release: v1.5.2</summary>

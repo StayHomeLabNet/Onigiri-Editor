@@ -18,12 +18,17 @@ import {
   MessageSquare,
   Play,
   RefreshCw,
+  RotateCcw,
   Send,
   Settings2,
   Square,
   Terminal,
   Trash2,
   AlertCircle,
+  BookmarkPlus,
+  FileText,
+  Minimize2,
+  Pin,
   Zap,
 } from 'lucide-react';
 import type {
@@ -32,13 +37,17 @@ import type {
   AiProviderConfig,
   AiProviderId,
   ChatMessage,
+  WorkspaceNoteIndexEntry,
 } from '../types';
 import type { Translations } from '../i18n/types';
 import {
   assistAiConnection,
   cancelAiChat,
+  deleteWorkspaceFiles,
   detectAiCapabilities,
+  getGitStatus,
   getHostOs,
+  gitDiscardFiles,
   listLocalModels,
   listSubscriptionModels,
   listenAiChatProgress,
@@ -47,6 +56,16 @@ import {
   sendAiChat,
   writeWorkspaceFile,
 } from '../utils/platform';
+import { formatAiErrorHint } from '../utils/aiErrorHint';
+import { appendWorkspaceAiRule, loadWorkspaceAiRules } from '../utils/aiProjectRules';
+import {
+  addAiMemoryItem,
+  buildAiMemoryPromptBlock,
+  findRelevantWorkspaceNotes,
+  getActiveAiMemoryItems,
+  subscribeAiMemory,
+} from '../utils/aiMemory';
+import { appendAiAuditEntry } from '../utils/aiAuditLog';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
 export const AI_THREADS_STORAGE_KEY = 'onigiri-markdown.ai-threads.v1';
@@ -55,12 +74,16 @@ interface AiThreadsStore {
   mode: 'tab' | 'shared';
   shared: ChatMessage[];
   byTab: Record<string, ChatMessage[]>;
+  summaries?: {
+    shared?: string;
+    byTab?: Record<string, string>;
+  };
 }
 
 function loadAiThreadsStore(): AiThreadsStore {
   try {
     const raw = localStorage.getItem(AI_THREADS_STORAGE_KEY);
-    if (!raw) return { mode: 'tab', shared: [], byTab: {} };
+    if (!raw) return { mode: 'tab', shared: [], byTab: {}, summaries: { byTab: {} } };
     const parsed = JSON.parse(raw);
     return {
       mode: parsed?.mode === 'shared' ? 'shared' : 'tab',
@@ -74,9 +97,16 @@ function loadAiThreadsStore(): AiThreadsStore {
                 .map(([k, v]) => [k, (v as ChatMessage[]).slice(-50)])
             )
           : {},
+      summaries: {
+        shared: typeof parsed?.summaries?.shared === 'string' ? parsed.summaries.shared : undefined,
+        byTab:
+          parsed?.summaries?.byTab && typeof parsed.summaries.byTab === 'object'
+            ? (parsed.summaries.byTab as Record<string, string>)
+            : {},
+      },
     };
   } catch {
-    return { mode: 'tab', shared: [], byTab: {} };
+    return { mode: 'tab', shared: [], byTab: {}, summaries: { byTab: {} } };
   }
 }
 
@@ -121,6 +151,14 @@ interface AiChatPanelProps {
   onWorkspaceRefresh?: () => void;
   onFileWritten?: (relativePath: string) => void;
   onCliTurnComplete?: () => void;
+  onBeforeCliDirectRun?: () => void;
+  aiProjectRulesEnabled?: boolean;
+  aiCliDirectCheckpointEnabled?: boolean;
+  aiAuditLogEnabled?: boolean;
+  aiMemoryEnabled?: boolean;
+  aiNoteSuggestEnabled?: boolean;
+  workspaceNoteIndex?: WorkspaceNoteIndexEntry[];
+  activeFilePath?: string | null;
   onRequestDiffPreview?: (req: DiffPreviewRequest) => void;
 }
 
@@ -269,6 +307,14 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   onWorkspaceRefresh,
   onFileWritten,
   onCliTurnComplete,
+  onBeforeCliDirectRun,
+  aiProjectRulesEnabled = true,
+  aiCliDirectCheckpointEnabled = true,
+  aiAuditLogEnabled = true,
+  aiMemoryEnabled = true,
+  aiNoteSuggestEnabled = true,
+  workspaceNoteIndex = [],
+  activeFilePath,
   onRequestDiffPreview,
 }) => {
   const [caps, setCaps] = useState<AiCapabilities | null>(null);
@@ -285,6 +331,39 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     null
   );
   const [showSupportCard, setShowSupportCard] = useState(false);
+  const [muteProjectRules, setMuteProjectRules] = useState(false);
+  const [mutePinnedMemory, setMutePinnedMemory] = useState(false);
+  const [detectedRuleFile, setDetectedRuleFile] = useState<string | null>(null);
+  const [pinnedMemoryCount, setPinnedMemoryCount] = useState<number>(
+    () => getActiveAiMemoryItems(workspaceRoot, aiMemoryEnabled).length
+  );
+  const [compacting, setCompacting] = useState(false);
+  const [showSummaryBox, setShowSummaryBox] = useState(false);
+  const [actionToast, setActionToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspaceRoot || !aiProjectRulesEnabled) {
+      setDetectedRuleFile(null);
+      return;
+    }
+    void loadWorkspaceAiRules(workspaceRoot, true).then((res) => {
+      if (!cancelled) {
+        setDetectedRuleFile(res?.sourceFile ?? null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceRoot, aiProjectRulesEnabled]);
+
+  useEffect(() => {
+    const sync = () => {
+      setPinnedMemoryCount(getActiveAiMemoryItems(workspaceRoot, aiMemoryEnabled).length);
+    };
+    sync();
+    return subscribeAiMemory(sync);
+  }, [workspaceRoot, aiMemoryEnabled]);
 
   const initialStore = useMemo(() => loadAiThreadsStore(), []);
   const threadsStoreRef = useRef<AiThreadsStore>(initialStore);
@@ -897,6 +976,165 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     }
   };
 
+  const [summaryRevision, setSummaryRevision] = useState(0);
+  const activeThreadSummary = useMemo(() => {
+    void summaryRevision;
+    const store = threadsStoreRef.current;
+    return threadMode === 'shared'
+      ? store.summaries?.shared || ''
+      : store.summaries?.byTab?.[activeTabId] || '';
+  }, [threadMode, activeTabId, summaryRevision]);
+
+  const updateThreadSummary = useCallback(
+    (summary: string | undefined, target?: { mode: 'tab' | 'shared'; tabId: string }) => {
+      const store = threadsStoreRef.current;
+      const useMode = target?.mode ?? threadMode;
+      const useTab = target?.tabId ?? activeTabId;
+      const prevSummaries = store.summaries ?? { byTab: {} };
+      store.summaries =
+        useMode === 'shared'
+          ? { ...prevSummaries, shared: summary }
+          : {
+              ...prevSummaries,
+              byTab: { ...(prevSummaries.byTab ?? {}), [useTab]: summary ?? '' },
+            };
+      saveAiThreadsStore(store);
+      setSummaryRevision((v) => v + 1);
+    },
+    [threadMode, activeTabId]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!workspaceRoot || !aiProjectRulesEnabled) {
+      setDetectedRuleFile(null);
+      return;
+    }
+    void loadWorkspaceAiRules(workspaceRoot, true).then((r) => {
+      if (!cancelled) setDetectedRuleFile(r?.sourceFile ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceRoot, aiProjectRulesEnabled]);
+
+  const showTempToast = useCallback((msg: string) => {
+    setActionToast(msg);
+    window.setTimeout(() => {
+      setActionToast((cur) => (cur === msg ? null : cur));
+    }, 2600);
+  }, []);
+
+  const handlePinToMemory = useCallback(
+    (text: string) => {
+      const cleaned = text.trim().replace(/\s+/g, ' ').slice(0, 400);
+      if (!cleaned) return;
+      const scope = workspaceRoot ? 'workspace' : 'global';
+      addAiMemoryItem(cleaned, scope, workspaceRoot);
+      const isJa = t.actions.close === '閉じる';
+      showTempToast(
+        isJa
+          ? `📌 ${scope === 'workspace' ? 'ワークスペース' : 'グローバル'}メモリーに保存しました`
+          : `📌 Saved to ${scope} AI memory`
+      );
+    },
+    [workspaceRoot, t.actions.close, showTempToast]
+  );
+
+  const handleSaveAsProjectRule = useCallback(
+    async (text: string) => {
+      if (!workspaceRoot) return;
+      const snippet = text.trim().split(/\r?\n/).slice(0, 8).join('\n').slice(0, 600);
+      if (!snippet) return;
+      const isJa = t.actions.close === '閉じる';
+      try {
+        const targetFile = await appendWorkspaceAiRule(workspaceRoot, snippet);
+        setDetectedRuleFile(targetFile);
+        onWorkspaceRefresh?.();
+        showTempToast(
+          isJa ? `📝 ${targetFile} にルールを追記しました` : `📝 Appended rule to ${targetFile}`
+        );
+      } catch (err) {
+        showTempToast(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [workspaceRoot, t.actions.close, onWorkspaceRefresh, showTempToast]
+  );
+
+  const handleCompactOlderTurns = useCallback(async () => {
+    if (compacting || sending) return;
+    const validMsgs = messages.filter((m) => !m.error);
+    if (validMsgs.length <= 6) return;
+    const older = validMsgs.slice(0, -6);
+    const keep = messages.slice(-6);
+    const capturedKey = { mode: threadMode, tabId: activeTabId };
+    setCompacting(true);
+    const isJa = t.actions.close === '閉じる';
+    try {
+      const transcript = older
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 1200)}`)
+        .join('\n\n');
+      const existingNote = activeThreadSummary
+        ? `Previous summary:\n${activeThreadSummary}\n\n`
+        : '';
+      const effectiveModel =
+        config.model.trim() ||
+        (config.provider === 'ollama' && localModels[0] ? localModels[0] : '') ||
+        (config.provider === 'lmstudio' && localModels[0] ? localModels[0] : '') ||
+        DEFAULT_MODELS[config.provider] ||
+        '';
+      const res = await sendAiChat({
+        requestId: `compact-${Date.now()}`,
+        provider: config.provider,
+        model: effectiveModel || undefined,
+        apiKey: config.apiKeys[config.provider],
+        baseUrl: config.baseUrls[config.provider] || DEFAULT_BASE_URLS[config.provider],
+        customCliCmd: config.customCliCmd,
+        systemPrompt: isJa
+          ? 'これまでの会話履歴を、今後の回答に必要な前提・決定事項・好みのルールを中心に簡潔な箇条書き（400文字以内）で要約してください。'
+          : 'Summarize the earlier conversation into concise bullet points (under 200 words) preserving key decisions, constraints, and user preferences.',
+        messages: [{ role: 'user', content: `${existingNote}${transcript}` }],
+        workspaceDir: null,
+        allowWorkspaceWrite: false,
+      });
+      if (res.content.trim()) {
+        updateThreadSummary(res.content.trim(), capturedKey);
+        updateMessages(keep, capturedKey);
+        showTempToast(
+          isJa ? '🗜️ 古い会話を要約して圧縮しました' : '🗜️ Compacted older turns into summary'
+        );
+      }
+    } catch (err) {
+      showTempToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCompacting(false);
+    }
+  }, [
+    compacting,
+    sending,
+    messages,
+    threadMode,
+    activeTabId,
+    activeThreadSummary,
+    config,
+    localModels,
+    t.actions.close,
+    updateThreadSummary,
+    updateMessages,
+    showTempToast,
+  ]);
+
+  const suggestedNotes = useMemo(() => {
+    if (!aiNoteSuggestEnabled || workspaceNoteIndex.length === 0) return [];
+    const query = input.trim().length >= 2 ? input : `${activeDocTitle || ''}`;
+    return findRelevantWorkspaceNotes(query, workspaceNoteIndex, activeFilePath, 3);
+  }, [aiNoteSuggestEnabled, workspaceNoteIndex, input, activeDocTitle, activeFilePath]);
+
+  const historyTurnCount = useMemo(
+    () => messages.filter((m) => !m.error).length,
+    [messages]
+  );
+
   const handleCancelSending = async () => {
     const reqId = activeRequestIdRef.current;
     if (!sending || !reqId || cancellingRef.current) return;
@@ -928,9 +1166,34 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     setInput('');
     setSending(true);
 
+    const isJa = t.actions.close === '閉じる';
     const promptParts: string[] = [
       'You are a helpful Markdown writing and engineering assistant inside Onigiri Editor. When providing rewritten sections or documents, respond in clean Markdown.',
     ];
+
+    const projectRules = await loadWorkspaceAiRules(
+      workspaceRoot,
+      aiProjectRulesEnabled && !muteProjectRules
+    );
+    if (projectRules) {
+      promptParts.push(projectRules.promptBlock);
+    }
+
+    const pinnedMemory = buildAiMemoryPromptBlock(
+      workspaceRoot,
+      aiMemoryEnabled && !mutePinnedMemory
+    );
+    if (pinnedMemory) {
+      promptParts.push(pinnedMemory);
+    }
+
+    const currentSummary =
+      threadMode === 'shared'
+        ? threadsStoreRef.current.summaries?.shared
+        : threadsStoreRef.current.summaries?.byTab?.[activeTabId];
+    if (currentSummary && currentSummary.trim()) {
+      promptParts.push(`# Earlier Conversation Summary\n${currentSummary.trim()}`);
+    }
 
     if (config.includeDocContext) {
       promptParts.push(
@@ -960,12 +1223,27 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
       }
     }
 
+    // Capture pre-run checkpoint & git status baseline for cli-direct mode
+    let baselineStatus: Map<string, string> | null = null;
+    if (workspaceRoot && aiFolderMode === 'cli-direct' && aiCliDirectCheckpointEnabled) {
+      onBeforeCliDirectRun?.();
+      try {
+        const gs = await getGitStatus(workspaceRoot);
+        if (gs.isRepo) {
+          baselineStatus = new Map(Object.entries(gs.entries));
+        }
+      } catch {
+        // non-git or unavailable
+      }
+    }
+
     const effectiveModel =
       config.model.trim() ||
       (config.provider === 'ollama' && localModels[0] ? localModels[0] : '') ||
       (config.provider === 'lmstudio' && localModels[0] ? localModels[0] : '') ||
       DEFAULT_MODELS[config.provider] ||
       '';
+    const startedAt = Date.now();
 
     try {
       const res = await sendAiChat({
@@ -984,14 +1262,44 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         allowWorkspaceWrite: Boolean(workspaceRoot && aiFolderMode === 'cli-direct'),
       });
 
+      let cliChanges: ChatMessage['cliChanges'] = undefined;
+      if (workspaceRoot && aiFolderMode === 'cli-direct' && aiCliDirectCheckpointEnabled && baselineStatus) {
+        try {
+          const afterGs = await getGitStatus(workspaceRoot);
+          if (afterGs.isRepo) {
+            const changed = Object.entries(afterGs.entries)
+              .filter(([path, status]) => baselineStatus!.get(path) !== status)
+              .map(([path, status]) => ({ path, status }));
+            if (changed.length > 0) {
+              cliChanges = { files: changed, rolledBack: false };
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       const assistantMsg: ChatMessage = {
         id: `msg-${Date.now()}-a`,
         role: 'assistant',
         content: res.content,
         model: res.modelUsed,
         timestamp: Date.now(),
+        cliChanges,
       };
       updateMessages((prev) => [...prev, assistantMsg], capturedKey);
+      appendAiAuditEntry(
+        {
+          source: 'chat',
+          label: activeDocTitle || 'AI Chat',
+          provider: config.provider,
+          model: res.modelUsed || effectiveModel || undefined,
+          promptPreview: trimmed,
+          responsePreview: res.content,
+          durationMs: Date.now() - startedAt,
+        },
+        aiAuditLogEnabled
+      );
 
       if (workspaceRoot && aiFolderMode === 'cli-direct') {
         onWorkspaceRefresh?.();
@@ -1009,10 +1317,24 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
         };
         updateMessages((prev) => [...prev, cancelNote], capturedKey);
       } else {
+        const info = formatAiErrorHint(err, config.provider, isJa);
+        appendAiAuditEntry(
+          {
+            source: 'chat',
+            label: activeDocTitle || 'AI Chat',
+            provider: config.provider,
+            model: effectiveModel || undefined,
+            promptPreview: trimmed,
+            responsePreview: '',
+            durationMs: Date.now() - startedAt,
+            error: info.message,
+          },
+          aiAuditLogEnabled
+        );
         const errorMsg: ChatMessage = {
           id: `msg-${Date.now()}-err`,
           role: 'assistant',
-          content: errText,
+          content: info.hint ? `${info.message}\n\n💡 ${info.hint}` : info.message,
           timestamp: Date.now(),
           error: true,
         };
@@ -1991,6 +2313,71 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                     })}
                   </div>
                 )}
+                {msg.cliChanges && msg.cliChanges.files.length > 0 && workspaceRoot && (
+                  <div className="ai-cli-guard-box">
+                    <div className="ai-cli-guard-head">
+                      <span>
+                        {t.actions.close === '閉じる'
+                          ? `CLI 変更ファイル (${msg.cliChanges.files.length})`
+                          : `CLI Modified Files (${msg.cliChanges.files.length})`}
+                      </span>
+                      <button
+                        type="button"
+                        className={`mini-pill-btn ${msg.cliChanges.rolledBack ? '' : 'is-active'}`}
+                        disabled={Boolean(msg.cliChanges.rolledBack)}
+                        onClick={async () => {
+                          const tracked = msg.cliChanges!.files
+                            .filter((f) => f.status !== '?' && f.status !== '??')
+                            .map((f) => f.path);
+                          const untracked = msg.cliChanges!.files
+                            .filter((f) => f.status === '?' || f.status === '??')
+                            .map((f) => f.path);
+                          try {
+                            if (tracked.length > 0) {
+                              await gitDiscardFiles(workspaceRoot, tracked);
+                            }
+                            if (untracked.length > 0) {
+                              const absUntracked = untracked.map((rel) =>
+                                `${workspaceRoot.replace(/[/\\]+$/, '')}/${rel}`
+                              );
+                              await deleteWorkspaceFiles(workspaceRoot, absUntracked);
+                            }
+                            updateMessages((prev) =>
+                              prev.map((m) =>
+                                m.id === msg.id && m.cliChanges
+                                  ? { ...m, cliChanges: { ...m.cliChanges, rolledBack: true } }
+                                  : m
+                              )
+                            );
+                            onWorkspaceRefresh?.();
+                            onCliTurnComplete?.();
+                          } catch {
+                            // ignore rollback error
+                          }
+                        }}
+                      >
+                        <RotateCcw size={11} />
+                        <span>
+                          {msg.cliChanges.rolledBack
+                            ? t.actions.close === '閉じる'
+                              ? 'ロールバック済み'
+                              : 'Rolled Back'
+                            : t.actions.close === '閉じる'
+                              ? '変更を元に戻す'
+                              : 'Rollback Changes'}
+                        </span>
+                      </button>
+                    </div>
+                    <div className="ai-cli-guard-files">
+                      {msg.cliChanges.files.map((f) => (
+                        <div key={f.path} className="ai-cli-guard-file">
+                          <span className="ai-cli-guard-status">{f.status}</span>
+                          <span>{f.path}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {msg.role === 'assistant' && !msg.error && (
                   <div className="ai-msg-actions">
                     {msg.model && <span className="ai-msg-model">{msg.model}</span>}
@@ -2040,6 +2427,64 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
                       >
                         <ClipboardCopy size={11} />
                       </button>
+                      <button
+                        type="button"
+                        className="ai-act-btn"
+                        onClick={() => handlePinToMemory(msg.content)}
+                        title={
+                          t.actions.close === '閉じる'
+                            ? 'ピン留め AI メモリーに記憶'
+                            : 'Pin to AI Memory'
+                        }
+                      >
+                        <Pin size={11} />
+                      </button>
+                      {workspaceRoot && (
+                        <button
+                          type="button"
+                          className="ai-act-btn"
+                          onClick={() => void handleSaveAsProjectRule(msg.content)}
+                          title={
+                            t.actions.close === '閉じる'
+                              ? 'AGENTS.md / ルールに追記'
+                              : 'Append to AGENTS.md / Project Rules'
+                          }
+                        >
+                          <BookmarkPlus size={11} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {msg.role === 'user' && !msg.error && (
+                  <div className="ai-msg-actions" style={{ justifyContent: 'flex-end' }}>
+                    <div className="ai-msg-btns">
+                      <button
+                        type="button"
+                        className="ai-act-btn"
+                        onClick={() => handlePinToMemory(msg.content)}
+                        title={
+                          t.actions.close === '閉じる'
+                            ? 'この指示を AI メモリーに記憶'
+                            : 'Pin instruction to AI Memory'
+                        }
+                      >
+                        <Pin size={11} />
+                      </button>
+                      {workspaceRoot && (
+                        <button
+                          type="button"
+                          className="ai-act-btn"
+                          onClick={() => void handleSaveAsProjectRule(msg.content)}
+                          title={
+                            t.actions.close === '閉じる'
+                              ? 'AGENTS.md / ルールに追記'
+                              : 'Save as AGENTS.md rule'
+                          }
+                        >
+                          <BookmarkPlus size={11} />
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -2079,6 +2524,139 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
               <div className="ai-progress-placeholder">{t.aiChat.progressStarting}</div>
             )}
           </div>
+        )}
+      </div>
+
+      {actionToast && <div className="ai-memory-toast">{actionToast}</div>}
+
+      {activeThreadSummary && (
+        <div className="ai-summary-pill">
+          <button
+            type="button"
+            className="ai-summary-toggle"
+            onClick={() => setShowSummaryBox((v) => !v)}
+          >
+            <Minimize2 size={11} />
+            <span>
+              {t.actions.close === '閉じる' ? '圧縮済み会話要約あり' : 'Conversation Summary Active'}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="ai-summary-clear"
+            onClick={() => updateThreadSummary(undefined)}
+            title={t.actions.close === '閉じる' ? '要約をクリア' : 'Clear summary'}
+          >
+            ×
+          </button>
+          {showSummaryBox && <div className="ai-summary-body">{activeThreadSummary}</div>}
+        </div>
+      )}
+
+      {suggestedNotes.length > 0 && (
+        <div className="ai-note-suggest-bar">
+          <span className="ai-note-suggest-label">
+            {t.actions.close === '閉じる' ? '関連ノート:' : 'Related:'}
+          </span>
+          {suggestedNotes.map((note) => (
+            <button
+              key={note.path}
+              type="button"
+              className="ai-ctx-chip"
+              onClick={() => {
+                const token = `@${note.relativePath}`;
+                setInput((prev) => (prev.includes(token) ? prev : `${prev ? `${prev} ` : ''}${token} `));
+              }}
+              title={note.relativePath}
+            >
+              <FileText size={10} />
+              <span>{note.title || note.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="ai-context-bar">
+        <button
+          type="button"
+          className={`ai-ctx-chip ${config.includeDocContext ? 'is-on' : ''}`}
+          onClick={() =>
+            onConfigChange({ ...config, includeDocContext: !config.includeDocContext })
+          }
+          title={t.actions.close === '閉じる' ? '現在の文書を文脈に含める' : 'Toggle current document context'}
+        >
+          <span>{t.actions.close === '閉じる' ? '📄 文書' : '📄 Doc'}</span>
+        </button>
+        {workspaceRoot && aiFolderMode !== 'disabled' && (
+          <button
+            type="button"
+            className={`ai-ctx-chip ${config.includeFolderContext ? 'is-on' : ''}`}
+            onClick={() =>
+              onConfigChange({ ...config, includeFolderContext: !config.includeFolderContext })
+            }
+            title={t.actions.close === '閉じる' ? 'ワークスペース文脈を含める' : 'Toggle folder context'}
+          >
+            <span>{t.actions.close === '閉じる' ? '📁 フォルダ' : '📁 Folder'}</span>
+          </button>
+        )}
+        {detectedRuleFile && aiProjectRulesEnabled && (
+          <button
+            type="button"
+            className={`ai-ctx-chip ${!muteProjectRules ? 'is-on' : ''}`}
+            onClick={() => setMuteProjectRules((v) => !v)}
+            title={
+              t.actions.close === '閉じる'
+                ? `${detectedRuleFile} の注入を一時切替`
+                : `Toggle ${detectedRuleFile} injection`
+            }
+          >
+            <span>📜 {detectedRuleFile}</span>
+          </button>
+        )}
+        {aiMemoryEnabled && pinnedMemoryCount > 0 && (
+          <button
+            type="button"
+            className={`ai-ctx-chip ${!mutePinnedMemory ? 'is-on' : ''}`}
+            onClick={() => setMutePinnedMemory((v) => !v)}
+            title={
+              t.actions.close === '閉じる'
+                ? 'ピン留めメモリーの注入を一時切替'
+                : 'Toggle pinned AI memory injection'
+            }
+          >
+            <span>
+              📌 {t.actions.close === '閉じる' ? `記憶 (${pinnedMemoryCount})` : `Memory (${pinnedMemoryCount})`}
+            </span>
+          </button>
+        )}
+        <span className="ai-ctx-stat">
+          {t.actions.close === '閉じる'
+            ? `履歴 ${Math.min(historyTurnCount, 12)}/12`
+            : `History ${Math.min(historyTurnCount, 12)}/12`}
+        </span>
+        {historyTurnCount > 10 && (
+          <button
+            type="button"
+            className="ai-ctx-chip is-action"
+            disabled={compacting || sending}
+            onClick={() => void handleCompactOlderTurns()}
+            title={
+              t.actions.close === '閉じる'
+                ? '古い会話を要約圧縮して文脈を保持'
+                : 'Summarize & compact older turns'
+            }
+          >
+            <Minimize2 size={10} />
+            <span>
+              {compacting
+                ? t.actions.close === '閉じる'
+                  ? '圧縮中…'
+                  : 'Compacting…'
+                : t.actions.close === '閉じる'
+                  ? '要約圧縮'
+                  : 'Compact'}
+            </span>
+          </button>
         )}
       </div>
 

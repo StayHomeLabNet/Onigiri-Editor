@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   Sparkles,
@@ -37,12 +37,23 @@ import type {
   SnapshotKind,
   SyntaxPresetId,
   TextEncodingId,
+  WorkspaceNoteIndexEntry,
   WrapMode,
 } from '../types';
 import type { Translations } from '../i18n/types';
 import { extractFrontmatter, updateFrontmatter } from '../utils/markdown';
 import { TEXT_ENCODINGS } from '../utils/encodings';
-import { formatShortcut, sendAiChat } from '../utils/platform';
+import { formatShortcut, listenAiChatProgress, sendAiChat, writeClipboardText } from '../utils/platform';
+import { formatAiErrorHint, type AiErrorInfo } from '../utils/aiErrorHint';
+import { loadWorkspaceAiRules } from '../utils/aiProjectRules';
+import { buildAiMemoryPromptBlock } from '../utils/aiMemory';
+import {
+  appendAiAuditEntry,
+  clearAiAuditLog,
+  loadAiAuditLog,
+  subscribeAiAuditLog,
+  type AiAuditEntry,
+} from '../utils/aiAuditLog';
 import { parseAiReviewFindings, runLocalDocumentReview } from '../utils/documentReview';
 import {
   checkMarkdownCompatibility,
@@ -83,9 +94,11 @@ interface InspectorDrawerProps {
   onSaveChatAsNote?: (title: string, markdown: string) => void;
   workspaceRoot: string | null;
   workspaceFilePaths?: string[];
+  workspaceNoteIndex?: WorkspaceNoteIndexEntry[];
   onWorkspaceRefresh?: () => void;
   onFileWritten?: (relativePath: string) => void;
   onCliTurnComplete?: () => void;
+  onBeforeCliDirectRun?: () => void;
   onRequestDiffPreview?: (req: DiffPreviewRequest) => void;
   onJumpToLine?: (line: number) => void;
   onApplyReviewFix?: (finding: ReviewFinding) => void;
@@ -124,9 +137,11 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   onSaveChatAsNote,
   workspaceRoot,
   workspaceFilePaths,
+  workspaceNoteIndex,
   onWorkspaceRefresh,
   onFileWritten,
   onCliTurnComplete,
+  onBeforeCliDirectRun,
   onRequestDiffPreview,
   onJumpToLine,
   onApplyReviewFix,
@@ -139,7 +154,17 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   const [reviewRefreshTick, setReviewRefreshTick] = useState(0);
   const [aiFindings, setAiFindings] = useState<ReviewFinding[]>([]);
   const [aiReviewBusy, setAiReviewBusy] = useState(false);
-  const [aiReviewError, setAiReviewError] = useState<string | null>(null);
+  const [aiReviewElapsed, setAiReviewElapsed] = useState(0);
+  const [aiReviewProgressText, setAiReviewProgressText] = useState<string | null>(null);
+  const [aiReviewError, setAiReviewError] = useState<AiErrorInfo | null>(null);
+  const [auditEntries, setAuditEntries] = useState<AiAuditEntry[]>(() => loadAiAuditLog());
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
+
+  useEffect(() => {
+    return subscribeAiAuditLog(() => {
+      setAuditEntries(loadAiAuditLog());
+    });
+  }, []);
 
   const localFindings = useMemo(() => {
     if (activeTab !== 'review') return [];
@@ -160,20 +185,46 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
 
   const handleRunAiReview = async () => {
     if (aiReviewBusy) return;
+    const reqId = `doc-review-${Date.now()}`;
     setAiReviewBusy(true);
+    setAiReviewElapsed(0);
+    setAiReviewProgressText(null);
     setAiReviewError(null);
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setAiReviewElapsed(Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+    const unlisten = await listenAiChatProgress((ev) => {
+      if (ev.requestId !== reqId) return;
+      if (ev.elapsedSecs > 0) setAiReviewElapsed(ev.elapsedSecs);
+      const line = ev.text.trim().split(/\r?\n/).pop()?.trim();
+      if (line) setAiReviewProgressText(line.slice(0, 90));
+    });
     const numberedDoc = markdown
       .split(/\r?\n/)
       .slice(0, 400)
       .map((line, i) => `${i + 1}: ${line}`)
       .join('\n');
-    const systemPrompt =
+    const rules = await loadWorkspaceAiRules(
+      workspaceRoot,
+      settings.aiProjectRulesEnabled ?? true
+    );
+    const pinnedMemory = buildAiMemoryPromptBlock(
+      workspaceRoot,
+      settings.aiMemoryEnabled ?? true
+    );
+    const basePrompt =
       locale === 'ja'
         ? 'あなたは技術ドキュメント・文章の校正レビュアーです。誤字脱字、文法誤り、用語の不統一、曖昧な表現、論理の飛躍を見つけ、必ずJSON配列のみを返してください。各要素は {"line": 行番号(整数), "severity": "error"|"warning"|"info", "category": "typo"|"consistency"|"structure"|"ai", "title": "短い指摘タイトル", "detail": "具体的な改善提案", "original": "置換元の文字列(任意)", "replacement": "置換後の文字列(任意)"} の形式にしてください。問題がなければ [] を返してください。'
         : 'You are a meticulous technical proofreader. Identify typos, grammar errors, inconsistent terminology, or unclear phrasing. Return ONLY a JSON array of objects: [{"line": number, "severity": "error"|"warning"|"info", "category": "typo"|"consistency"|"structure"|"ai", "title": string, "detail": string, "original"?: string, "replacement"?: string}]. Return [] if none.';
+    const sysParts = [basePrompt];
+    if (pinnedMemory) sysParts.push(pinnedMemory);
+    if (rules) sysParts.push(rules.promptBlock);
+    const systemPrompt = sysParts.join('\n\n');
+    const userContent = `Document (${activeDocTitle || 'Untitled'}):\n\n${numberedDoc}`;
     try {
       const res = await sendAiChat({
-        requestId: `doc-review-${Date.now()}`,
+        requestId: reqId,
         provider: aiConfig.provider,
         model: aiConfig.model.trim() || undefined,
         apiKey: aiConfig.apiKeys[aiConfig.provider],
@@ -183,17 +234,46 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
         messages: [
           {
             role: 'user',
-            content: `Document (${activeDocTitle || 'Untitled'}):\n\n${numberedDoc}`,
+            content: userContent,
           },
         ],
         workspaceDir: workspaceRoot,
         allowWorkspaceWrite: false,
       });
       setAiFindings(parseAiReviewFindings(res.content));
+      appendAiAuditEntry(
+        {
+          source: 'review',
+          label: activeDocTitle || 'Document Review',
+          provider: aiConfig.provider,
+          model: res.modelUsed || aiConfig.model.trim() || undefined,
+          promptPreview: userContent,
+          responsePreview: res.content,
+          durationMs: Date.now() - startedAt,
+        },
+        settings.aiAuditLogEnabled ?? true
+      );
     } catch (err) {
-      setAiReviewError(err instanceof Error ? err.message : String(err));
+      const info = formatAiErrorHint(err, aiConfig.provider, locale === 'ja');
+      setAiReviewError(info);
+      appendAiAuditEntry(
+        {
+          source: 'review',
+          label: activeDocTitle || 'Document Review',
+          provider: aiConfig.provider,
+          model: aiConfig.model.trim() || undefined,
+          promptPreview: userContent,
+          responsePreview: '',
+          durationMs: Date.now() - startedAt,
+          error: info.message,
+        },
+        settings.aiAuditLogEnabled ?? true
+      );
     } finally {
+      window.clearInterval(timer);
+      unlisten();
       setAiReviewBusy(false);
+      setAiReviewProgressText(null);
     }
   };
 
@@ -367,6 +447,14 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             onWorkspaceRefresh={onWorkspaceRefresh}
             onFileWritten={onFileWritten}
             onCliTurnComplete={onCliTurnComplete}
+            onBeforeCliDirectRun={onBeforeCliDirectRun}
+            aiProjectRulesEnabled={settings.aiProjectRulesEnabled ?? true}
+            aiCliDirectCheckpointEnabled={settings.aiCliDirectCheckpointEnabled ?? true}
+            aiAuditLogEnabled={settings.aiAuditLogEnabled ?? true}
+            aiMemoryEnabled={settings.aiMemoryEnabled ?? true}
+            aiNoteSuggestEnabled={settings.aiNoteSuggestEnabled ?? true}
+            workspaceNoteIndex={workspaceNoteIndex}
+            activeFilePath={activeFilePath}
             onRequestDiffPreview={onRequestDiffPreview}
           />
         )}
@@ -411,6 +499,105 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                 <Code2 size={14} />
                 <span>{t.inspector.copyHtmlBtn}</span>
               </button>
+            </div>
+
+            <div className="ins-divider" />
+
+            <div className="ai-audit-section">
+              <div className="ai-audit-header">
+                <h4 className="ins-title" style={{ margin: 0 }}>
+                  {locale === 'ja' ? 'AI 実行履歴（監査・再実行）' : 'AI Execution Audit Log'}
+                </h4>
+                {auditEntries.length > 0 && (
+                  <button
+                    type="button"
+                    className="mini-pill-btn"
+                    onClick={() => clearAiAuditLog()}
+                  >
+                    <Trash2 size={11} />
+                    <span>{locale === 'ja' ? '履歴クリア' : 'Clear'}</span>
+                  </button>
+                )}
+              </div>
+              {auditEntries.length === 0 ? (
+                <p className="ins-desc" style={{ marginTop: 6 }}>
+                  {locale === 'ja'
+                    ? 'まだ AI 実行履歴がありません（設定 → 全般・表示 で記録の ON/OFF を切り替えられます）。'
+                    : 'No AI execution logs yet (toggle recording in Settings → General & View).'}
+                </p>
+              ) : (
+                <div className="ai-audit-list">
+                  {auditEntries.slice(0, 25).map((entry) => {
+                    const isOpen = expandedAuditId === entry.id;
+                    const timeStr = new Date(entry.timestamp).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    });
+                    return (
+                      <div
+                        key={entry.id}
+                        className={`ai-audit-item ${entry.error ? 'is-error' : ''}`}
+                      >
+                        <button
+                          type="button"
+                          className="ai-audit-item-head"
+                          onClick={() => setExpandedAuditId(isOpen ? null : entry.id)}
+                        >
+                          <span className="ai-audit-badge">{entry.source}</span>
+                          <span className="ai-audit-meta">
+                            {entry.provider}
+                            {entry.model ? `/${entry.model}` : ''} · {(entry.durationMs / 1000).toFixed(1)}s
+                          </span>
+                          <span className="ai-audit-time">{timeStr}</span>
+                        </button>
+                        {isOpen && (
+                          <div className="ai-audit-detail">
+                            <div className="ai-audit-label">
+                              {locale === 'ja' ? 'プロンプト（マスク済み）' : 'Prompt (Redacted)'}
+                            </div>
+                            <pre className="ai-audit-pre">{entry.promptPreview}</pre>
+                            {entry.error ? (
+                              <div className="ai-audit-err">{entry.error}</div>
+                            ) : (
+                              <>
+                                <div className="ai-audit-label">
+                                  {locale === 'ja' ? '応答' : 'Response'}
+                                </div>
+                                <pre className="ai-audit-pre">{entry.responsePreview}</pre>
+                              </>
+                            )}
+                            <div className="ai-audit-actions">
+                              <button
+                                type="button"
+                                className="mini-pill-btn"
+                                onClick={() => void writeClipboardText(entry.promptPreview)}
+                              >
+                                <ClipboardCopy size={11} />
+                                <span>
+                                  {locale === 'ja' ? 'プロンプトをコピー' : 'Copy Prompt'}
+                                </span>
+                              </button>
+                              {entry.responsePreview && (
+                                <button
+                                  type="button"
+                                  className="mini-pill-btn"
+                                  onClick={() => void writeClipboardText(entry.responsePreview)}
+                                >
+                                  <ClipboardCopy size={11} />
+                                  <span>
+                                    {locale === 'ja' ? '応答をコピー' : 'Copy Response'}
+                                  </span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -737,7 +924,33 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
               </button>
             </div>
 
-            {aiReviewError && <div className="error-box">{aiReviewError}</div>}
+            {aiReviewBusy && (
+              <div className="inline-ai-progress-box" role="status" aria-live="polite">
+                <div className="inline-ai-progress-row">
+                  <Loader2 size={13} className="spin-icon" />
+                  <span>
+                    {locale === 'ja'
+                      ? `${aiConfig.provider} で校正中… (${aiReviewElapsed}秒)`
+                      : `Proofreading with ${aiConfig.provider}… (${aiReviewElapsed}s)`}
+                  </span>
+                </div>
+                {aiReviewProgressText && (
+                  <div className="inline-ai-progress-detail">{aiReviewProgressText}</div>
+                )}
+                <div className="inline-ai-progress-bar">
+                  <div className="inline-ai-progress-bar-fill" />
+                </div>
+              </div>
+            )}
+
+            {aiReviewError && (
+              <div className="inline-ai-error">
+                <div>{aiReviewError.message}</div>
+                {aiReviewError.hint && (
+                  <div className="inline-ai-error-hint">{aiReviewError.hint}</div>
+                )}
+              </div>
+            )}
 
             {(settings.markdownCompatCheckEnabled ?? true) && (
               <div className="compat-check-box">

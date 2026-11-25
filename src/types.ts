@@ -97,6 +97,11 @@ export interface AiProviderConfig {
   includeFolderContext: boolean;
 }
 
+export interface ChatMessageCliChange {
+  path: string;
+  status: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
@@ -104,6 +109,10 @@ export interface ChatMessage {
   model?: string;
   timestamp: number;
   error?: boolean;
+  cliChanges?: {
+    files: ChatMessageCliChange[];
+    rolledBack?: boolean;
+  };
 }
 
 export type SnapshotKind = 'manual' | 'auto' | 'ai-before' | 'save-backup';
@@ -325,6 +334,11 @@ export interface EditorSettings {
   imageKeepOriginal?: boolean;
   aiSendPreviewEnabled?: boolean;
   aiAutoRedactSecrets?: boolean;
+  aiProjectRulesEnabled?: boolean;
+  aiCliDirectCheckpointEnabled?: boolean;
+  aiAuditLogEnabled?: boolean;
+  aiMemoryEnabled?: boolean;
+  aiNoteSuggestEnabled?: boolean;
 }
 
 export type MarkdownCompatTarget = 'github' | 'commonmark' | 'onigiri';

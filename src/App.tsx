@@ -6838,6 +6838,7 @@ export function App() {
             }}
             workspaceRoot={workspaceRoot}
             workspaceFilePaths={workspaceEntries.filter((e) => !e.isDir).map((e) => e.path)}
+            workspaceNoteIndex={workspaceNoteIndex}
             onWorkspaceRefresh={() => workspaceRoot && refreshWorkspace(workspaceRoot)}
             onFileWritten={(relPath) => {
               notify(`${t.toasts.folderFileWritten}: ${relPath}`);
@@ -6846,6 +6847,26 @@ export function App() {
             onCliTurnComplete={() => {
               void syncOpenTabsWithDisk();
               if (workspaceRoot) void refreshWorkspace(workspaceRoot);
+            }}
+            onBeforeCliDirectRun={() => {
+              setTabs((prev) =>
+                prev.map((tab) => {
+                  const snap: Snapshot = {
+                    id: `snap-cli-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+                    label:
+                      locale === 'ja'
+                        ? `CLI直接編集前 (${new Date().toLocaleTimeString()})`
+                        : `Before CLI direct (${new Date().toLocaleTimeString()})`,
+                    content: tab.content,
+                    timestamp: Date.now(),
+                    kind: 'ai-before',
+                  };
+                  return {
+                    ...tab,
+                    snapshots: [snap, ...tab.snapshots].slice(0, 30),
+                  };
+                })
+              );
             }}
             onRequestDiffPreview={setDiffPreview}
             onJumpToLine={(ln) => handleGoToLine(ln)}

@@ -4,6 +4,9 @@ import type { AiProviderConfig, AiProviderId, InlineAiPresetItem } from '../type
 import type { Translations } from '../i18n/types';
 import { cancelAiChat, listenAiChatProgress, sendAiChat } from '../utils/platform';
 import { formatAiErrorHint, type AiErrorInfo } from '../utils/aiErrorHint';
+import { loadWorkspaceAiRules } from '../utils/aiProjectRules';
+import { buildAiMemoryPromptBlock } from '../utils/aiMemory';
+import { appendAiAuditEntry } from '../utils/aiAuditLog';
 
 export const INLINE_AI_PRESETS_KEY = 'onigiri-markdown.inline-ai-presets.v1';
 const INLINE_AI_MODAL_SIZE_KEY = 'onigiri-markdown.inline-ai-modal-size.v1';
@@ -103,8 +106,33 @@ interface InlineAiEditModalProps {
   languageLabel: string;
   aiConfig: AiProviderConfig;
   workspaceRoot: string | null;
+  aiProjectRulesEnabled?: boolean;
+  aiMemoryEnabled?: boolean;
+  aiAuditLogEnabled?: boolean;
   onClose: () => void;
   onResultReady: (proposedText: string, instruction: string) => void;
+}
+
+const COMPARE_PROVIDER_OPTIONS: Array<{ id: AiProviderId; label: string }> = [
+  { id: 'codex-cli', label: 'Codex CLI' },
+  { id: 'claude-cli', label: 'Claude Code CLI' },
+  { id: 'gemini-cli', label: 'Gemini CLI' },
+  { id: 'antigravity-cli', label: 'Antigravity CLI' },
+  { id: 'apple-foundation-models', label: 'Apple Intelligence' },
+  { id: 'openai-api', label: 'OpenAI API' },
+  { id: 'anthropic-api', label: 'Anthropic API' },
+  { id: 'gemini-api', label: 'Gemini API' },
+  { id: 'ollama', label: 'Ollama' },
+  { id: 'lmstudio', label: 'LM Studio' },
+];
+
+interface AbCompareCandidate {
+  label: string;
+  provider: AiProviderId;
+  modelUsed?: string;
+  durationMs: number;
+  text?: string;
+  error?: AiErrorInfo;
 }
 
 export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
@@ -115,6 +143,9 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
   languageLabel,
   aiConfig,
   workspaceRoot,
+  aiProjectRulesEnabled = true,
+  aiMemoryEnabled = true,
+  aiAuditLogEnabled = true,
   onClose,
   onResultReady,
 }) => {
@@ -123,6 +154,12 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [progressText, setProgressText] = useState<string | null>(null);
   const [errorInfo, setErrorInfo] = useState<AiErrorInfo | null>(null);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareProviderB, setCompareProviderB] = useState<AiProviderId>(() =>
+    aiConfig.provider === 'claude-cli' ? 'codex-cli' : 'claude-cli'
+  );
+  const [compareModelB, setCompareModelB] = useState('');
+  const [abResults, setAbResults] = useState<[AbCompareCandidate, AbCompareCandidate] | null>(null);
   const [presets, setPresets] = useState<InlineAiPresetItem[]>(() => loadSavedPresets(t));
   const [managingPresets, setManagingPresets] = useState(false);
   const [addingPreset, setAddingPreset] = useState(false);
@@ -130,6 +167,7 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
   const [customSize, setCustomSize] = useState<ModalSize | null>(() => loadSavedModalSize());
   const [expanded, setExpanded] = useState(false);
   const requestIdRef = useRef<string | null>(null);
+  const activeRequestIdsRef = useRef<string[]>([]);
   const cancelledRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -168,6 +206,7 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
     setErrorInfo(null);
     setProgressText(null);
     setElapsedSecs(0);
+    setAbResults(null);
     setBusy(false);
     setAddingPreset(false);
     cancelledRef.current = false;
@@ -246,20 +285,23 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
     const trimmed = (overrideInstruction ?? instruction).trim();
     if (!trimmed || busy) return;
 
-    const reqId = `inline-ai-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    requestIdRef.current = reqId;
+    const reqIdA = `inline-ai-a-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const reqIdB = `inline-ai-b-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    requestIdRef.current = reqIdA;
+    activeRequestIdsRef.current = compareMode ? [reqIdA, reqIdB] : [reqIdA];
     cancelledRef.current = false;
     setBusy(true);
     setElapsedSecs(0);
     setProgressText(null);
     setErrorInfo(null);
+    setAbResults(null);
 
     const startedAt = Date.now();
     const timer = window.setInterval(() => {
       setElapsedSecs(Math.max(1, Math.floor((Date.now() - startedAt) / 1000)));
     }, 1000);
     const unlisten = await listenAiChatProgress((ev) => {
-      if (ev.requestId !== reqId) return;
+      if (!activeRequestIdsRef.current.includes(ev.requestId)) return;
       if (ev.elapsedSecs > 0) {
         setElapsedSecs(ev.elapsedSecs);
       }
@@ -269,47 +311,123 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
       }
     });
 
-    const effectiveModel =
+    const effectiveModelA =
       aiConfig.model.trim() || DEFAULT_MODELS[aiConfig.provider] || '';
 
-    const systemPrompt = [
+    const rules = await loadWorkspaceAiRules(workspaceRoot, aiProjectRulesEnabled);
+    const pinnedMemory = buildAiMemoryPromptBlock(workspaceRoot, aiMemoryEnabled);
+    const baseSystemPrompt = [
       'You are performing an inline text/code transformation on a selected fragment inside an editor.',
       `File: ${fileName} (${languageLabel})`,
       'Return ONLY the replacement text for the selected fragment.',
       'Do not include explanations, preambles, or surrounding markdown code fences unless the original selection itself uses them.',
       'Preserve surrounding indentation and style conventions unless instructed otherwise.',
     ].join('\n');
+    const systemParts = [baseSystemPrompt];
+    if (pinnedMemory) systemParts.push(pinnedMemory);
+    if (rules) systemParts.push(rules.promptBlock);
+    const systemPrompt = systemParts.join('\n\n');
 
     const userPrompt = `Instruction:\n${trimmed}\n\nSelected text:\n<<<SELECTION\n${selectedText}\nSELECTION>>>`;
 
-    try {
-      const res = await sendAiChat({
-        requestId: reqId,
-        provider: aiConfig.provider,
-        model: effectiveModel || undefined,
-        apiKey: aiConfig.apiKeys[aiConfig.provider],
-        baseUrl:
-          aiConfig.baseUrls[aiConfig.provider] || DEFAULT_BASE_URLS[aiConfig.provider],
-        customCliCmd: aiConfig.customCliCmd,
-        systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-        workspaceDir: workspaceRoot,
-        allowWorkspaceWrite: false,
-      });
+    const runOne = async (
+      reqId: string,
+      provider: AiProviderId,
+      modelOverride?: string
+    ): Promise<AbCompareCandidate> => {
+      const t0 = Date.now();
+      const model =
+        (modelOverride && modelOverride.trim()) ||
+        (provider === aiConfig.provider ? effectiveModelA : aiConfig.models?.[provider]?.trim()) ||
+        DEFAULT_MODELS[provider] ||
+        '';
+      try {
+        const res = await sendAiChat({
+          requestId: reqId,
+          provider,
+          model: model || undefined,
+          apiKey: aiConfig.apiKeys[provider],
+          baseUrl: aiConfig.baseUrls[provider] || DEFAULT_BASE_URLS[provider],
+          customCliCmd: aiConfig.customCliCmd,
+          systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          workspaceDir: workspaceRoot,
+          allowWorkspaceWrite: false,
+        });
+        const cleaned = stripSingleMarkdownFence(res.content, selectedText);
+        const durationMs = Date.now() - t0;
+        appendAiAuditEntry(
+          {
+            source: 'inline-edit',
+            label: `${fileName} (${provider})`,
+            provider,
+            model: res.modelUsed || model || undefined,
+            promptPreview: userPrompt,
+            responsePreview: cleaned,
+            durationMs,
+            applied: !compareMode,
+          },
+          aiAuditLogEnabled
+        );
+        return {
+          label: provider,
+          provider,
+          modelUsed: res.modelUsed || model || undefined,
+          durationMs,
+          text: cleaned,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const info = formatAiErrorHint(err, provider, isJa);
+        const durationMs = Date.now() - t0;
+        if (msg !== 'CLI_CANCELLED') {
+          appendAiAuditEntry(
+            {
+              source: 'inline-edit',
+              label: `${fileName} (${provider})`,
+              provider,
+              model: model || undefined,
+              promptPreview: userPrompt,
+              responsePreview: '',
+              durationMs,
+              error: info.message,
+            },
+            aiAuditLogEnabled
+          );
+        }
+        return {
+          label: provider,
+          provider,
+          durationMs,
+          error: info,
+        };
+      }
+    };
 
-      if (cancelledRef.current) return;
-      const cleaned = stripSingleMarkdownFence(res.content, selectedText);
-      onResultReady(cleaned, trimmed);
-    } catch (err) {
-      if (cancelledRef.current) return;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg !== 'CLI_CANCELLED') {
-        setErrorInfo(formatAiErrorHint(err, aiConfig.provider, isJa));
+    try {
+      if (compareMode) {
+        const [resA, resB] = await Promise.all([
+          runOne(reqIdA, aiConfig.provider, effectiveModelA),
+          runOne(reqIdB, compareProviderB, compareModelB),
+        ]);
+        if (cancelledRef.current) return;
+        setAbResults([resA, resB]);
+      } else {
+        const resA = await runOne(reqIdA, aiConfig.provider, effectiveModelA);
+        if (cancelledRef.current) return;
+        if (resA.error) {
+          if (resA.error.message !== 'CLI_CANCELLED') {
+            setErrorInfo(resA.error);
+          }
+          return;
+        }
+        onResultReady(resA.text ?? '', trimmed);
       }
     } finally {
       window.clearInterval(timer);
       unlisten();
       requestIdRef.current = null;
+      activeRequestIdsRef.current = [];
       setBusy(false);
       setProgressText(null);
     }
@@ -317,10 +435,12 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
 
   const handleCancelRequest = async () => {
     cancelledRef.current = true;
-    const reqId = requestIdRef.current;
-    if (reqId) {
-      await cancelAiChat(reqId).catch(() => {});
-    }
+    const ids = activeRequestIdsRef.current.length > 0
+      ? [...activeRequestIdsRef.current]
+      : requestIdRef.current
+        ? [requestIdRef.current]
+        : [];
+    await Promise.all(ids.map((id) => cancelAiChat(id).catch(() => {})));
     setBusy(false);
   };
 
@@ -561,14 +681,60 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
             }}
           />
 
+          <div className="inline-ai-compare-bar">
+            <label className="check-row" style={{ margin: 0 }}>
+              <input
+                type="checkbox"
+                checked={compareMode}
+                disabled={busy}
+                onChange={(e) => {
+                  setCompareMode(e.target.checked);
+                  setAbResults(null);
+                }}
+              />
+              <span>
+                {isJa ? '2モデル並列比較 (A/B)' : 'Compare 2 Models in Parallel (A/B)'}
+              </span>
+            </label>
+            {compareMode && (
+              <div className="inline-ai-compare-inputs">
+                <span className="inline-ai-compare-tag">B:</span>
+                <select
+                  className="data-delimiter-select"
+                  value={compareProviderB}
+                  disabled={busy}
+                  onChange={(e) => setCompareProviderB(e.target.value as AiProviderId)}
+                >
+                  {COMPARE_PROVIDER_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  className="inline-ai-compare-model-input"
+                  value={compareModelB}
+                  disabled={busy}
+                  onChange={(e) => setCompareModelB(e.target.value)}
+                  placeholder={isJa ? 'モデル指定 (任意)' : 'Model (optional)'}
+                />
+              </div>
+            )}
+          </div>
+
           {busy && (
             <div className="inline-ai-progress-box" role="status" aria-live="polite">
               <div className="inline-ai-progress-row">
                 <Loader2 size={13} className="spin-icon" />
                 <span>
-                  {isJa
-                    ? `${aiConfig.provider} で生成中… (${elapsedSecs}秒)`
-                    : `Generating with ${aiConfig.provider}… (${elapsedSecs}s)`}
+                  {compareMode
+                    ? isJa
+                      ? `${aiConfig.provider} と ${compareProviderB} を並列生成中… (${elapsedSecs}秒)`
+                      : `Generating A/B (${aiConfig.provider} vs ${compareProviderB})… (${elapsedSecs}s)`
+                    : isJa
+                      ? `${aiConfig.provider} で生成中… (${elapsedSecs}秒)`
+                      : `Generating with ${aiConfig.provider}… (${elapsedSecs}s)`}
                 </span>
               </div>
               {progressText && (
@@ -577,6 +743,45 @@ export const InlineAiEditModal: React.FC<InlineAiEditModalProps> = ({
               <div className="inline-ai-progress-bar">
                 <div className="inline-ai-progress-bar-fill" />
               </div>
+            </div>
+          )}
+
+          {abResults && (
+            <div className="inline-ai-ab-grid">
+              {abResults.map((cand, idx) => (
+                <div key={idx} className="inline-ai-ab-card">
+                  <div className="inline-ai-ab-head">
+                    <span className="inline-ai-ab-badge">
+                      {idx === 0 ? 'A' : 'B'}: {cand.provider}
+                      {cand.modelUsed ? ` (${cand.modelUsed})` : ''}
+                    </span>
+                    <span className="inline-ai-ab-time">
+                      {(cand.durationMs / 1000).toFixed(1)}s
+                    </span>
+                  </div>
+                  {cand.error ? (
+                    <div className="inline-ai-error">
+                      <div>{cand.error.message}</div>
+                      {cand.error.hint && (
+                        <div className="inline-ai-error-hint">{cand.error.hint}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <pre className="inline-ai-ab-pre">{cand.text}</pre>
+                      <button
+                        type="button"
+                        className="primary-btn"
+                        style={{ alignSelf: 'flex-end', padding: '4px 10px', fontSize: 12 }}
+                        onClick={() => onResultReady(cand.text ?? '', instruction.trim())}
+                      >
+                        <Sparkles size={12} />
+                        <span>{isJa ? 'この案を Diff で適用' : 'Apply with Diff'}</span>
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           )}
 

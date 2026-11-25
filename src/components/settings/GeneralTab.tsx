@@ -1,5 +1,13 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Clock, Download, FileText, RefreshCw, Rocket } from 'lucide-react';
+import {
+  addAiMemoryItem,
+  loadAiMemoryItems,
+  removeAiMemoryItem,
+  subscribeAiMemory,
+  toggleAiMemoryItem,
+  type AiMemoryItem,
+} from '../../utils/aiMemory';
 import { formatUpdateCheckTime, isVersionSkipped } from '../UpdateModal';
 import type { Translations } from '../../i18n/types';
 import { SUPPORTED_LOCALES, localeNames } from '../../i18n';
@@ -47,6 +55,13 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
   onAutoUpdateNow,
   isUpdatingApp,
 }) => {
+  const [memoryItems, setMemoryItems] = useState<AiMemoryItem[]>(() => loadAiMemoryItems());
+  const [newMemoryText, setNewMemoryText] = useState('');
+
+  useEffect(() => {
+    return subscribeAiMemory(() => setMemoryItems(loadAiMemoryItems()));
+  }, []);
+
   return (
     <div className="settings-section">
       <div className="settings-grid-2">
@@ -534,6 +549,186 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
                 : 'Automatically mask detected API keys & tokens in preview'}
             </span>
           </label>
+        )}
+
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={settings.aiProjectRulesEnabled ?? true}
+            onChange={(e) =>
+              onSettingsChange({ ...settings, aiProjectRulesEnabled: e.target.checked })
+            }
+          />
+          <span>
+            {locale === 'ja'
+              ? 'プロジェクトの AI ルール（AGENTS.md / CLAUDE.md）を自動注入する'
+              : 'Auto-inject project AI rules (AGENTS.md / CLAUDE.md) into prompts'}
+          </span>
+        </label>
+
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={settings.aiCliDirectCheckpointEnabled ?? true}
+            onChange={(e) =>
+              onSettingsChange({ ...settings, aiCliDirectCheckpointEnabled: e.target.checked })
+            }
+          />
+          <span>
+            {locale === 'ja'
+              ? 'CLI 直接編集（cli-direct）前に自動スナップショット＆ロールバックガードを有効にする'
+              : 'Enable pre-run snapshot & rollback guard for CLI direct workspace edits'}
+          </span>
+        </label>
+
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={settings.aiAuditLogEnabled ?? true}
+            onChange={(e) =>
+              onSettingsChange({ ...settings, aiAuditLogEnabled: e.target.checked })
+            }
+          />
+          <span>
+            {locale === 'ja'
+              ? 'AI 実行履歴（マスク済みプロンプト・応答・再実行ログ）を記録する'
+              : 'Record AI execution audit & replay log (with secret redaction)'}
+          </span>
+        </label>
+
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={settings.aiNoteSuggestEnabled ?? true}
+            onChange={(e) =>
+              onSettingsChange({ ...settings, aiNoteSuggestEnabled: e.target.checked })
+            }
+          />
+          <span>
+            {locale === 'ja'
+              ? 'AI チャットで関連ノート（[[Wikiリンク]] / #タグ）を自動提案する'
+              : 'Auto-suggest relevant workspace notes in AI Chat'}
+          </span>
+        </label>
+
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={settings.aiMemoryEnabled ?? true}
+            onChange={(e) =>
+              onSettingsChange({ ...settings, aiMemoryEnabled: e.target.checked })
+            }
+          />
+          <span>
+            {locale === 'ja'
+              ? 'ピン留め AI メモリー（文体・好みのルール記憶）をプロンプトに含める'
+              : 'Include pinned AI memory rules in prompts'}
+          </span>
+        </label>
+
+        {(settings.aiMemoryEnabled ?? true) && (
+          <div
+            style={{
+              marginLeft: 18,
+              marginBottom: 8,
+              padding: '8px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+              background: 'var(--bg-elevated)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="text"
+                className="text-input"
+                style={{ flex: 1, fontSize: 12 }}
+                value={newMemoryText}
+                onChange={(e) => setNewMemoryText(e.target.value)}
+                placeholder={
+                  locale === 'ja'
+                    ? '例：日本語の回答はです・ます調で、結論から簡潔に書く'
+                    : 'e.g. Always respond concisely in Markdown bullet points'
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newMemoryText.trim()) {
+                    e.preventDefault();
+                    addAiMemoryItem(newMemoryText, 'global');
+                    setNewMemoryText('');
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="mini-pill-btn is-active"
+                disabled={!newMemoryText.trim()}
+                onClick={() => {
+                  if (!newMemoryText.trim()) return;
+                  addAiMemoryItem(newMemoryText, 'global');
+                  setNewMemoryText('');
+                }}
+              >
+                {locale === 'ja' ? '追加' : 'Add'}
+              </button>
+            </div>
+            {memoryItems.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 140, overflowY: 'auto' }}>
+                {memoryItems.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 12,
+                      padding: '3px 6px',
+                      borderRadius: 6,
+                      background: 'var(--bg-app)',
+                      border: '1px solid var(--border)',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={m.enabled}
+                      onChange={() => toggleAiMemoryItem(m.id)}
+                    />
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                        background: 'var(--bg-elevated)',
+                        color: 'var(--fg-muted)',
+                      }}
+                    >
+                      {m.scope}
+                    </span>
+                    <span
+                      style={{
+                        flex: 1,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        opacity: m.enabled ? 1 : 0.5,
+                      }}
+                      title={m.text}
+                    >
+                      {m.text}
+                    </span>
+                    <button
+                      type="button"
+                      className="mini-pill-btn"
+                      onClick={() => removeAiMemoryItem(m.id)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         <label className="check-row">

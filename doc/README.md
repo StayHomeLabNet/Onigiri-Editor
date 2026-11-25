@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.3)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.4)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -259,8 +259,13 @@ Click the top-right **Options / AI Chat** icon (robot icon) to open the right dr
   - Sends the active selection when highlighted or the entire document otherwise, replaces immediately with single-step Undo (`⌘Z` / `Ctrl+Z`), and lets you click the spinner (or press its shortcut again) while running to cancel.
 - **Per-Tab vs. Shared Threads**: Switch between keeping an isolated AI conversation per active tab or using a shared workspace thread.
 - **Save Chat as `.md` Note**: Export the current AI conversation directly into a new Markdown tab for archiving or further editing.
-- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`)**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets in a resizable/expandable modal with live progress streaming, elapsed timer, troubleshooting hints, and **Diff Preview** confirmation before applying.
-- **AI Folder Access (Advanced Mode)**: Switch between **Disabled**, **Read-Only**, **Read + Write (Diff Preview approval)**, and **CLI Direct Workspace Write**.
+- **Inline AI Edit on Selection (`⌘⇧E` / `Ctrl+Shift+E`) & 2-Model A/B Comparison**: Select text or code and edit via AI presets (**Refactor**, **Add Comments**, **Fix Bugs / Typos**, **Make Concise**, **Polite Tone**, **Translate JA / EN**) or custom presets in a resizable/expandable modal with live progress streaming, elapsed timer, troubleshooting hints, optional **2-Model Parallel A/B Comparison**, and **Diff Preview** confirmation before applying.
+- **AI Folder Access & `cli-direct` Checkpoint Guard (Advanced Mode)**: Switch between **Disabled**, **Read-Only**, **Read + Write (Diff Preview approval)**, and **CLI Direct Workspace Write** (with automatic pre-execution checkpointing and changed-file summary).
+- **AI Harness Rules, Pinned Memory, Thread Compaction & Context Intelligence (`v1.5.4`)**:
+  - **Project Rules Auto-Injection**: Automatically detects workspace-root `AGENTS.md`, `CLAUDE.md`, or `.onigiri-rules.md` and injects them into AI Chat, Inline Edit, Custom Buttons, and AI Review (**Settings → General** toggleable). You can also append effective rules from any chat message to your workspace rule file in 1 click.
+  - **Pinned AI Memory (Global / Workspace)**: Manage persistent rules in **Settings → General** or pin directly from chat messages (`Pin`) to inject across all AI workflows.
+  - **Long Thread Compaction**: Summarize older chat turns into a collapsible summary pill while keeping the latest 6 turns active.
+  - **Context Visibility Bar & Related Note Suggestions**: Inspect active context chips (`Doc`, `Folder`, `AGENTS.md`, `Memory (N)`, `History`) above the composer with 1-click mute toggles, attach up to 3 relevant workspace notes suggested from the Knowledge Index (`@relativePath`), and inspect/re-run past executions in the **AI Audit Log**.
 
 ### Proofread & Document Review, Formatter & Stats
 
