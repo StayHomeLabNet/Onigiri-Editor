@@ -59,6 +59,7 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
   - Toggle **View → Show Header Bar**, **View → Show Format Toolbar**, and **Status Bar** from the menu bar, Settings, or Command Palette.
   - **Settings → General & View** also provides **Hide top header bar in Simple mode** and **Show format toolbar in Simple mode**.
   - **Status Bar One-Step Mode Switcher**: Whenever the top header bar is hidden, the right side of the Status Bar displays a compact one-click mode switcher (`Simple → Basic`, `Basic → Advanced`, or `Advanced → Basic`) alongside a quick Settings button.
+  - **Basic / Simple Mode TopBar Document Pill & Tab Switcher**: The active filename pill in the TopBar includes a direct `×` close button and opens an **Open Tabs Popover** on click (showing an `index/total ▾` badge when multiple tabs are open) so you can switch tabs, close background tabs, open a new tab, or close other tabs without switching to Advanced mode.
 
 ---
 

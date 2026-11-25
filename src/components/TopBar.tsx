@@ -31,6 +31,10 @@ import {
   Network,
   Images,
   Compass,
+  ChevronDown,
+  Pin,
+  Plus,
+  X,
 } from 'lucide-react';
 import type { AppMode, Locale, ThemeId, ViewLayout } from '../types';
 import type { Translations } from '../i18n/types';
@@ -84,6 +88,17 @@ interface TopBarProps {
   isMarkdown?: boolean;
   isDirty: boolean;
   activeTitle: string;
+  tabs?: Array<{
+    id: string;
+    title: string;
+    path?: string | null;
+    dirty: boolean;
+    pinned?: boolean;
+  }>;
+  activeTabId?: string;
+  onSelectTab?: (id: string) => void;
+  onCloseTab?: (id: string) => void;
+  onCloseOtherTabs?: (id: string) => void;
   updateAvailableVersion?: string | null;
   updateReadyToInstall?: boolean;
   onOpenUpdateModal?: () => void;
@@ -129,6 +144,11 @@ export const TopBar: React.FC<TopBarProps> = ({
   isMarkdown = true,
   isDirty,
   activeTitle,
+  tabs = [],
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
+  onCloseOtherTabs,
   updateAvailableVersion,
   updateReadyToInstall,
   onOpenUpdateModal,
@@ -141,6 +161,31 @@ export const TopBar: React.FC<TopBarProps> = ({
   const themeBtnRef = useRef<HTMLButtonElement>(null);
   const localeBtnRef = useRef<HTMLButtonElement>(null);
   const layoutSwitchRef = useRef<HTMLDivElement>(null);
+  const docPillRef = useRef<HTMLDivElement>(null);
+
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (mode === 'advanced') setTabMenuOpen(false);
+  }, [mode]);
+
+  useEffect(() => {
+    if (!tabMenuOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (docPillRef.current && !docPillRef.current.contains(e.target as Node)) {
+        setTabMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTabMenuOpen(false);
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [tabMenuOpen]);
 
   const [collapseLevel, setCollapseLevel] = useState<TopBarCollapseLevel>(0);
   const savedWidthsRef = useRef<TopBarSavedWidths>({ ...DEFAULT_TOPBAR_SAVED_WIDTHS });
@@ -335,10 +380,118 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
 
         {mode !== 'advanced' && (
-          <span className="basic-doc-title" data-tooltip={activeTitle}>
-            {activeTitle}
-            {isDirty ? <span className="dirty-dot" /> : null}
-          </span>
+          <div className="basic-doc-pill-wrap" ref={docPillRef}>
+            <div className={`basic-doc-pill ${tabMenuOpen ? 'is-open' : ''}`}>
+              <button
+                type="button"
+                className="basic-doc-trigger"
+                onClick={() => setTabMenuOpen((v) => !v)}
+                data-tooltip={activeTitle}
+                aria-expanded={tabMenuOpen}
+                aria-label={activeTitle}
+              >
+                <span className="basic-doc-title-text">{activeTitle}</span>
+                {isDirty ? <span className="dirty-dot" /> : null}
+                {tabs.length > 1 && (
+                  <span className="basic-doc-count">
+                    {Math.max(
+                      1,
+                      tabs.findIndex((tb) => tb.id === activeTabId) + 1
+                    )}
+                    /{tabs.length}
+                    <ChevronDown size={11} />
+                  </span>
+                )}
+              </button>
+              {activeTabId && onCloseTab && (
+                <button
+                  type="button"
+                  className="basic-doc-close-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCloseTab(activeTabId);
+                  }}
+                  data-tooltip={t.tabMenu.close}
+                  data-tooltip-shortcut={formatShortcut('⌘W')}
+                  aria-label={t.tabMenu.close}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+
+            {tabMenuOpen && (
+              <div className="basic-tab-popover" role="menu">
+                <div className="basic-tab-popover-header">
+                  <span className="basic-tab-popover-title">
+                    {tabs.length} {tabs.length === 1 ? 'Tab' : 'Tabs'}
+                  </span>
+                  <div className="basic-tab-popover-actions">
+                    <button
+                      type="button"
+                      className="basic-tab-popover-action"
+                      onClick={() => {
+                        setTabMenuOpen(false);
+                        onNewFile();
+                      }}
+                      data-tooltip={t.actions.newFile}
+                      aria-label={t.actions.newFile}
+                    >
+                      <Plus size={12} />
+                    </button>
+                    {tabs.length > 1 && activeTabId && onCloseOtherTabs && (
+                      <button
+                        type="button"
+                        className="basic-tab-popover-action"
+                        onClick={() => {
+                          onCloseOtherTabs(activeTabId);
+                          setTabMenuOpen(false);
+                        }}
+                      >
+                        {t.tabMenu.closeOthers}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="basic-tab-popover-list">
+                  {tabs.map((tb) => {
+                    const isActive = tb.id === activeTabId;
+                    return (
+                      <div
+                        key={tb.id}
+                        className={`basic-tab-popover-item ${isActive ? 'is-active' : ''}`}
+                        onClick={() => {
+                          onSelectTab?.(tb.id);
+                          setTabMenuOpen(false);
+                        }}
+                        role="menuitem"
+                      >
+                        <div className="basic-tab-popover-item-main">
+                          {tb.pinned && <Pin size={11} className="basic-tab-pin-icon" />}
+                          <span className="basic-tab-popover-item-title">{tb.title}</span>
+                          {tb.dirty && <span className="dirty-dot" />}
+                        </div>
+                        {onCloseTab && (
+                          <button
+                            type="button"
+                            className="basic-tab-popover-item-close"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onCloseTab(tb.id);
+                              if (tabs.length <= 1) setTabMenuOpen(false);
+                            }}
+                            aria-label={t.tabMenu.close}
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

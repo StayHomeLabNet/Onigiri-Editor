@@ -11,6 +11,8 @@ Onigiri Editor `v1.5.4` strengthens the AI Harness and AI Memory architecture—
   - **Explicit Pinned AI Memory (Global / Workspace)**: Manage persistent rules in **Settings → General** or pin directly from any chat message (`Pin`) for injection across all AI pathways.
   - **Long Thread Compaction & 1-Click Save Rule**: Compact older chat turns into a persistent summary pill (retaining the latest 6 messages) and append effective instructions straight to `AGENTS.md` / `.onigiri-rules.md`.
   - **Context Visibility Bar & Related Note Suggestions**: Inspect active context chips (`Doc`, `Folder`, `AGENTS.md`, `Memory (N)`, `History`) above the chat composer with 1-click mute toggles, and attach up to 3 relevant workspace notes suggested from the Knowledge Index (`@relativePath`).
+- **Basic / Simple Mode TopBar Document Pill**:
+  - Added a direct `×` close button to the active filename pill in the TopBar, plus an interactive **Open Tabs Popover** (with an `index/total ▾` badge when multiple tabs are open) to switch tabs, close individual tabs, create a new tab, or close other tabs without leaving Basic/Simple mode.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel, includes Apple Foundation Models support on macOS 26+)**: `.dmg` / `.app.tar.gz`
@@ -32,6 +34,8 @@ Onigiri Editor `v1.5.4` では、AI ハーネス基盤と AI メモリー機能�
   - **明示的ピン留めメモリー（グローバル／ワークスペース別）**: **設定 → 全般** での編集やチャットメッセージ横のピン留めボタンからルールを登録し、全 AI 経路へ自動注入します。
   - **長いスレッドの要約圧縮 ＆ `AGENTS.md` 追記**: 過去の会話を要約ピルへ圧縮して直近 6 件を保持でき、チャットでうまくいった指示をワークスペース規約ファイルへワンクリック追記できます。
   - **コンテキスト可視化バー ＆ ナレッジ関連ノート提案**: 入力欄上部に送信中の文脈チップ（文書・フォルダ・`AGENTS.md`・メモリー件数・履歴件数）を表示して一時ミュートできるほか、ナレッジインデックスから関連ノートを最大 3 件提案して `@相対パス` で即添付できます。
+- **標準 / シンプルモード上部ヘッダーのファイル名ピル強化**:
+  - 上部ヘッダーバーのファイル名横に直接 **閉じる「×」ボタン** を追加し、複数タブが開かれているときは **`現在位置/総数 ▾` バッジ** とクリック展開式の **開いているタブ一覧ポップオーバー**（タブ切替・個別「×」閉じ・新規タブ・他のタブをすべて閉じる）から拡張モードへ切り替えずに操作できるようになりました。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応・macOS 26+ Apple Foundation Models 対応）**: `.dmg` / `.app.tar.gz`

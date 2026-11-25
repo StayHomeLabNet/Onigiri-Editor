@@ -5803,6 +5803,11 @@ export function App() {
               isMarkdown={previewKind === 'markdown'}
               isDirty={activeTab.dirty}
               activeTitle={activeTab.title}
+              tabs={tabs}
+              activeTabId={activeTab.id}
+              onSelectTab={setActiveTabId}
+              onCloseTab={handleCloseTab}
+              onCloseOtherTabs={handleCloseOtherTabs}
               updateAvailableVersion={updateInfo?.hasUpdate ? updateInfo.latestVersion : null}
               updateReadyToInstall={Boolean(downloadedUpdate)}
               onOpenUpdateModal={() => setShowUpdateModal(true)}

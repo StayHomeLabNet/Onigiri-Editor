@@ -112,6 +112,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Pinned AI Memory (Global / Workspace)**: Manage persistent rules in **Settings → General** or pin directly from any chat message (`Pin`) for automatic injection across all AI pathways.
   - **Long Thread Compaction & Save Rule to `AGENTS.md`**: Compact older chat turns into a persistent summary pill (keeping the latest 6 messages) and save effective instructions straight into `AGENTS.md` / `.onigiri-rules.md`.
   - **Context Visibility Bar & Knowledge Index Suggestions**: Inspect and temporarily mute active context chips (`Doc`, `Folder`, `AGENTS.md`, `Memory (N)`, `History`) above the chat composer, and attach up to 3 relevant workspace notes suggested from the Knowledge Index (`@relativePath`).
+- **Basic / Simple Mode TopBar Document Pill**:
+  - Added a direct `×` close button to the active filename pill in the TopBar, plus an interactive **Open Tabs Popover** (with `index/total` badge when multiple tabs are open) for switching tabs, closing individual tabs, creating a new tab, or closing other tabs without leaving Basic/Simple mode.
 
 <details>
 <summary>Previous release: v1.5.3</summary>
