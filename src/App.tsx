@@ -529,6 +529,7 @@ export function App() {
   const [showInspector, setShowInspector] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('chat');
   const [showFind, setShowFind] = useState(false);
+  const [findBarOverlapsBrowser, setFindBarOverlapsBrowser] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -5737,7 +5738,7 @@ export function App() {
     !zenMode &&
     showRightBrowser &&
     !anyModalOpen &&
-    !(showFind && layout === 'preview');
+    !(showFind && (layout === 'preview' || findBarOverlapsBrowser));
   const showRightPaneHeader =
     !showSideComparePane &&
     (settings.builtinBrowserEnabled || settings.externalBrowserPreviewEnabled);
@@ -5787,6 +5788,11 @@ export function App() {
           bottomEditorRef.current?.setFindHighlights(payload);
         }
       }}
+      getAnchorRect={() =>
+        (layout !== 'preview' ? editorPaneRef.current : splitContainerRef.current)
+          ?.getBoundingClientRect() ?? null
+      }
+      onBrowserOverlapChange={setFindBarOverlapsBrowser}
     />
   );
 
@@ -6133,7 +6139,7 @@ export function App() {
         )}
 
         <div className="center-stage" ref={splitContainerRef}>
-          {layout === 'preview' && findReplaceBar}
+          {findReplaceBar}
 
           {activeTab.externalStatus && (
             <div
@@ -6209,7 +6215,6 @@ export function App() {
                 className={`pane editor-pane ${editorSplitVertical ? 'is-split-vertical' : ''}`}
                 style={layout === 'split' ? { width: `${splitRatio * 100}%` } : undefined}
               >
-                {findReplaceBar}
                 {editorSplitVertical ? (
                   <>
                     <div

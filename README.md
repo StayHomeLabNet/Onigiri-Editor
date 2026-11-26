@@ -114,6 +114,9 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Context Visibility Bar & Knowledge Index Suggestions**: Inspect and temporarily mute active context chips (`Doc`, `Folder`, `AGENTS.md`, `Memory (N)`, `History`) above the chat composer, and attach up to 3 relevant workspace notes suggested from the Knowledge Index (`@relativePath`).
 - **Basic / Simple Mode TopBar Document Pill**:
   - Added a direct `×` close button to the active filename pill in the TopBar, plus an interactive **Open Tabs Popover** (with `index/total` badge when multiple tabs are open) for switching tabs, closing individual tabs, creating a new tab, or closing other tabs without leaving Basic/Simple mode.
+- **Draggable Find & Replace Window & Native Browser Overlay Fixes**:
+  - Made the **Find & Replace (`⌘F` / `Ctrl+F`)** bar freely draggable anywhere across the entire app window (double-click the grip handle to reset position), anchored safely to the editor pane by default and protected from clipping behind the embedded native WebView browser.
+  - Fixed Windows desktop shortcut / single-instance re-launch to open a new window when launched without file arguments, clamped tooltips away from the embedded browser viewport, and hid empty AI connection settings drawers for subscription CLIs.
 
 <details>
 <summary>Previous release: v1.5.3</summary>

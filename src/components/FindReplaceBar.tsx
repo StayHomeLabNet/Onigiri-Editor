@@ -15,6 +15,7 @@ import {
   ReplaceAll,
   RefreshCw,
   AlertCircle,
+  GripVertical,
 } from 'lucide-react';
 import type { Translations } from '../i18n/types';
 import {
@@ -92,6 +93,8 @@ interface FindReplaceBarProps {
   }) => void;
   onSyncScope: (scope: TextRange | null) => void;
   onSyncHighlights: (payload: { matches: FindMatch[]; activeIndex: number } | null) => void;
+  getAnchorRect?: () => DOMRect | null;
+  onBrowserOverlapChange?: (overlaps: boolean) => void;
 }
 
 export const FindReplaceBar = forwardRef<FindReplaceBarHandle, FindReplaceBarProps>(
@@ -109,6 +112,8 @@ export const FindReplaceBar = forwardRef<FindReplaceBarHandle, FindReplaceBarPro
       onReplaceAll,
       onSyncScope,
       onSyncHighlights,
+      getAnchorRect,
+      onBrowserOverlapChange,
     },
     ref
   ) => {
@@ -125,6 +130,10 @@ export const FindReplaceBar = forwardRef<FindReplaceBarHandle, FindReplaceBarPro
 
     const findInputRef = useRef<HTMLInputElement | null>(null);
     const replaceInputRef = useRef<HTMLInputElement | null>(null);
+    const barRef = useRef<HTMLDivElement | null>(null);
+    const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null);
+    const [defaultPos, setDefaultPos] = useState<{ left: number; top: number } | null>(null);
+    const [isDragging, setIsDragging] = useState(false);
     const pendingAfterReplacePosRef = useRef<number | null>(null);
     const shouldJumpOnCriteriaChangeRef = useRef(false);
     const seededFocusRef = useRef(false);
@@ -373,6 +382,101 @@ export const FindReplaceBar = forwardRef<FindReplaceBarHandle, FindReplaceBarPro
       [inSelection, selectionScope, jump, onSyncScope]
     );
 
+    const computeDefaultPos = useCallback(() => {
+      const barEl = barRef.current;
+      const barWidth = barEl?.offsetWidth || Math.min(520, window.innerWidth - 32);
+      const barHeight = barEl?.offsetHeight || 110;
+      const anchor = getAnchorRect?.();
+      if (anchor && anchor.width > 0 && anchor.height > 0) {
+        const left = Math.min(
+          Math.max(8, window.innerWidth - barWidth - 8),
+          Math.max(8, anchor.right - barWidth - 16)
+        );
+        const top = Math.min(
+          Math.max(8, window.innerHeight - barHeight - 8),
+          Math.max(8, anchor.top + 10)
+        );
+        setDefaultPos({ left, top });
+      } else {
+        setDefaultPos({
+          left: Math.max(8, window.innerWidth - barWidth - 16),
+          top: 56,
+        });
+      }
+    }, [getAnchorRect]);
+
+    useEffect(() => {
+      if (!open || dragPos !== null) return;
+      const raf = window.requestAnimationFrame(computeDefaultPos);
+      window.addEventListener('resize', computeDefaultPos);
+      return () => {
+        window.cancelAnimationFrame(raf);
+        window.removeEventListener('resize', computeDefaultPos);
+      };
+    }, [open, dragPos, computeDefaultPos]);
+
+    useEffect(() => {
+      if (!open) {
+        onBrowserOverlapChange?.(false);
+        return;
+      }
+      const checkOverlap = () => {
+        const barEl = barRef.current;
+        const browserHost = document.querySelector('.native-browser-host') as HTMLElement | null;
+        if (!barEl || !browserHost) {
+          onBrowserOverlapChange?.(false);
+          return;
+        }
+        const a = barEl.getBoundingClientRect();
+        const b = browserHost.getBoundingClientRect();
+        if (b.width <= 0 || b.height <= 0) {
+          onBrowserOverlapChange?.(false);
+          return;
+        }
+        const overlaps =
+          a.right > b.left && a.left < b.right && a.bottom > b.top && a.top < b.bottom;
+        onBrowserOverlapChange?.(overlaps);
+      };
+      const raf = window.requestAnimationFrame(checkOverlap);
+      return () => window.cancelAnimationFrame(raf);
+    }, [open, dragPos, defaultPos, onBrowserOverlapChange]);
+
+    const handleBarPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, button, label, select, textarea, a')) return;
+      const barEl = barRef.current;
+      if (!barEl) return;
+
+      e.preventDefault();
+      const barRect = barEl.getBoundingClientRect();
+      const startLeft = barRect.left;
+      const startTop = barRect.top;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const maxLeft = Math.max(4, window.innerWidth - barRect.width - 4);
+      const maxTop = Math.max(4, window.innerHeight - barRect.height - 4);
+
+      setIsDragging(true);
+
+      const onMove = (ev: PointerEvent) => {
+        const nextLeft = Math.min(maxLeft, Math.max(4, startLeft + (ev.clientX - startX)));
+        const nextTop = Math.min(maxTop, Math.max(4, startTop + (ev.clientY - startY)));
+        setDragPos({ left: nextLeft, top: nextTop });
+      };
+
+      const onUp = () => {
+        setIsDragging(false);
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    }, []);
+
     if (!open) return null;
 
     const scopeLineInfo =
@@ -383,10 +487,26 @@ export const FindReplaceBar = forwardRef<FindReplaceBarHandle, FindReplaceBarPro
     const canSearch = Boolean(query) && !regexError && (!inSelection || Boolean(selectionScope));
     const hasMatches = canSearch && matches.length > 0;
 
+    const resolvedPos = dragPos ?? defaultPos;
+
     return (
-      <div className="find-bar" role="dialog" aria-label={t.actions.findReplace}>
-        {/* Row 1: Find input + count + Prev / Next + Close */}
+      <div
+        ref={barRef}
+        className={`find-bar ${isDragging ? 'is-dragging' : ''}`}
+        role="dialog"
+        aria-label={t.actions.findReplace}
+        style={resolvedPos ? { left: resolvedPos.left, top: resolvedPos.top, right: 'auto' } : undefined}
+        onPointerDown={handleBarPointerDown}
+      >
+        {/* Row 1: Drag handle + Find input + count + Prev / Next + Close */}
         <div className="find-row">
+          <span
+            className="find-drag-handle"
+            onDoubleClick={() => setDragPos(null)}
+            aria-hidden="true"
+          >
+            <GripVertical size={13} />
+          </span>
           <input
             ref={findInputRef}
             type="text"

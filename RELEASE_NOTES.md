@@ -13,6 +13,9 @@ Onigiri Editor `v1.5.4` strengthens the AI Harness and AI Memory architecture—
   - **Context Visibility Bar & Related Note Suggestions**: Inspect active context chips (`Doc`, `Folder`, `AGENTS.md`, `Memory (N)`, `History`) above the chat composer with 1-click mute toggles, and attach up to 3 relevant workspace notes suggested from the Knowledge Index (`@relativePath`).
 - **Basic / Simple Mode TopBar Document Pill**:
   - Added a direct `×` close button to the active filename pill in the TopBar, plus an interactive **Open Tabs Popover** (with an `index/total ▾` badge when multiple tabs are open) to switch tabs, close individual tabs, create a new tab, or close other tabs without leaving Basic/Simple mode.
+- **Draggable Find & Replace Window & Native Browser Overlay Fixes**:
+  - Made the **Find & Replace (`⌘F` / `Ctrl+F`)** bar freely draggable anywhere across the entire app window (double-click the grip handle to reset position), anchored safely to the editor pane by default and protected from clipping behind the embedded native WebView browser.
+  - Fixed Windows desktop shortcut / single-instance re-launch to open a new window when launched without file arguments, clamped tooltips away from the embedded browser viewport, and hid empty AI connection settings drawers for subscription CLIs.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel, includes Apple Foundation Models support on macOS 26+)**: `.dmg` / `.app.tar.gz`
@@ -36,6 +39,9 @@ Onigiri Editor `v1.5.4` では、AI ハーネス基盤と AI メモリー機能�
   - **コンテキスト可視化バー ＆ ナレッジ関連ノート提案**: 入力欄上部に送信中の文脈チップ（文書・フォルダ・`AGENTS.md`・メモリー件数・履歴件数）を表示して一時ミュートできるほか、ナレッジインデックスから関連ノートを最大 3 件提案して `@相対パス` で即添付できます。
 - **標準 / シンプルモード上部ヘッダーのファイル名ピル強化**:
   - 上部ヘッダーバーのファイル名横に直接 **閉じる「×」ボタン** を追加し、複数タブが開かれているときは **`現在位置/総数 ▾` バッジ** とクリック展開式の **開いているタブ一覧ポップオーバー**（タブ切替・個別「×」閉じ・新規タブ・他のタブをすべて閉じる）から拡張モードへ切り替えずに操作できるようになりました。
+- **文字列検索・置換ウィンドウの自由ドラッグ移動 ＆ 各種表示・起動改善**:
+  - **検索・置換バー（`⌘F` / `Ctrl+F`）** をアプリウィンドウ全体（サイドバー・プレビュー・インスペクター上を含む）へドラッグで自由に移動できるようにしました（ハンドルをダブルクリックで初期位置へリセット。内蔵ブラウザと重なる場合も自動保護）。
+  - Windows で既存起動中にショートカットから再起動した際に新しいウィンドウが開くよう修正し、ツールチップの内蔵ブラウザ下潜り込み防止およびサブスク CLI 時の空の接続設定欄非表示に対応しました。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応・macOS 26+ Apple Foundation Models 対応）**: `.dmg` / `.app.tar.gz`

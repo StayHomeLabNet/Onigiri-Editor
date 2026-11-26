@@ -156,6 +156,7 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 
 - On Windows/Linux, `Ctrl+H` jumps directly to Replace. Navigate matches with `F3` / `⌘G` and `Shift+F3` / `⌘⇧G`.
 - Supports **Match Case**, **Distinguish Full/Half-Width**, **Whole Word**, **Regular Expression**, and **In Selection** scope.
+- **Draggable Floating Window**: Drag the grip handle (`⋮⋮`) or any non-input area of the Find & Replace bar to move it freely anywhere across the app window (double-click the handle to reset to the default top-right position).
 
 ### Editor Right-Click Context Menu
 
