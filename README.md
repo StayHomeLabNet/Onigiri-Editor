@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v154">What's New in v1.5.4</a> ・
+    <a href="#whats-new-in-v155">What's New in v1.5.5</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.4-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.5-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.5.4`
+Current version: `v1.5.5`
 
 ## Key Features
 
@@ -100,7 +100,15 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.5.4
+## What's New in v1.5.5
+
+- **Zone-Aware Drag & Drop (Folder Tree / Editor & Preview / AI Chat)**:
+  - **Workspace Folder Tree (Advanced Mode)**: Hovering highlights the exact target folder (or parent folder of a hovered file). Normal drop **copies** external files/folders into that folder; hold **`Shift`** while dropping to **move** them.
+  - **Editor & Preview Panes**: Dropping images saves them to your asset folder and inserts Markdown image syntax at the cursor. Dropping non-image files (`.md`, `.txt`, `.csv`, etc.) opens them in a new tab by default, or inserts a relative Markdown link `[name](path)` when holding **`Shift`** or **`Ctrl` (`⌘`)**.
+  - **AI Chat Panel (Multimodal & File Attachments)**: Dropping text/code/Markdown files attaches their contents as prompt context chips; dropping images attaches thumbnail chips and sends them as **Base64 multimodal image inputs** to Cloud APIs (OpenAI, Anthropic, Gemini) / Ollama, or as **image file paths** to AI CLIs (Codex, Claude, Gemini, Antigravity, Custom CLI).
+
+<details>
+<summary>Previous release: v1.5.4</summary>
 
 - **AI Harness Architecture Upgrades (All Toggleable in Settings → General)**:
   - **Auto-Load Project Rules (`AGENTS.md` / `CLAUDE.md` / `.onigiri-rules.md`)**: Automatically detects workspace-root rule files and injects them into AI Chat, Inline AI Edit, Toolbar AI Custom Buttons, and AI Document Review prompts.
@@ -117,6 +125,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **Draggable Find & Replace Window & Native Browser Overlay Fixes**:
   - Made the **Find & Replace (`⌘F` / `Ctrl+F`)** bar freely draggable anywhere across the entire app window (double-click the grip handle to reset position), anchored safely to the editor pane by default and protected from clipping behind the embedded native WebView browser.
   - Fixed Windows desktop shortcut / single-instance re-launch to open a new window when launched without file arguments, clamped tooltips away from the embedded browser viewport, and hid empty AI connection settings drawers for subscription CLIs.
+
+</details>
 
 <details>
 <summary>Previous release: v1.5.3</summary>

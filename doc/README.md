@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.4)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.5)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -157,6 +157,10 @@ Switch anytime via the top header bar, **View** menu, **`⌘\` / `Ctrl+\`** (cyc
 - On Windows/Linux, `Ctrl+H` jumps directly to Replace. Navigate matches with `F3` / `⌘G` and `Shift+F3` / `⌘⇧G`.
 - Supports **Match Case**, **Distinguish Full/Half-Width**, **Whole Word**, **Regular Expression**, and **In Selection** scope.
 - **Draggable Floating Window**: Drag the grip handle (`⋮⋮`) or any non-input area of the Find & Replace bar to move it freely anywhere across the app window (double-click the handle to reset to the default top-right position).
+- **Zone-Aware Drag & Drop (`v1.5.5`)**:
+  - **Folder Tree (Advanced Mode)**: Drop external files/folders onto any folder row to **copy** them there (hold **`Shift`** to **move**).
+  - **Editor / Preview**: Drop images to save & insert at cursor; drop text/Markdown files to open in a new tab (hold **`Shift`** or **`Ctrl` (`⌘`)** to insert a relative Markdown link).
+  - **AI Chat**: Drop text/code/Markdown files or images onto the right Inspector to attach them as prompt chips (multimodal Base64 for Cloud APIs/Ollama; file paths for AI CLIs).
 
 ### Editor Right-Click Context Menu
 

@@ -607,6 +607,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               type="button"
               className={`tree-row is-dir ${isExpanded ? 'is-expanded' : ''}`}
+              data-drop-folder-path={node.path}
+              data-drop-folder-label={node.relativePath}
               style={{ paddingLeft: `${6 + depth * 14}px` }}
               onClick={() => toggleDir(node.relativePath)}
               onContextMenu={(e) => {
@@ -659,11 +661,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 ? 'is-renamed'
                 : 'is-modified';
 
+      const parentDirPath = node.path.replace(/[/\\][^/\\]+$/, '');
+      const parentRelPath = node.relativePath.includes('/')
+        ? node.relativePath.replace(/\/[^/]+$/, '')
+        : '';
+
       return (
         <button
           key={`file:${node.relativePath}`}
           type="button"
           draggable
+          data-drop-folder-path={parentDirPath}
+          data-drop-folder-label={parentRelPath}
           onDragStart={(e) => {
             try {
               e.dataTransfer.setData(
@@ -850,7 +859,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <div className="sidebar-body">
         {activeTab === 'files' && (
-          <div className="sidebar-section">
+          <div
+            className="sidebar-section"
+            data-drop-zone={workspaceRoot ? 'sidebar' : undefined}
+            data-drop-folder-path={workspaceRoot || undefined}
+            data-drop-folder-label=""
+          >
             {!workspaceRoot ? (
               <div className="sidebar-empty-wrap">
                 <div className="sidebar-empty">

@@ -59,7 +59,7 @@ import {
   checkMarkdownCompatibility,
   convertSingleBreaksForStandardMarkdown,
 } from '../utils/markdownCompat';
-import { AiChatPanel } from './AiChatPanel';
+import { AiChatPanel, type AiDroppedAttachment } from './AiChatPanel';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
 interface InspectorDrawerProps {
@@ -95,6 +95,7 @@ interface InspectorDrawerProps {
   workspaceRoot: string | null;
   workspaceFilePaths?: string[];
   workspaceNoteIndex?: WorkspaceNoteIndexEntry[];
+  pendingDropFiles?: { seq: number; items: AiDroppedAttachment[] } | null;
   onWorkspaceRefresh?: () => void;
   onFileWritten?: (relativePath: string) => void;
   onCliTurnComplete?: () => void;
@@ -138,6 +139,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   workspaceRoot,
   workspaceFilePaths,
   workspaceNoteIndex,
+  pendingDropFiles,
   onWorkspaceRefresh,
   onFileWritten,
   onCliTurnComplete,
@@ -426,7 +428,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
         })}
       </div>
 
-      <div className={`inspector-body ${activeTab === 'chat' ? 'is-chat' : ''}`}>
+      <div className={`inspector-body ${activeTab === 'chat' ? 'is-chat' : ''}`} data-drop-zone="ai">
         {activeTab === 'chat' && (
           <AiChatPanel
             t={t}
@@ -455,6 +457,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             aiNoteSuggestEnabled={settings.aiNoteSuggestEnabled ?? true}
             workspaceNoteIndex={workspaceNoteIndex}
             activeFilePath={activeFilePath}
+            pendingDropFiles={pendingDropFiles}
             onRequestDiffPreview={onRequestDiffPreview}
           />
         )}

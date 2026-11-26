@@ -1756,6 +1756,106 @@ fn duplicate_workspace_file(root_path: String, target_path: String) -> Result<St
     duplicate_workspace_file_impl(&root_path, &target_path)
 }
 
+fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<(), String> {
+    fs::create_dir_all(dest).map_err(|e| format!("Failed to create directory: {}", e))?;
+    let entries = fs::read_dir(src).map_err(|e| format!("Failed to read directory: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let target = dest.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_recursive(&path, &target)?;
+        } else {
+            fs::copy(&path, &target).map_err(|e| format!("Failed to copy file: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+fn unique_dest_path_in_dir(dir: &Path, file_name: &str, is_dir: bool) -> PathBuf {
+    let direct = dir.join(file_name);
+    if !direct.exists() {
+        return direct;
+    }
+    let p = Path::new(file_name);
+    let stem = if is_dir {
+        file_name
+    } else {
+        p.file_stem().and_then(|s| s.to_str()).unwrap_or(file_name)
+    };
+    let ext = if is_dir {
+        None
+    } else {
+        p.extension().and_then(|s| s.to_str())
+    };
+    let mut idx = 1usize;
+    loop {
+        let candidate_name = match ext {
+            Some(e) if !e.is_empty() => format!("{} ({}).{}", stem, idx, e),
+            _ => format!("{} ({})", stem, idx),
+        };
+        let candidate = dir.join(candidate_name);
+        if !candidate.exists() {
+            return candidate;
+        }
+        idx += 1;
+    }
+}
+
+#[tauri::command]
+fn import_external_files_to_workspace_dir(
+    root_path: String,
+    target_dir: String,
+    source_paths: Vec<String>,
+    move_files: bool,
+) -> Result<Vec<String>, String> {
+    let (_root, dest_dir) = resolve_existing_workspace_entry(&root_path, &target_dir)?;
+    if !dest_dir.is_dir() {
+        return Err("Drop target is not a directory".to_string());
+    }
+    let mut results = Vec::new();
+    for raw_src in source_paths {
+        let src = PathBuf::from(raw_src.trim());
+        if !src.exists() {
+            continue;
+        }
+        let canon_src = src.canonicalize().unwrap_or_else(|_| src.clone());
+        if let Some(parent) = canon_src.parent() {
+            if parent == dest_dir {
+                results.push(canon_src.to_string_lossy().to_string());
+                continue;
+            }
+        }
+        if canon_src.is_dir() && dest_dir.starts_with(&canon_src) {
+            return Err("Cannot move or copy a folder into itself".to_string());
+        }
+        let file_name = canon_src
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| "Invalid source file name".to_string())?;
+        let dest = unique_dest_path_in_dir(&dest_dir, file_name, canon_src.is_dir());
+        if move_files {
+            if fs::rename(&canon_src, &dest).is_err() {
+                if canon_src.is_dir() {
+                    copy_dir_recursive(&canon_src, &dest)?;
+                    fs::remove_dir_all(&canon_src)
+                        .map_err(|e| format!("Failed to remove source folder: {}", e))?;
+                } else {
+                    fs::copy(&canon_src, &dest)
+                        .map_err(|e| format!("Failed to copy file: {}", e))?;
+                    fs::remove_file(&canon_src)
+                        .map_err(|e| format!("Failed to remove source file: {}", e))?;
+                }
+            }
+        } else if canon_src.is_dir() {
+            copy_dir_recursive(&canon_src, &dest)?;
+        } else {
+            fs::copy(&canon_src, &dest).map_err(|e| format!("Failed to copy file: {}", e))?;
+        }
+        results.push(dest.to_string_lossy().to_string());
+    }
+    Ok(results)
+}
+
 fn delete_workspace_entry_impl(root_path: &str, target_path: &str) -> Result<(), String> {
     let (root, target) = resolve_existing_workspace_entry(root_path, target_path)?;
     if target == root {
@@ -3057,7 +3157,8 @@ pub fn run() {
             set_global_hotkey,
             clear_app_caches,
             reset_window_state,
-            create_new_window
+            create_new_window,
+            import_external_files_to_workspace_dir
         ])
         .build(tauri::generate_context!())
         .expect("error while building Onigiri Editor");

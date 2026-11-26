@@ -527,6 +527,38 @@ export interface AiChatProgressEvent {
   elapsedSecs: number;
 }
 
+export interface AiImageAttachmentPayload {
+  path?: string;
+  name?: string;
+  mimeType: string;
+  base64: string;
+}
+
+export async function readImageDataUrl(path: string, baseDir?: string | null): Promise<string | null> {
+  if (!isTauri()) return null;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string>('read_image_data_url', {
+    path,
+    baseDir: baseDir ?? null,
+  });
+}
+
+export async function importExternalFilesToWorkspaceDir(
+  rootPath: string,
+  targetDir: string,
+  sourcePaths: string[],
+  moveFiles: boolean
+): Promise<string[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string[]>('import_external_files_to_workspace_dir', {
+    rootPath,
+    targetDir,
+    sourcePaths,
+    moveFiles,
+  });
+}
+
 export async function sendAiChat(params: {
   requestId?: string;
   provider: AiProviderId;
@@ -538,6 +570,7 @@ export async function sendAiChat(params: {
   messages: Array<{ role: string; content: string }>;
   workspaceDir?: string | null;
   allowWorkspaceWrite?: boolean;
+  images?: AiImageAttachmentPayload[];
 }): Promise<{ content: string; modelUsed: string }> {
   if (isTauri()) {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -553,6 +586,7 @@ export async function sendAiChat(params: {
         messages: params.messages,
         workspaceDir: params.workspaceDir || null,
         allowWorkspaceWrite: Boolean(params.allowWorkspaceWrite),
+        images: params.images || [],
       },
     });
   }

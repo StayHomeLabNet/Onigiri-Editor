@@ -3941,3 +3941,55 @@
   gap: 3px;
   flex-shrink: 0;
 }
+
+/* AI Chat Dropped File / Image Attachment Chips */
+.ai-attached-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px 8px 0;
+}
+
+.ai-attached-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 190px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg-primary);
+  font-size: 11px;
+}
+
+.ai-attached-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.ai-attached-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-attached-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 1px;
+  border-radius: 3px;
+}
+
+.ai-attached-remove:hover {
+  color: var(--fg-primary);
+  background: var(--bg-hover);
+}

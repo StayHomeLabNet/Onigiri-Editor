@@ -105,6 +105,17 @@ pub struct ChatMessageInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AiImageAttachment {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub name: String,
+    pub mime_type: String,
+    pub base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AiChatRequest {
     #[serde(default)]
     pub request_id: Option<String>,
@@ -117,6 +128,8 @@ pub struct AiChatRequest {
     pub messages: Vec<ChatMessageInput>,
     pub workspace_dir: Option<String>,
     pub allow_workspace_write: Option<bool>,
+    #[serde(default)]
+    pub images: Vec<AiImageAttachment>,
 }
 
 #[derive(Serialize)]
@@ -1756,6 +1769,14 @@ fi
 }
 
 fn format_cli_prompt(system_prompt: Option<&str>, messages: &[ChatMessageInput]) -> String {
+    format_cli_prompt_with_images(system_prompt, messages, &[])
+}
+
+fn format_cli_prompt_with_images(
+    system_prompt: Option<&str>,
+    messages: &[ChatMessageInput],
+    images: &[AiImageAttachment],
+) -> String {
     let mut parts = Vec::new();
     if let Some(sys) = system_prompt {
         if !sys.trim().is_empty() {
@@ -1776,6 +1797,20 @@ fn format_cli_prompt(system_prompt: Option<&str>, messages: &[ChatMessageInput])
     }
     if let Some(last) = messages.last() {
         parts.push(last.content.clone());
+    }
+    if !images.is_empty() {
+        parts.push(String::new());
+        parts.push("# Attached Images".to_string());
+        for img in images {
+            let label = if !img.path.trim().is_empty() {
+                img.path.trim()
+            } else {
+                img.name.trim()
+            };
+            if !label.is_empty() {
+                parts.push(format!("- {}", label));
+            }
+        }
     }
     parts.join("\n")
 }
@@ -2386,7 +2421,11 @@ pub async fn ai_chat(
             let bin = find_executable(&["codex"]).ok_or_else(|| {
                 "Codex CLI (`codex`) was not found on PATH. Click \"Setup in Terminal\" or run `npm install -g @openai/codex && codex login` (requires Node.js 18+).".to_string()
             })?;
-            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let prompt = format_cli_prompt_with_images(
+                request.system_prompt.as_deref(),
+                &request.messages,
+                &request.images,
+            );
             let out_file = std::env::temp_dir().join(format!(
                 "onigiri_codex_{}.txt",
                 std::time::SystemTime::now()
@@ -2458,7 +2497,11 @@ pub async fn ai_chat(
             let bin = find_executable(&["claude"]).ok_or_else(|| {
                 "Claude Code CLI (`claude`) was not found on PATH. Click \"Setup in Terminal\" or run `npm install -g @anthropic-ai/claude-code && claude` (requires Node.js 18+).".to_string()
             })?;
-            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let prompt = format_cli_prompt_with_images(
+                request.system_prompt.as_deref(),
+                &request.messages,
+                &request.images,
+            );
             let mut args = vec!["-p".to_string()];
             if let Some(m) = model_opt {
                 args.push("--model".to_string());
@@ -2513,7 +2556,11 @@ pub async fn ai_chat(
                         .to_string(),
                 );
             }
-            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let prompt = format_cli_prompt_with_images(
+                request.system_prompt.as_deref(),
+                &request.messages,
+                &request.images,
+            );
             let mut args = Vec::new();
             if let Some(m) = model_opt.filter(|m| *m != "auto") {
                 args.push("-m".to_string());
@@ -2558,7 +2605,11 @@ pub async fn ai_chat(
             let bin = find_executable(&["agy"]).ok_or_else(|| {
                 "Antigravity CLI (`agy`) was not found on PATH. Click \"Setup in Terminal\" (macOS/Linux: curl -fsSL https://antigravity.google/cli/install.sh | bash, Windows: irm https://antigravity.google/cli/install.ps1 | iex).".to_string()
             })?;
-            let raw_prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let raw_prompt = format_cli_prompt_with_images(
+                request.system_prompt.as_deref(),
+                &request.messages,
+                &request.images,
+            );
             let prompt = if cfg!(target_os = "windows") {
                 clamp_utf16_prompt(&raw_prompt, 26_000)
             } else {
@@ -2608,7 +2659,11 @@ pub async fn ai_chat(
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| "Custom CLI command is empty.".to_string())?;
-            let prompt = format_cli_prompt(request.system_prompt.as_deref(), &request.messages);
+            let prompt = format_cli_prompt_with_images(
+                request.system_prompt.as_deref(),
+                &request.messages,
+                &request.images,
+            );
             let mut tokens: Vec<String> = raw_cmd.split_whitespace().map(|s| s.to_string()).collect();
             let cmd_name = tokens.remove(0);
             let bin = find_executable(&[&cmd_name]).unwrap_or(cmd_name);
@@ -2688,8 +2743,22 @@ pub async fn ai_chat(
                     msg_list.push(serde_json::json!({ "role": "system", "content": sys.trim() }));
                 }
             }
-            for m in &request.messages {
-                msg_list.push(serde_json::json!({ "role": m.role, "content": m.content }));
+            let last_idx = request.messages.len().saturating_sub(1);
+            for (idx, m) in request.messages.iter().enumerate() {
+                if idx == last_idx && m.role != "assistant" && !request.images.is_empty() {
+                    let mut parts = vec![serde_json::json!({ "type": "text", "text": m.content })];
+                    for img in &request.images {
+                        parts.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": format!("data:{};base64,{}", img.mime_type, img.base64)
+                            }
+                        }));
+                    }
+                    msg_list.push(serde_json::json!({ "role": m.role, "content": parts }));
+                } else {
+                    msg_list.push(serde_json::json!({ "role": m.role, "content": m.content }));
+                }
             }
 
             let client = reqwest::Client::builder()
@@ -2773,14 +2842,35 @@ pub async fn ai_chat(
                 .trim_end_matches('/');
             let endpoint = format!("{}/v1/messages", base);
 
+            let last_idx = request.messages.len().saturating_sub(1);
             let msgs: Vec<serde_json::Value> = request
                 .messages
                 .iter()
-                .map(|m| {
-                    serde_json::json!({
-                        "role": if m.role == "assistant" { "assistant" } else { "user" },
-                        "content": m.content
-                    })
+                .enumerate()
+                .map(|(idx, m)| {
+                    if idx == last_idx && m.role != "assistant" && !request.images.is_empty() {
+                        let mut parts: Vec<serde_json::Value> = request
+                            .images
+                            .iter()
+                            .map(|img| {
+                                serde_json::json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": img.mime_type,
+                                        "data": img.base64
+                                    }
+                                })
+                            })
+                            .collect();
+                        parts.push(serde_json::json!({ "type": "text", "text": m.content }));
+                        serde_json::json!({ "role": "user", "content": parts })
+                    } else {
+                        serde_json::json!({
+                            "role": if m.role == "assistant" { "assistant" } else { "user" },
+                            "content": m.content
+                        })
+                    }
                 })
                 .collect();
 
@@ -2836,13 +2926,26 @@ pub async fn ai_chat(
                 model, api_key
             );
 
+            let last_idx = request.messages.len().saturating_sub(1);
             let contents: Vec<serde_json::Value> = request
                 .messages
                 .iter()
-                .map(|m| {
+                .enumerate()
+                .map(|(idx, m)| {
+                    let mut parts = vec![serde_json::json!({ "text": m.content })];
+                    if idx == last_idx && m.role != "assistant" && !request.images.is_empty() {
+                        for img in &request.images {
+                            parts.push(serde_json::json!({
+                                "inline_data": {
+                                    "mime_type": img.mime_type,
+                                    "data": img.base64
+                                }
+                            }));
+                        }
+                    }
                     serde_json::json!({
                         "role": if m.role == "assistant" { "model" } else { "user" },
-                        "parts": [{ "text": m.content }]
+                        "parts": parts
                     })
                 })
                 .collect();
@@ -2894,8 +2997,18 @@ pub async fn ai_chat(
                     msg_list.push(serde_json::json!({ "role": "system", "content": sys.trim() }));
                 }
             }
-            for m in &request.messages {
-                msg_list.push(serde_json::json!({ "role": m.role, "content": m.content }));
+            let last_idx = request.messages.len().saturating_sub(1);
+            for (idx, m) in request.messages.iter().enumerate() {
+                if idx == last_idx && m.role != "assistant" && !request.images.is_empty() {
+                    let imgs: Vec<&str> = request.images.iter().map(|i| i.base64.as_str()).collect();
+                    msg_list.push(serde_json::json!({
+                        "role": m.role,
+                        "content": m.content,
+                        "images": imgs
+                    }));
+                } else {
+                    msg_list.push(serde_json::json!({ "role": m.role, "content": m.content }));
+                }
             }
 
             let client = reqwest::Client::builder()

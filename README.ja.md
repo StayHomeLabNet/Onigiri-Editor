@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v154-の更新内容">v1.5.4 の更新内容</a> ・
+    <a href="#v155-の更新内容">v1.5.5 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.4-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.5-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、**8言語**（**English** / **日本語** / **简体中文** / **繁體中文** / **한국어** / **Español** / **Français** / **Deutsch**）の中から最適な UI とネイティブメニューバーで起動します。
 
-現在のバージョン: `v1.5.4`
+現在のバージョン: `v1.5.5`
 
 ## 主な機能
 
@@ -100,7 +100,15 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.5.4 の更新内容
+## v1.5.5 の更新内容
+
+- **領域別ドラッグ＆ドロップ対応（フォルダツリー / エディタ＆プレビュー / AI チャット）**:
+  - **拡張モードのフォルダツリー**: カーソル下のフォルダ行（ファイル上の場合はその親フォルダ）を個別ハイライト表示します。通常ドロップでそのフォルダへ**コピー**、**`Shift` キーを押しながら**離すと**移動**します。
+  - **エディタ / プレビュー領域**: 画像ドロップ時はアセットフォルダへ保存してカーソル位置へ挿入します。非画像ファイル（`.md` / `.txt` / `.csv` 等）は通常ドロップで**新しいタブで開き**、**`Shift` または `Ctrl`（Mac は `⌘`）を押しながら**離すと相対パスの Markdown リンク `[ファイル名](パス)` を挿入します。
+  - **AI チャット領域（マルチモーダル画像＆ファイル添付）**: テキスト／コード／Markdown 等をドロップすると添付チップとして文脈に追加され、画像をドロップするとサムネイル付きチップとして添付し、Cloud API（OpenAI / Anthropic / Gemini）・Ollama 等には Base64 画像として、CLI プロバイダーには画像パスとして送信します。
+
+<details>
+<summary>以前のリリース: v1.5.4</summary>
 
 - **AI ハーネス基盤の強化（設定 → 全般で各種 ON/OFF 切替可）**:
   - **`AGENTS.md` / `CLAUDE.md` / `.onigiri-rules.md` 自動読み込み**: ワークスペース直下のプロジェクト規約ファイルを検出し、AI チャット・インライン編集・AI カスタムボタン・AI 校正へ自動注入します。
@@ -117,6 +125,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
 - **文字列検索・置換ウィンドウの自由ドラッグ移動 ＆ 各種表示・起動改善**:
   - **検索・置換バー（`⌘F` / `Ctrl+F`）** をアプリウィンドウ全体（サイドバー・プレビュー・インスペクター上を含む）へドラッグで自由に移動できるようにしました（ハンドルをダブルクリックで初期位置へリセット。内蔵ブラウザと重なる場合も自動保護）。
   - Windows で既存起動中にショートカットから再起動した際に新しいウィンドウが開くよう修正し、ツールチップの内蔵ブラウザ下潜り込み防止およびサブスク CLI 時の空の接続設定欄非表示に対応しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.5.3</summary>

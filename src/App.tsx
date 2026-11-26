@@ -192,6 +192,8 @@ import {
   updateExternalPreview,
   writeClipboardText,
   writeFileSilently,
+  importExternalFilesToWorkspaceDir,
+  readImageDataUrl,
 } from './utils/platform';
 import {
   buildInitialSessionState,
@@ -238,6 +240,7 @@ import { SideComparePane, type GitHeadComparisonState } from './components/SideC
 import { type ProjectSetupActionParams } from './components/ProjectSetupCard';
 import { LanUrlList } from './components/LanUrlList';
 import { InspectorDrawer } from './components/InspectorDrawer';
+import type { AiDroppedAttachment } from './components/AiChatPanel';
 import {
   FindReplaceBar,
   FIND_OPTS_STORAGE_KEY,
@@ -530,6 +533,16 @@ export function App() {
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>('chat');
   const [showFind, setShowFind] = useState(false);
   const [findBarOverlapsBrowser, setFindBarOverlapsBrowser] = useState(false);
+  const [dropZoneHover, setDropZoneHover] = useState<{
+    zone: 'sidebar' | 'editor' | 'preview' | 'ai';
+    label: string;
+    rect: { left: number; top: number; width: number; height: number };
+  } | null>(null);
+  const [aiPendingDropFiles, setAiPendingDropFiles] = useState<{
+    seq: number;
+    items: AiDroppedAttachment[];
+  } | null>(null);
+  const dragModsRef = useRef({ shift: false, ctrl: false, meta: false });
   const [showPalette, setShowPalette] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -2125,6 +2138,17 @@ export function App() {
     openPathInTab,
     notify,
     errorPrefix: t.toasts.errorPrefix,
+    locale,
+    setActivePane,
+    insertTextIntoPane: (pane: 'editor' | 'preview', text: string) => {
+      void pane;
+      getActiveEditorTarget()?.insertText(text);
+    },
+    openAiWithDroppedFiles: (items: AiDroppedAttachment[]) => {
+      setShowInspector(true);
+      setInspectorTab('chat');
+      setAiPendingDropFiles({ seq: Date.now(), items });
+    },
   });
   dropHelpersRef.current = {
     docPath:
@@ -2137,7 +2161,36 @@ export function App() {
     openPathInTab,
     notify,
     errorPrefix: t.toasts.errorPrefix,
+    locale,
+    setActivePane,
+    insertTextIntoPane: (pane: 'editor' | 'preview', text: string) => {
+      void pane;
+      getActiveEditorTarget()?.insertText(text);
+    },
+    openAiWithDroppedFiles: (items: AiDroppedAttachment[]) => {
+      setShowInspector(true);
+      setInspectorTab('chat');
+      setAiPendingDropFiles({ seq: Date.now(), items });
+    },
   };
+
+  // Track modifier keys (Shift / Ctrl / Meta) during external OS drag-drop
+  useEffect(() => {
+    const syncMods = (e: KeyboardEvent) => {
+      dragModsRef.current = { shift: e.shiftKey, ctrl: e.ctrlKey, meta: e.metaKey };
+    };
+    const clearMods = () => {
+      dragModsRef.current = { shift: false, ctrl: false, meta: false };
+    };
+    window.addEventListener('keydown', syncMods, true);
+    window.addEventListener('keyup', syncMods, true);
+    window.addEventListener('blur', clearMods);
+    return () => {
+      window.removeEventListener('keydown', syncMods, true);
+      window.removeEventListener('keyup', syncMods, true);
+      window.removeEventListener('blur', clearMods);
+    };
+  }, []);
 
   // Tauri initial opened files + macOS Finder Open With + native drag-drop (Markdown + Images)
   useEffect(() => {
@@ -2171,17 +2224,205 @@ export function App() {
           }
         });
 
+        const IMAGE_DROP_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
+        const BINARY_SKIP_RE = /\.(pdf|zip|tar|gz|dmg|exe|msi|app|bin|wasm|mp4|mov|mp3|wav)$/i;
+
+        const computeRelLink = (fromDocPath: string | undefined, targetPath: string): string => {
+          const normTarget = targetPath.replace(/\\/g, '/');
+          if (!fromDocPath) return normTarget;
+          const normFrom = fromDocPath.replace(/\\/g, '/');
+          const fromParts = normFrom.split('/').slice(0, -1);
+          const toParts = normTarget.split('/');
+          let common = 0;
+          while (
+            common < fromParts.length &&
+            common < toParts.length - 1 &&
+            fromParts[common].toLowerCase() === toParts[common].toLowerCase()
+          ) {
+            common++;
+          }
+          if (common === 0) return normTarget;
+          const ups = new Array(fromParts.length - common).fill('..');
+          const rel = [...ups, ...toParts.slice(common)].join('/');
+          return rel.includes(' ') ? `<${rel}>` : rel;
+        };
+
+        const resolveDropTarget = (pos?: { x: number; y: number }) => {
+          const dpr = window.devicePixelRatio || 1;
+          const clientX = pos ? pos.x / dpr : -1;
+          const clientY = pos ? pos.y / dpr : -1;
+          const el =
+            clientX >= 0 && clientY >= 0 ? document.elementFromPoint(clientX, clientY) : null;
+
+          const folderEl = el?.closest('[data-drop-folder-path]') as HTMLElement | null;
+          if (folderEl && workspaceRootRef.current && folderEl.dataset.dropFolderPath) {
+            const r = folderEl.getBoundingClientRect();
+            return {
+              zone: 'sidebar' as const,
+              folderPath: folderEl.dataset.dropFolderPath,
+              folderLabel: folderEl.dataset.dropFolderLabel || '',
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+            };
+          }
+          const aiEl = el?.closest('[data-drop-zone="ai"]') as HTMLElement | null;
+          if (aiEl) {
+            const r = aiEl.getBoundingClientRect();
+            return {
+              zone: 'ai' as const,
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+            };
+          }
+          const previewEl = el?.closest('.preview-pane') as HTMLElement | null;
+          if (previewEl) {
+            const r = previewEl.getBoundingClientRect();
+            return {
+              zone: 'preview' as const,
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+            };
+          }
+          const editorEl = el?.closest('.editor-pane') as HTMLElement | null;
+          if (editorEl) {
+            const r = editorEl.getBoundingClientRect();
+            return {
+              zone: 'editor' as const,
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+            };
+          }
+          return {
+            zone: 'editor' as const,
+            rect: { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
+          };
+        };
+
         unlistenDrop = await getCurrentWebview().onDragDropEvent(async (event) => {
+          const isJa = dropHelpersRef.current.locale === 'ja';
           if (event.payload.type === 'enter' || event.payload.type === 'over') {
-            setIsDraggingFile(true);
+            setIsDraggingFile(false);
+            const target = resolveDropTarget(
+              (event.payload as { position?: { x: number; y: number } }).position
+            );
+            const { shift, ctrl, meta } = dragModsRef.current;
+            let label = '';
+            if (target.zone === 'sidebar') {
+              const folderName = target.folderLabel || (isJa ? 'ルート' : 'Root');
+              label = shift
+                ? isJa
+                  ? `📁 ${folderName} へ移動`
+                  : `📁 Move to ${folderName}`
+                : isJa
+                  ? `📁 ${folderName} へコピー (Shift: 移動)`
+                  : `📁 Copy to ${folderName} (Shift: Move)`;
+            } else if (target.zone === 'ai') {
+              label = isJa ? '🤖 AI チャットに添付' : '🤖 Attach to AI Chat';
+            } else if (target.zone === 'preview') {
+              label =
+                shift || ctrl || meta
+                  ? isJa
+                    ? '🔗 プレビューへリンク挿入'
+                    : '🔗 Insert Link in Preview'
+                  : isJa
+                    ? '👁️ プレビューへ挿入 / 開く (Shift/Ctrl: リンク)'
+                    : '👁️ Insert / Open (Shift/Ctrl: Link)';
+            } else {
+              label =
+                shift || ctrl || meta
+                  ? isJa
+                    ? '🔗 エディタへリンク挿入'
+                    : '🔗 Insert Link in Editor'
+                  : isJa
+                    ? '📝 エディタへ挿入 / 開く (Shift/Ctrl: リンク)'
+                    : '📝 Insert / Open (Shift/Ctrl: Link)';
+            }
+            setDropZoneHover({ zone: target.zone, label, rect: target.rect });
           } else if (event.payload.type === 'leave') {
             setIsDraggingFile(false);
+            setDropZoneHover(null);
           } else if (event.payload.type === 'drop') {
             setIsDraggingFile(false);
+            setDropZoneHover(null);
             const paths = event.payload.paths || [];
+            if (paths.length === 0) return;
+
+            const target = resolveDropTarget(
+              (event.payload as { position?: { x: number; y: number } }).position
+            );
+            const { shift, ctrl, meta } = dragModsRef.current;
+
+            if (target.zone === 'sidebar' && workspaceRootRef.current) {
+              try {
+                const imported = await importExternalFilesToWorkspaceDir(
+                  workspaceRootRef.current,
+                  target.folderPath,
+                  paths,
+                  shift
+                );
+                void refreshWorkspaceRef.current(workspaceRootRef.current);
+                if (imported.length > 0) {
+                  dropHelpersRef.current.notify(
+                    isJa
+                      ? `${imported.length} 件を${shift ? '移動' : 'コピー'}しました`
+                      : `${shift ? 'Moved' : 'Copied'} ${imported.length} item(s)`
+                  );
+                }
+              } catch (err) {
+                dropHelpersRef.current.notify(
+                  `${dropHelpersRef.current.errorPrefix} ${formatErrorMessage(err)}`
+                );
+              }
+              return;
+            }
+
+            if (target.zone === 'ai') {
+              const items: AiDroppedAttachment[] = [];
+              for (const p of paths) {
+                const name = p.split(/[/\\]/).pop() || p;
+                if (IMAGE_DROP_RE.test(p)) {
+                  try {
+                    const dataUrl = await readImageDataUrl(p);
+                    if (dataUrl) {
+                      const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+                      if (m) {
+                        items.push({
+                          id: `drop-img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                          kind: 'image',
+                          name,
+                          path: p,
+                          mimeType: m[1],
+                          base64: m[2],
+                          dataUrl,
+                        });
+                      }
+                    }
+                  } catch {
+                    // ignore unreadable image
+                  }
+                } else if (!BINARY_SKIP_RE.test(p)) {
+                  try {
+                    const loaded = await readFileByPath(p);
+                    items.push({
+                      id: `drop-file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                      kind: 'file',
+                      name,
+                      path: p,
+                      textContent: loaded.content,
+                    });
+                  } catch {
+                    // ignore unreadable file
+                  }
+                }
+              }
+              if (items.length > 0) {
+                dropHelpersRef.current.openAiWithDroppedFiles(items);
+              }
+              return;
+            }
+
+            const targetPane = target.zone === 'preview' ? 'preview' : 'editor';
+            dropHelpersRef.current.setActivePane(targetPane === 'preview' ? 'visual' : 'code');
+
             let savedAnyImage = false;
             for (const p of paths) {
-              if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(p)) {
+              if (IMAGE_DROP_RE.test(p)) {
                 try {
                   const savedSrc = await saveImageAsset(
                     p,
@@ -2197,10 +2438,17 @@ export function App() {
                     `${dropHelpersRef.current.errorPrefix} ${formatErrorMessage(err)}`
                   );
                 }
-              } else if (
-                !/\.(pdf|zip|tar|gz|dmg|exe|msi|app|bin|wasm|mp4|mov|mp3|wav)$/i.test(p)
-              ) {
-                await dropHelpersRef.current.openPathInTab(p);
+              } else if (!BINARY_SKIP_RE.test(p)) {
+                if (shift || ctrl || meta) {
+                  const fileName = p.split(/[/\\]/).pop() || p;
+                  const href = computeRelLink(dropHelpersRef.current.docPath, p);
+                  dropHelpersRef.current.insertTextIntoPane(
+                    targetPane,
+                    `[${fileName}](${href})`
+                  );
+                } else {
+                  await dropHelpersRef.current.openPathInTab(p);
+                }
               }
             }
             if (savedAnyImage && workspaceRootRef.current) {
@@ -6798,6 +7046,7 @@ export function App() {
             markdown={activeTab.content}
             activeDocTitle={activeTab.title}
             activeFilePath={activeTab.filePath}
+            pendingDropFiles={aiPendingDropFiles}
             savedContent={activeTab.savedContent}
             stats={stats}
             snapshots={activeTab.snapshots}
@@ -7175,6 +7424,20 @@ export function App() {
         }}
         onCloseFeatureGuideModal={() => setShowFeatureGuideModal(false)}
       />
+
+      {dropZoneHover && (
+        <div
+          className="drop-zone-highlight"
+          style={{
+            left: dropZoneHover.rect.left,
+            top: dropZoneHover.rect.top,
+            width: dropZoneHover.rect.width,
+            height: dropZoneHover.rect.height,
+          }}
+        >
+          <span className="drop-zone-badge">{dropZoneHover.label}</span>
+        </div>
+      )}
 
       {isDraggingFile && (
         <div className="drop-overlay">

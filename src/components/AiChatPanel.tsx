@@ -28,6 +28,7 @@ import {
   BookmarkPlus,
   FileText,
   Minimize2,
+  X,
   Pin,
   Zap,
 } from 'lucide-react';
@@ -134,6 +135,17 @@ function saveAiThreadsStore(store: AiThreadsStore): void {
   }
 }
 
+export interface AiDroppedAttachment {
+  id: string;
+  kind: 'image' | 'file';
+  name: string;
+  path: string;
+  mimeType?: string;
+  base64?: string;
+  dataUrl?: string;
+  textContent?: string;
+}
+
 interface AiChatPanelProps {
   t: Translations;
   markdown: string;
@@ -159,6 +171,7 @@ interface AiChatPanelProps {
   aiNoteSuggestEnabled?: boolean;
   workspaceNoteIndex?: WorkspaceNoteIndexEntry[];
   activeFilePath?: string | null;
+  pendingDropFiles?: { seq: number; items: AiDroppedAttachment[] } | null;
   onRequestDiffPreview?: (req: DiffPreviewRequest) => void;
 }
 
@@ -315,6 +328,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   aiNoteSuggestEnabled = true,
   workspaceNoteIndex = [],
   activeFilePath,
+  pendingDropFiles,
   onRequestDiffPreview,
 }) => {
   const [caps, setCaps] = useState<AiCapabilities | null>(null);
@@ -340,6 +354,16 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   const [compacting, setCompacting] = useState(false);
   const [showSummaryBox, setShowSummaryBox] = useState(false);
   const [actionToast, setActionToast] = useState<string | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AiDroppedAttachment[]>([]);
+
+  useEffect(() => {
+    if (!pendingDropFiles || pendingDropFiles.items.length === 0) return;
+    setAttachedFiles((prev) => {
+      const existingPaths = new Set(prev.map((x) => x.path));
+      const added = pendingDropFiles.items.filter((x) => !existingPaths.has(x.path));
+      return added.length > 0 ? [...prev, ...added] : prev;
+    });
+  }, [pendingDropFiles]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1207,6 +1231,24 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
       );
     }
 
+    const attachedTextFiles = attachedFiles.filter((f) => f.kind === 'file');
+    if (attachedTextFiles.length > 0) {
+      const blocks = attachedTextFiles.map((f) => {
+        const body = (f.textContent || '').slice(0, 24000);
+        return `### ${f.name} (${f.path})\n\`\`\`\n${body}\n\`\`\``;
+      });
+      promptParts.push(`# Attached Files\n${blocks.join('\n\n')}`);
+    }
+
+    const attachedImages = attachedFiles
+      .filter((f) => f.kind === 'image' && f.base64 && f.mimeType)
+      .map((f) => ({
+        path: f.path,
+        name: f.name,
+        mimeType: f.mimeType!,
+        base64: f.base64!,
+      }));
+
     if (workspaceRoot && aiFolderMode !== 'disabled') {
       if (config.includeFolderContext) {
         try {
@@ -1266,7 +1308,11 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           .map((m) => ({ role: m.role, content: m.content })),
         workspaceDir: workspaceRoot && aiFolderMode !== 'disabled' ? workspaceRoot : null,
         allowWorkspaceWrite: Boolean(workspaceRoot && aiFolderMode === 'cli-direct'),
+        images: attachedImages,
       });
+      if (attachedFiles.length > 0) {
+        setAttachedFiles([]);
+      }
 
       let cliChanges: ChatMessage['cliChanges'] = undefined;
       if (workspaceRoot && aiFolderMode === 'cli-direct' && aiCliDirectCheckpointEnabled && baselineStatus) {
@@ -2667,6 +2713,32 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           </button>
         )}
       </div>
+
+      {/* Attached Dropped Files / Images */}
+      {attachedFiles.length > 0 && (
+        <div className="ai-attached-chips">
+          {attachedFiles.map((att) => (
+            <span key={att.id} className="ai-attached-chip" title={att.path}>
+              {att.kind === 'image' && att.dataUrl ? (
+                <img src={att.dataUrl} alt={att.name} className="ai-attached-thumb" />
+              ) : (
+                <FileText size={11} />
+              )}
+              <span className="ai-attached-name">{att.name}</span>
+              <button
+                type="button"
+                className="ai-attached-remove"
+                onClick={() =>
+                  setAttachedFiles((prev) => prev.filter((x) => x.id !== att.id))
+                }
+                aria-label={t.actions.close}
+              >
+                <X size={10} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Input Composer */}
       <form

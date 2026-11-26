@@ -1,21 +1,10 @@
-Onigiri Editor `v1.5.4` strengthens the AI Harness and AI Memory architecture—adding automatic `AGENTS.md` / `CLAUDE.md` rule injection, unified progress & error diagnostics, 2-model parallel A/B comparison, `cli-direct` checkpoint guards, an AI execution audit log, global/workspace pinned AI memory, long thread compaction, context visibility chips, and Knowledge Index note suggestions (all toggleable in **Settings → General**).
+Onigiri Editor `v1.5.5` introduces **Zone-Aware Drag & Drop** across the Workspace Folder Tree, Editor/Preview panes, and AI Chat panel—allowing you to copy or move files directly into workspace folders, insert images or relative Markdown links, and attach files or multimodal images straight to AI Chat.
 
-### Highlights (`v1.5.4`)
-- **AI Harness Enhancements (`Settings → General` toggles)**:
-  - **Auto-Load Project Rules (`AGENTS.md` / `CLAUDE.md` / `.onigiri-rules.md`)**: Automatically detects workspace-root rule files and injects them into AI Chat, Inline AI Edit, Toolbar AI Custom Buttons, and AI Document Review.
-  - **Unified Progress & Error Diagnostics**: Extends `listenAiChatProgress` live streaming status and categorized `aiErrorHint.ts` troubleshooting hints to Toolbar AI Custom Buttons and AI Document Review.
-  - **2-Model Parallel A/B Comparison**: Run a primary model and a comparison model side-by-side in **Inline AI Edit (`⌘⇧E`)** and **AI Chat**, and apply the better result.
-  - **`cli-direct` Pre-Run Checkpoint Guard**: Captures workspace state before `cli-direct` writes and surfaces modified files after execution.
-  - **AI Execution Audit Log**: Records masked prompt previews, provider/model, duration, and apply status with 1-click re-run support.
-- **AI Memory & Context Intelligence**:
-  - **Explicit Pinned AI Memory (Global / Workspace)**: Manage persistent rules in **Settings → General** or pin directly from any chat message (`Pin`) for injection across all AI pathways.
-  - **Long Thread Compaction & 1-Click Save Rule**: Compact older chat turns into a persistent summary pill (retaining the latest 6 messages) and append effective instructions straight to `AGENTS.md` / `.onigiri-rules.md`.
-  - **Context Visibility Bar & Related Note Suggestions**: Inspect active context chips (`Doc`, `Folder`, `AGENTS.md`, `Memory (N)`, `History`) above the chat composer with 1-click mute toggles, and attach up to 3 relevant workspace notes suggested from the Knowledge Index (`@relativePath`).
-- **Basic / Simple Mode TopBar Document Pill**:
-  - Added a direct `×` close button to the active filename pill in the TopBar, plus an interactive **Open Tabs Popover** (with an `index/total ▾` badge when multiple tabs are open) to switch tabs, close individual tabs, create a new tab, or close other tabs without leaving Basic/Simple mode.
-- **Draggable Find & Replace Window & Native Browser Overlay Fixes**:
-  - Made the **Find & Replace (`⌘F` / `Ctrl+F`)** bar freely draggable anywhere across the entire app window (double-click the grip handle to reset position), anchored safely to the editor pane by default and protected from clipping behind the embedded native WebView browser.
-  - Fixed Windows desktop shortcut / single-instance re-launch to open a new window when launched without file arguments, clamped tooltips away from the embedded browser viewport, and hid empty AI connection settings drawers for subscription CLIs.
+### Highlights (`v1.5.5`)
+- **Zone-Aware Drag & Drop**:
+  - **Workspace Folder Tree (Advanced Mode)**: Hovering highlights the target folder row (or parent folder of a hovered file). Normal drop **copies** external files/folders into that folder; hold **`Shift`** while dropping to **move** them.
+  - **Editor & Preview Panes**: Dropping images saves them to your asset folder and inserts Markdown image syntax at the cursor. Dropping non-image files (`.md`, `.txt`, `.csv`, etc.) opens them in a new tab by default, or inserts a relative Markdown link `[name](path)` when holding **`Shift`** or **`Ctrl` (`⌘`)**.
+  - **AI Chat Panel (Multimodal & File Attachments)**: Dropping text/code/Markdown files attaches their contents as prompt context chips; dropping images attaches thumbnail chips and sends them as **Base64 multimodal image inputs** to Cloud APIs (OpenAI, Anthropic, Gemini) / Ollama, or as **image file paths** to AI CLIs (Codex, Claude, Gemini, Antigravity, Custom CLI).
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel, includes Apple Foundation Models support on macOS 26+)**: `.dmg` / `.app.tar.gz`
@@ -24,24 +13,13 @@ Onigiri Editor `v1.5.4` strengthens the AI Harness and AI Memory architecture—
 
 ---
 
-Onigiri Editor `v1.5.4` では、AI ハーネス基盤と AI メモリー機能を大幅に強化しました。`AGENTS.md` / `CLAUDE.md` 自動読み込み、全 AI 経路での進捗・エラー診断統一、2 モデル並列 A/B 比較、`cli-direct` チェックポイントガード、AI 実行履歴ログに加え、ピン留め AI メモリー、スレッド要約圧縮、文脈可視化バー、ナレッジ関連ノート提案を実装しています（各種機能は **設定 → 全般** で ON/OFF 切替可能）。
+Onigiri Editor `v1.5.5` では、**領域別ドラッグ＆ドロップ（フォルダツリー / エディタ＆プレビュー / AI チャット）** を実装し、外部ファイルや画像のドロップ先に応じて「フォルダへのコピー・移動」「カーソル位置への画像／相対リンク挿入」「AI チャットへのファイル・マルチモーダル画像添付」を使い分けられるようになりました。
 
-### 主な変更点（`v1.5.4`）
-- **AI ハーネス基盤の強化（`設定 → 全般` で各種 ON/OFF 可）**:
-  - **`AGENTS.md` / `CLAUDE.md` / `.onigiri-rules.md` 自動読み込み**: ワークスペース直下の規約ファイルを自動検出し、AI チャット・インライン編集・AI カスタムボタン・AI 校正へ自動注入します。
-  - **進捗表示＆エラー診断の統一**: ツールバー AI カスタムボタンおよび AI 校正でも、`listenAiChatProgress` のリアルタイム進捗と `aiErrorHint.ts` の原因別対処ヒントを表示します。
-  - **2 モデル並列 A/B 比較**: **インライン AI 編集（`⌘⇧E`）** と **AI チャット** で比較用セカンダリモデルを並列実行し、出力を並べて比較・適用できます。
-  - **`cli-direct` 実行前チェックポイントガード**: ワークスペース直接書き込み前に状態を記録し、実行後に変更ファイル一覧を確認できます。
-  - **AI 実行履歴（監査・再実行ログ）**: シークレットマスク済みプロンプト・使用モデル・所要時間・適用有無を記録し、ワンクリックで再実行できます。
-- **AI メモリー ＆ 文脈インテリジェンス**:
-  - **明示的ピン留めメモリー（グローバル／ワークスペース別）**: **設定 → 全般** での編集やチャットメッセージ横のピン留めボタンからルールを登録し、全 AI 経路へ自動注入します。
-  - **長いスレッドの要約圧縮 ＆ `AGENTS.md` 追記**: 過去の会話を要約ピルへ圧縮して直近 6 件を保持でき、チャットでうまくいった指示をワークスペース規約ファイルへワンクリック追記できます。
-  - **コンテキスト可視化バー ＆ ナレッジ関連ノート提案**: 入力欄上部に送信中の文脈チップ（文書・フォルダ・`AGENTS.md`・メモリー件数・履歴件数）を表示して一時ミュートできるほか、ナレッジインデックスから関連ノートを最大 3 件提案して `@相対パス` で即添付できます。
-- **標準 / シンプルモード上部ヘッダーのファイル名ピル強化**:
-  - 上部ヘッダーバーのファイル名横に直接 **閉じる「×」ボタン** を追加し、複数タブが開かれているときは **`現在位置/総数 ▾` バッジ** とクリック展開式の **開いているタブ一覧ポップオーバー**（タブ切替・個別「×」閉じ・新規タブ・他のタブをすべて閉じる）から拡張モードへ切り替えずに操作できるようになりました。
-- **文字列検索・置換ウィンドウの自由ドラッグ移動 ＆ 各種表示・起動改善**:
-  - **検索・置換バー（`⌘F` / `Ctrl+F`）** をアプリウィンドウ全体（サイドバー・プレビュー・インスペクター上を含む）へドラッグで自由に移動できるようにしました（ハンドルをダブルクリックで初期位置へリセット。内蔵ブラウザと重なる場合も自動保護）。
-  - Windows で既存起動中にショートカットから再起動した際に新しいウィンドウが開くよう修正し、ツールチップの内蔵ブラウザ下潜り込み防止およびサブスク CLI 時の空の接続設定欄非表示に対応しました。
+### 主な変更点（`v1.5.5`）
+- **領域別ドラッグ＆ドロップ対応**:
+  - **拡張モードのフォルダツリー**: カーソル下のフォルダ行（ファイル上の場合はその親フォルダ）を個別ハイライト表示します。通常ドロップでそのフォルダへ**コピー**、**`Shift` キーを押しながら**離すと**移動**します。
+  - **エディタ / プレビュー領域**: 画像ドロップ時はアセットフォルダへ保存してカーソル位置へ挿入します。非画像ファイル（`.md` / `.txt` / `.csv` 等）は通常ドロップで**新しいタブで開き**、**`Shift` または `Ctrl`（Mac は `⌘`）を押しながら**離すと相対パスの Markdown リンク `[ファイル名](パス)` を挿入します。
+  - **AI チャット領域（マルチモーダル画像＆ファイル添付）**: テキスト／コード／Markdown 等をドロップすると添付チップとして文脈に追加され、画像をドロップするとサムネイル付きチップとして添付し、Cloud API（OpenAI / Anthropic / Gemini）・Ollama 等には Base64 画像として、CLI プロバイダーには画像パスとして送信します。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応・macOS 26+ Apple Foundation Models 対応）**: `.dmg` / `.app.tar.gz`
