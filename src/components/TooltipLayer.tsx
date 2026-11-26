@@ -233,18 +233,39 @@ export const TooltipLayer: React.FC<{ enabled?: boolean }> = ({ enabled = true }
     };
   }, [enabled]);
 
-  // Clamp horizontal position within viewport after render
+  // Clamp horizontal position within viewport (and away from active native browser host) after render
   useEffect(() => {
     const el = tooltipElRef.current;
     if (!el || !tooltip) return;
     const rect = el.getBoundingClientRect();
     const margin = 8;
+    let minLeft = margin;
+    let maxRight = window.innerWidth - margin;
+
+    const browserHost = document.querySelector('.native-browser-host') as HTMLElement | null;
+    if (browserHost) {
+      const bRect = browserHost.getBoundingClientRect();
+      if (
+        bRect.width > 0 &&
+        bRect.height > 0 &&
+        rect.bottom > bRect.top &&
+        rect.top < bRect.bottom
+      ) {
+        const targetRect = activeTargetRef.current?.getBoundingClientRect();
+        if (targetRect && targetRect.left >= bRect.right - 4) {
+          minLeft = Math.max(minLeft, bRect.right + 6);
+        } else if (targetRect && targetRect.right <= bRect.left + 4) {
+          maxRight = Math.min(maxRight, bRect.left - 6);
+        }
+      }
+    }
+
     let clampedX = tooltip.x;
     const halfW = rect.width / 2;
-    if (clampedX - halfW < margin) {
-      clampedX = margin + halfW;
-    } else if (clampedX + halfW > window.innerWidth - margin) {
-      clampedX = window.innerWidth - margin - halfW;
+    if (clampedX - halfW < minLeft) {
+      clampedX = minLeft + halfW;
+    } else if (clampedX + halfW > maxRight) {
+      clampedX = maxRight - halfW;
     }
     if (Math.abs(clampedX - tooltip.x) > 0.5) {
       el.style.left = `${clampedX}px`;

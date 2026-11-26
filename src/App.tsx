@@ -5736,10 +5736,59 @@ export function App() {
     mode !== 'simple' &&
     !zenMode &&
     showRightBrowser &&
-    !anyModalOpen;
+    !anyModalOpen &&
+    !(showFind && layout === 'preview');
   const showRightPaneHeader =
     !showSideComparePane &&
     (settings.builtinBrowserEnabled || settings.externalBrowserPreviewEnabled);
+
+  const findReplaceBar = (
+    <FindReplaceBar
+      ref={findBarRef}
+      t={t}
+      open={showFind}
+      docId={activeTab.id}
+      onClose={() => {
+        setShowFind(false);
+        editorRef.current?.focus();
+      }}
+      documentText={activeTab.content}
+      getEditorSelection={() => editorRef.current?.getSelectionRange() ?? null}
+      getCursorOffset={() => editorRef.current?.getCursorOffset() ?? 0}
+      onSelectMatch={(from, to, opts) => editorRef.current?.selectRange(from, to, opts)}
+      onReplaceRange={(from, to, text) => {
+        if (editorRef.current) {
+          editorRef.current.replaceRange(from, to, text);
+        } else {
+          const cur = activeTab.content;
+          updateActiveContent(cur.slice(0, from) + text + cur.slice(to));
+        }
+      }}
+      onReplaceAll={({ scopeFrom, scopeTo, replacedSlice, nextText, count }) => {
+        if (editorRef.current) {
+          editorRef.current.replaceRange(scopeFrom, scopeTo, replacedSlice, {
+            selectResult: false,
+          });
+        } else {
+          updateActiveContent(nextText);
+          if (scopeTo > scopeFrom) {
+            findBarRef.current?.onScopeMapped({
+              from: scopeFrom,
+              to: scopeFrom + replacedSlice.length,
+            });
+          }
+        }
+        notify(t.find.replacedCount.replace('{n}', String(count)));
+      }}
+      onSyncScope={(scope) => editorRef.current?.setFindScope(scope)}
+      onSyncHighlights={(payload) => {
+        topEditorRef.current?.setFindHighlights(payload);
+        if (editorSplitVerticalRef.current) {
+          bottomEditorRef.current?.setFindHighlights(payload);
+        }
+      }}
+    />
+  );
 
   return (
     <div
@@ -6084,51 +6133,7 @@ export function App() {
         )}
 
         <div className="center-stage" ref={splitContainerRef}>
-          <FindReplaceBar
-            ref={findBarRef}
-            t={t}
-            open={showFind}
-            docId={activeTab.id}
-            onClose={() => {
-              setShowFind(false);
-              editorRef.current?.focus();
-            }}
-            documentText={activeTab.content}
-            getEditorSelection={() => editorRef.current?.getSelectionRange() ?? null}
-            getCursorOffset={() => editorRef.current?.getCursorOffset() ?? 0}
-            onSelectMatch={(from, to, opts) => editorRef.current?.selectRange(from, to, opts)}
-            onReplaceRange={(from, to, text) => {
-              if (editorRef.current) {
-                editorRef.current.replaceRange(from, to, text);
-              } else {
-                const cur = activeTab.content;
-                updateActiveContent(cur.slice(0, from) + text + cur.slice(to));
-              }
-            }}
-            onReplaceAll={({ scopeFrom, scopeTo, replacedSlice, nextText, count }) => {
-              if (editorRef.current) {
-                editorRef.current.replaceRange(scopeFrom, scopeTo, replacedSlice, {
-                  selectResult: false,
-                });
-              } else {
-                updateActiveContent(nextText);
-                if (scopeTo > scopeFrom) {
-                  findBarRef.current?.onScopeMapped({
-                    from: scopeFrom,
-                    to: scopeFrom + replacedSlice.length,
-                  });
-                }
-              }
-              notify(t.find.replacedCount.replace('{n}', String(count)));
-            }}
-            onSyncScope={(scope) => editorRef.current?.setFindScope(scope)}
-            onSyncHighlights={(payload) => {
-              topEditorRef.current?.setFindHighlights(payload);
-              if (editorSplitVerticalRef.current) {
-                bottomEditorRef.current?.setFindHighlights(payload);
-              }
-            }}
-          />
+          {layout === 'preview' && findReplaceBar}
 
           {activeTab.externalStatus && (
             <div
@@ -6204,6 +6209,7 @@ export function App() {
                 className={`pane editor-pane ${editorSplitVertical ? 'is-split-vertical' : ''}`}
                 style={layout === 'split' ? { width: `${splitRatio * 100}%` } : undefined}
               >
+                {findReplaceBar}
                 {editorSplitVertical ? (
                   <>
                     <div

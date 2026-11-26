@@ -2893,6 +2893,7 @@ pub fn run() {
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             let mut new_paths = Vec::new();
+            let mut dir_path: Option<String> = None;
             let mut seen = HashSet::new();
             for arg in args.into_iter().skip(1) {
                 if !arg.starts_with('-') {
@@ -2912,6 +2913,13 @@ pub fn run() {
                         if seen.insert(resolved.clone()) {
                             new_paths.push(resolved);
                         }
+                    } else if dir_path.is_none() && candidate.exists() && candidate.is_dir() {
+                        let raw_str = candidate
+                            .canonicalize()
+                            .unwrap_or(candidate)
+                            .to_string_lossy()
+                            .to_string();
+                        dir_path = Some(raw_str.strip_prefix(r"\\?\").unwrap_or(&raw_str).to_string());
                     }
                 }
             }
@@ -2925,12 +2933,20 @@ pub fn run() {
                 } else {
                     let _ = app.emit("open-files", new_paths);
                 }
-            }
-            if let Some(target_label) = focused_or_primary_window_label(app) {
-                if let Some(win) = app.get_webview_window(&target_label) {
-                    let _ = win.unminimize();
-                    let _ = win.show();
-                    let _ = win.set_focus();
+                if let Some(target_label) = focused_or_primary_window_label(app) {
+                    if let Some(win) = app.get_webview_window(&target_label) {
+                        let _ = win.unminimize();
+                        let _ = win.show();
+                        let _ = win.set_focus();
+                    }
+                }
+            } else if create_new_window_impl(app, dir_path, None).is_err() {
+                if let Some(target_label) = focused_or_primary_window_label(app) {
+                    if let Some(win) = app.get_webview_window(&target_label) {
+                        let _ = win.unminimize();
+                        let _ = win.show();
+                        let _ = win.set_focus();
+                    }
                 }
             }
         }));

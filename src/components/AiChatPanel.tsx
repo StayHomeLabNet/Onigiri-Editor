@@ -867,6 +867,12 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
     config.provider === 'lmstudio' ||
     config.provider === 'openai-compat';
 
+  const hasConnectionSettings =
+    config.provider === 'apple-foundation-models' ||
+    config.provider === 'custom-cli' ||
+    needsApiKey ||
+    supportsBaseUrl;
+
   const isLocalModelProvider =
     config.provider === 'ollama' ||
     config.provider === 'lmstudio' ||
@@ -1927,14 +1933,16 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             </optgroup>
           </select>
 
-          <button
-            type="button"
-            className={`icon-btn-sm ${showSettings ? 'is-active' : ''}`}
-            onClick={() => setShowSettings((v) => !v)}
-            title={t.aiChat.configToggle}
-          >
-            <Settings2 size={14} />
-          </button>
+          {hasConnectionSettings && (
+            <button
+              type="button"
+              className={`icon-btn-sm ${showSettings ? 'is-active' : ''}`}
+              onClick={() => setShowSettings((v) => !v)}
+              title={t.aiChat.configToggle}
+            >
+              <Settings2 size={14} />
+            </button>
+          )}
           <button
             type="button"
             className="icon-btn-sm"
@@ -2094,7 +2102,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
           )}
         </div>
 
-        {showSettings && (
+        {showSettings && hasConnectionSettings && (
           <div className="ai-settings-drawer">
             {config.provider === 'apple-foundation-models' && (
               <div className="platform-hint-note">
