@@ -288,7 +288,7 @@ export function delimitedToMarkdownTable(text: string): string | null {
 export function tableRowsToDelimited(
   headers: string[],
   rows: string[][],
-  delimiter: '\t' | ',' = ','
+  delimiter: '\t' | ',' | ';' = ','
 ): string {
   const escapeCell = (val: string) => {
     const str = val ?? '';

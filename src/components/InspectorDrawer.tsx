@@ -60,6 +60,10 @@ import {
   convertSingleBreaksForStandardMarkdown,
 } from '../utils/markdownCompat';
 import { AiChatPanel, type AiDroppedAttachment } from './AiChatPanel';
+import {
+  getActiveWorkspaceDragEntry,
+  setActiveWorkspaceDragEntry,
+} from '../utils/paths';
 import type { DiffPreviewRequest } from './AiDiffPreviewModal';
 
 interface InspectorDrawerProps {
@@ -96,6 +100,7 @@ interface InspectorDrawerProps {
   workspaceFilePaths?: string[];
   workspaceNoteIndex?: WorkspaceNoteIndexEntry[];
   pendingDropFiles?: { seq: number; items: AiDroppedAttachment[] } | null;
+  onDropWorkspacePathsToAi?: (paths: string[]) => void;
   onWorkspaceRefresh?: () => void;
   onFileWritten?: (relativePath: string) => void;
   onCliTurnComplete?: () => void;
@@ -140,6 +145,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   workspaceFilePaths,
   workspaceNoteIndex,
   pendingDropFiles,
+  onDropWorkspacePathsToAi,
   onWorkspaceRefresh,
   onFileWritten,
   onCliTurnComplete,
@@ -402,7 +408,38 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   ];
 
   return (
-    <aside className="inspector">
+    <aside
+      className="inspector"
+      data-drop-zone="ai"
+      onDragOver={(e) => {
+        if (
+          e.dataTransfer?.types?.includes('application/x-onigiri-workspace-entry') ||
+          getActiveWorkspaceDragEntry()
+        ) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+        }
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer?.getData('application/x-onigiri-workspace-entry');
+        let parsed: { path?: string; isDir?: boolean } | null = null;
+        if (raw) {
+          try {
+            parsed = JSON.parse(raw) as { path?: string; isDir?: boolean };
+          } catch {
+            parsed = null;
+          }
+        }
+        if (!parsed) {
+          parsed = getActiveWorkspaceDragEntry();
+        }
+        setActiveWorkspaceDragEntry(null);
+        if (!parsed?.path || parsed.isDir) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onDropWorkspacePathsToAi?.([parsed.path]);
+      }}
+    >
       <div className={`inspector-tabs is-style-${tabStyle}`} role="tablist">
         {inspectorTabDefs.map((tab) => {
           const isActive = activeTab === tab.key;
@@ -428,7 +465,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
         })}
       </div>
 
-      <div className={`inspector-body ${activeTab === 'chat' ? 'is-chat' : ''}`} data-drop-zone="ai">
+      <div className={`inspector-body ${activeTab === 'chat' ? 'is-chat' : ''}`}>
         {activeTab === 'chat' && (
           <AiChatPanel
             t={t}

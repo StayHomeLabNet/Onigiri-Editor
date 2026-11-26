@@ -695,8 +695,12 @@ fn write_clipboard_text(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn scan_workspace(root_path: String) -> Result<Vec<WorkspaceEntry>, String> {
+async fn scan_workspace(
+    root_path: String,
+    include_all_files: Option<bool>,
+) -> Result<Vec<WorkspaceEntry>, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<WorkspaceEntry>, String> {
+        let show_all = include_all_files.unwrap_or(false);
         let root = PathBuf::from(&root_path);
         if !root.exists() || !root.is_dir() {
             return Err("Workspace path is not a directory".to_string());
@@ -715,6 +719,8 @@ async fn scan_workspace(root_path: String) -> Result<Vec<WorkspaceEntry>, String
                 let name = e.file_name().to_string_lossy();
                 if e.file_type().is_dir() {
                     !should_skip_dir(&name)
+                } else if show_all {
+                    name != ".DS_Store" && name != "Thumbs.db"
                 } else {
                     is_workspace_visible_file(e.path())
                 }
@@ -726,8 +732,15 @@ async fn scan_workspace(root_path: String) -> Result<Vec<WorkspaceEntry>, String
             }
             let path = entry.path();
             let is_dir = entry.file_type().is_dir();
-            if !is_dir && !is_workspace_visible_file(path) {
-                continue;
+            if !is_dir {
+                let name = entry.file_name().to_string_lossy();
+                if show_all {
+                    if name == ".DS_Store" || name == "Thumbs.db" {
+                        continue;
+                    }
+                } else if !is_workspace_visible_file(path) {
+                    continue;
+                }
             }
 
             let Ok(rel) = path.strip_prefix(&root) else {

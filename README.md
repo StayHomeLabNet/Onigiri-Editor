@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v155">What's New in v1.5.5</a> ・
+    <a href="#whats-new-in-v156">What's New in v1.5.6</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.5-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.6-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.5.5`
+Current version: `v1.5.6`
 
 ## Key Features
 
@@ -100,12 +100,24 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.5.5
+## What's New in v1.5.6
+
+- **Excel-Like Spreadsheet Editing & Formula Engine (CSV / TSV)**:
+  - **Direct Cell Typing & Keyboard Navigation**: Type directly (including CJK/IME) into any selected cell without double-clicking; navigate with `Enter` / `Shift+Enter`, `Tab` / `Shift+Tab`, `Arrow` keys, `F2`, and `Escape`.
+  - **Formula Bar & Built-in Formula Engine**: Evaluates `=` formulas (`SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `COUNTA`, `COUNTIF`, `SUMIF`, `IF`, `IFERROR`, `ISERROR`, `ISBLANK`, `ISNUMBER`, `AND`, `OR`, `NOT`, `ROUND`, `ROUNDUP`, `ROUNDDOWN`, `ABS`, `SQRT`, `POWER`, `MOD`, `INT`, `FLOOR`, `CEILING`, `CONCAT`, `LEN`, `UPPER`, `LOWER`, `TRIM`, `LEFT`, `RIGHT`, `MID`, `SUBSTITUTE`, `TODAY`, `NOW`, `%` operator, circular reference detection) and exports to **`.xlsx` / `.ods`**.
+  - **Formula Pointing Mode**: Click another cell while entering a `=` formula to insert `B2`, or drag across cells to insert `B2:D2`, with live reference highlights.
+  - **Range Selection, AutoFill & Rich Context Menu**: Drag-select ranges with live `Σ / Avg / Count` stats, AutoFill handle (`+` drag / double-click with smart tag options), Cut/Copy/Copy Value/Paste (with relative formula shifting)/Paste Values Only, and Row/Column Insert & Delete (auto-adjusting formulas).
+- **Expanded Specialized Live Previews**: Dedicated live preview panes for JSON, YAML/TOML, `.env`, CSS, Diff, HTTP, Logs, OpenAPI, Mermaid/Diagrams, LaTeX, and SVG.
+
+<details>
+<summary>Previous release: v1.5.5</summary>
 
 - **Zone-Aware Drag & Drop (Folder Tree / Editor & Preview / AI Chat)**:
   - **Workspace Folder Tree (Advanced Mode)**: Hovering highlights the exact target folder (or parent folder of a hovered file). Normal drop **copies** external files/folders into that folder; hold **`Shift`** while dropping to **move** them.
   - **Editor & Preview Panes**: Dropping images saves them to your asset folder and inserts Markdown image syntax at the cursor. Dropping non-image files (`.md`, `.txt`, `.csv`, etc.) opens them in a new tab by default, or inserts a relative Markdown link `[name](path)` when holding **`Shift`** or **`Ctrl` (`⌘`)**.
   - **AI Chat Panel (Multimodal & File Attachments)**: Dropping text/code/Markdown files attaches their contents as prompt context chips; dropping images attaches thumbnail chips and sends them as **Base64 multimodal image inputs** to Cloud APIs (OpenAI, Anthropic, Gemini) / Ollama, or as **image file paths** to AI CLIs (Codex, Claude, Gemini, Antigravity, Custom CLI).
+
+</details>
 
 <details>
 <summary>Previous release: v1.5.4</summary>

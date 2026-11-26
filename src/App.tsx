@@ -67,7 +67,25 @@ import {
   saveCustomTemplates,
 } from './utils/templates';
 import { resolveEditorLanguageLabel, resolveEffectiveLanguageId } from './utils/language';
-import { formatMarkdownImageSyntax, normalizeLocalMarkdownPath } from './utils/paths';
+import { JsonPreviewPane } from './components/previews/JsonPreviewPane';
+import { YamlTomlPreviewPane } from './components/previews/YamlTomlPreviewPane';
+import { EnvPreviewPane } from './components/previews/EnvPreviewPane';
+import { SvgPreviewPane } from './components/previews/SvgPreviewPane';
+import { DiagramPreviewPane } from './components/previews/DiagramPreviewPane';
+import { CssPreviewPane } from './components/previews/CssPreviewPane';
+import { DiffPreviewPane } from './components/previews/DiffPreviewPane';
+import { LogPreviewPane } from './components/previews/LogPreviewPane';
+import { LatexPreviewPane } from './components/previews/LatexPreviewPane';
+import { HttpPreviewPane } from './components/previews/HttpPreviewPane';
+import { OpenApiPreviewPane } from './components/previews/OpenApiPreviewPane';
+import {
+  buildMarkdownDropLink,
+  formatMarkdownImageSyntax,
+  getActiveWorkspaceDragEntry,
+  normalizeLocalMarkdownPath,
+  setActiveWorkspaceDragEntry,
+  type WorkspaceDragEntry,
+} from './utils/paths';
 import { resolveSyntaxColors, syntaxColorsToCssVars, SYNTAX_PRESETS } from './utils/syntaxThemes';
 import {
   CUSTOM_SNIPPETS_KEY,
@@ -541,6 +559,11 @@ export function App() {
   const [aiPendingDropFiles, setAiPendingDropFiles] = useState<{
     seq: number;
     items: AiDroppedAttachment[];
+  } | null>(null);
+  const [internalDragGhost, setInternalDragGhost] = useState<{
+    name: string;
+    x: number;
+    y: number;
   } | null>(null);
   const dragModsRef = useRef({ shift: false, ctrl: false, meta: false });
   const [showPalette, setShowPalette] = useState(false);
@@ -1419,7 +1442,7 @@ export function App() {
       if (!init) return;
 
       if (init.workspaceRoot && isTauri()) {
-        scanWorkspaceDir(init.workspaceRoot)
+        scanWorkspaceDir(init.workspaceRoot, showAllWorkspaceFilesRef.current)
           .then((list) => {
             if (!cancelled) setWorkspaceEntries(list);
           })
@@ -1912,7 +1935,7 @@ export function App() {
         notify(t.toasts.reloadedExternal);
       }
       if (anyDiskDelta && workspaceRootRef.current) {
-        scanWorkspaceDir(workspaceRootRef.current)
+        scanWorkspaceDir(workspaceRootRef.current, showAllWorkspaceFilesRef.current)
           .then(setWorkspaceEntries)
           .catch(() => {});
         void refreshGitStatus(workspaceRootRef.current);
@@ -1935,7 +1958,7 @@ export function App() {
         const now = Date.now();
         if (root && now - lastWorkspaceScanMs > 2500) {
           lastWorkspaceScanMs = now;
-          scanWorkspaceDir(root)
+          scanWorkspaceDir(root, showAllWorkspaceFilesRef.current)
             .then(setWorkspaceEntries)
             .catch(() => {});
           void refreshGitStatus(root);
@@ -2130,6 +2153,157 @@ export function App() {
     [t, handleReloadFromDisk, handleKeepMine]
   );
 
+  const attachWorkspacePathsToAi = useCallback(
+    async (paths: string[]) => {
+      const items: AiDroppedAttachment[] = [];
+      for (const p of paths) {
+        const name = p.split(/[/\\]/).pop() || p;
+        if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(p)) {
+          try {
+            const dataUrl = await readImageDataUrl(p, workspaceRootRef.current);
+            if (dataUrl) {
+              const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+              if (m) {
+                items.push({
+                  id: `drop-img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  kind: 'image',
+                  name,
+                  path: p,
+                  mimeType: m[1],
+                  base64: m[2],
+                  dataUrl,
+                });
+              }
+            }
+          } catch (err) {
+            notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+          }
+        } else if (!/\.(pdf|zip|tar|gz|dmg|exe|msi|app|bin|wasm|mp4|mov|mp3|wav)$/i.test(p)) {
+          try {
+            const loaded = await readFileByPath(p);
+            items.push({
+              id: `drop-file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              kind: 'file',
+              name,
+              path: p,
+              textContent: loaded.content,
+            });
+          } catch (err) {
+            notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+          }
+        }
+      }
+      if (items.length > 0) {
+        setShowInspector(true);
+        setInspectorTab('chat');
+        setAiPendingDropFiles({ seq: Date.now(), items });
+      }
+    },
+    [notify, t.toasts.errorPrefix]
+  );
+
+  const resolveInternalDropZone = useCallback((clientX: number, clientY: number) => {
+    const aiHost = document.querySelector('[data-drop-zone="ai"]') as HTMLElement | null;
+    if (aiHost) {
+      const r = aiHost.getBoundingClientRect();
+      if (
+        r.width > 0 &&
+        r.height > 0 &&
+        clientX >= r.left &&
+        clientX <= r.right &&
+        clientY >= r.top &&
+        clientY <= r.bottom
+      ) {
+        return {
+          zone: 'ai' as const,
+          rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+        };
+      }
+    }
+    const el = document.elementFromPoint(clientX, clientY);
+    const previewEl = el?.closest('.preview-pane') as HTMLElement | null;
+    if (previewEl) {
+      const r = previewEl.getBoundingClientRect();
+      return {
+        zone: 'preview' as const,
+        rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      };
+    }
+    const editorEl = el?.closest('.editor-pane') as HTMLElement | null;
+    if (editorEl) {
+      const r = editorEl.getBoundingClientRect();
+      return {
+        zone: 'editor' as const,
+        rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      };
+    }
+    return null;
+  }, []);
+
+  const handleInternalFileDragMove = useCallback(
+    (entry: { path: string; name: string; relPath: string }, clientX: number, clientY: number) => {
+      setInternalDragGhost({ name: entry.name, x: clientX, y: clientY });
+      const target = resolveInternalDropZone(clientX, clientY);
+      const isJa = locale === 'ja';
+      if (!target) {
+        setDropZoneHover(null);
+      } else if (target.zone === 'ai') {
+        setDropZoneHover({
+          zone: 'ai',
+          label: isJa ? '🤖 AI チャットに添付' : '🤖 Attach to AI Chat',
+          rect: target.rect,
+        });
+      } else if (target.zone === 'preview') {
+        setDropZoneHover({
+          zone: 'preview',
+          label: isJa ? '👁️ プレビューへ挿入' : '👁️ Insert into Preview',
+          rect: target.rect,
+        });
+      } else {
+        setDropZoneHover({
+          zone: 'editor',
+          label: isJa ? '📝 エディタへ挿入' : '📝 Insert into Editor',
+          rect: target.rect,
+        });
+      }
+    },
+    [locale, resolveInternalDropZone]
+  );
+
+  const handleInternalFileDragEnd = useCallback(
+    (entry: { path: string; name: string; relPath: string }, clientX: number, clientY: number) => {
+      setInternalDragGhost(null);
+      setDropZoneHover(null);
+      const target = resolveInternalDropZone(clientX, clientY);
+      if (!target) return;
+      if (target.zone === 'ai') {
+        void attachWorkspacePathsToAi([entry.path]);
+        return;
+      }
+      const snippet = buildMarkdownDropLink({
+        targetPath: entry.path,
+        targetName: entry.name,
+        relativePathFromRoot: entry.relPath,
+        activeDocPath: activeTab.filePath,
+        workspaceRoot,
+      });
+      setActivePane(target.zone === 'preview' ? 'visual' : 'code');
+      getActiveEditorTarget()?.insertText(snippet);
+    },
+    [
+      activeTab.filePath,
+      attachWorkspacePathsToAi,
+      getActiveEditorTarget,
+      resolveInternalDropZone,
+      workspaceRoot,
+    ]
+  );
+
+  const handleInternalFileDragCancel = useCallback(() => {
+    setInternalDragGhost(null);
+    setDropZoneHover(null);
+  }, []);
+
   const dropHelpersRef = useRef({
     docPath: activeTab.filePath,
     workspaceRoot,
@@ -2181,14 +2355,19 @@ export function App() {
     };
     const clearMods = () => {
       dragModsRef.current = { shift: false, ctrl: false, meta: false };
+      setDropZoneHover(null);
     };
     window.addEventListener('keydown', syncMods, true);
     window.addEventListener('keyup', syncMods, true);
     window.addEventListener('blur', clearMods);
+    window.addEventListener('dragend', clearMods, true);
+    window.addEventListener('drop', clearMods, true);
     return () => {
       window.removeEventListener('keydown', syncMods, true);
       window.removeEventListener('keyup', syncMods, true);
       window.removeEventListener('blur', clearMods);
+      window.removeEventListener('dragend', clearMods, true);
+      window.removeEventListener('drop', clearMods, true);
     };
   }, []);
 
@@ -2226,6 +2405,18 @@ export function App() {
 
         const IMAGE_DROP_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i;
         const BINARY_SKIP_RE = /\.(pdf|zip|tar|gz|dmg|exe|msi|app|bin|wasm|mp4|mov|mp3|wav)$/i;
+        type ResolvedDropTarget =
+          | {
+              zone: 'sidebar';
+              folderPath: string;
+              folderLabel: string;
+              rect: { left: number; top: number; width: number; height: number };
+            }
+          | {
+              zone: 'ai' | 'preview' | 'editor';
+              rect: { left: number; top: number; width: number; height: number };
+            };
+        let lastResolvedZone: ResolvedDropTarget | null = null;
 
         const computeRelLink = (fromDocPath: string | undefined, targetPath: string): string => {
           const normTarget = targetPath.replace(/\\/g, '/');
@@ -2247,10 +2438,38 @@ export function App() {
           return rel.includes(' ') ? `<${rel}>` : rel;
         };
 
-        const resolveDropTarget = (pos?: { x: number; y: number }) => {
-          const dpr = window.devicePixelRatio || 1;
+        const resolveDropTarget = (pos?: { x: number; y: number }): ResolvedDropTarget => {
+          const rawDpr = window.devicePixelRatio || 1;
+          const usePhysicalScale = isMacOs()
+            ? Boolean(
+                pos &&
+                  (pos.x > window.innerWidth + 2 || pos.y > window.innerHeight + 2)
+              )
+            : true;
+          const dpr = usePhysicalScale ? rawDpr : 1;
           const clientX = pos ? pos.x / dpr : -1;
           const clientY = pos ? pos.y / dpr : -1;
+
+          if (clientX >= 0 && clientY >= 0) {
+            const aiHost = document.querySelector('[data-drop-zone="ai"]') as HTMLElement | null;
+            if (aiHost) {
+              const r = aiHost.getBoundingClientRect();
+              if (
+                r.width > 0 &&
+                r.height > 0 &&
+                clientX >= r.left &&
+                clientX <= r.right &&
+                clientY >= r.top &&
+                clientY <= r.bottom
+              ) {
+                return {
+                  zone: 'ai' as const,
+                  rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+                };
+              }
+            }
+          }
+
           const el =
             clientX >= 0 && clientY >= 0 ? document.elementFromPoint(clientX, clientY) : null;
 
@@ -2288,6 +2507,9 @@ export function App() {
               rect: { left: r.left, top: r.top, width: r.width, height: r.height },
             };
           }
+          if (clientX < 0 && clientY < 0 && lastResolvedZone) {
+            return lastResolvedZone;
+          }
           return {
             zone: 'editor' as const,
             rect: { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight },
@@ -2301,6 +2523,7 @@ export function App() {
             const target = resolveDropTarget(
               (event.payload as { position?: { x: number; y: number } }).position
             );
+            lastResolvedZone = target;
             const { shift, ctrl, meta } = dragModsRef.current;
             let label = '';
             if (target.zone === 'sidebar') {
@@ -2378,7 +2601,7 @@ export function App() {
                 const name = p.split(/[/\\]/).pop() || p;
                 if (IMAGE_DROP_RE.test(p)) {
                   try {
-                    const dataUrl = await readImageDataUrl(p);
+                    const dataUrl = await readImageDataUrl(p, workspaceRootRef.current);
                     if (dataUrl) {
                       const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
                       if (m) {
@@ -2393,8 +2616,10 @@ export function App() {
                         });
                       }
                     }
-                  } catch {
-                    // ignore unreadable image
+                  } catch (err) {
+                    dropHelpersRef.current.notify(
+                      `${dropHelpersRef.current.errorPrefix} ${formatErrorMessage(err)}`
+                    );
                   }
                 } else if (!BINARY_SKIP_RE.test(p)) {
                   try {
@@ -2406,8 +2631,10 @@ export function App() {
                       path: p,
                       textContent: loaded.content,
                     });
-                  } catch {
-                    // ignore unreadable file
+                  } catch (err) {
+                    dropHelpersRef.current.notify(
+                      `${dropHelpersRef.current.errorPrefix} ${formatErrorMessage(err)}`
+                    );
                   }
                 }
               }
@@ -2469,13 +2696,21 @@ export function App() {
 
   // File actions
   const handleNewFile = useCallback(
-    (opts?: { encoding?: TextEncodingId; eol?: '\n' | '\r\n' }) => {
+    (opts?: {
+      encoding?: TextEncodingId;
+      eol?: '\n' | '\r\n';
+      title?: string;
+      languageOverride?: string;
+    }) => {
       const encoding = opts?.encoding ?? effectiveSettings.defaultNewFileEncoding ?? 'utf-8';
       const eol = opts?.eol ?? effectiveSettings.defaultNewFileEol ?? '\n';
-      const created = makeTab(t.dialogs.untitledName, '', undefined, undefined, {
+      const created = makeTab(opts?.title || t.dialogs.untitledName, '', undefined, undefined, {
         encoding,
         eol,
       });
+      if (opts?.languageOverride) {
+        created.languageOverride = opts.languageOverride;
+      }
       if (mode !== 'advanced') {
         if (activeTab.dirty && !window.confirm(t.dialogs.unsavedCloseConfirm)) return;
         setTabs([created]);
@@ -3042,11 +3277,14 @@ export function App() {
     [openPathInTab, handleCompareTabWithGitHead]
   );
 
+  const showAllWorkspaceFilesRef = useRef(Boolean(settings.showAllWorkspaceFiles));
+  showAllWorkspaceFilesRef.current = Boolean(settings.showAllWorkspaceFiles);
+
   // Workspace folder actions
   const refreshWorkspace = useCallback(
     async (root: string) => {
       try {
-        const list = await scanWorkspaceDir(root);
+        const list = await scanWorkspaceDir(root, showAllWorkspaceFilesRef.current);
         setWorkspaceEntries(list);
         void refreshGitStatus(root);
         if (isTauri()) {
@@ -6050,7 +6288,41 @@ export function App() {
       data-print-mode={printMode}
       style={syntaxCssVars}
       onDragOver={(e) => {
-        if (e.dataTransfer?.types?.includes('application/x-onigiri-workspace-entry')) {
+        if (
+          e.dataTransfer?.types?.includes('application/x-onigiri-workspace-entry') ||
+          getActiveWorkspaceDragEntry()
+        ) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const aiEl = el?.closest('[data-drop-zone="ai"]') as HTMLElement | null;
+          const previewEl = el?.closest('.preview-pane') as HTMLElement | null;
+          const editorEl = el?.closest('.editor-pane') as HTMLElement | null;
+          const isJa = locale === 'ja';
+          if (aiEl) {
+            const r = aiEl.getBoundingClientRect();
+            setDropZoneHover({
+              zone: 'ai',
+              label: isJa ? '🤖 AI チャットに添付' : '🤖 Attach to AI Chat',
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+            });
+          } else if (previewEl) {
+            const r = previewEl.getBoundingClientRect();
+            setDropZoneHover({
+              zone: 'preview',
+              label: isJa ? '👁️ プレビューへ挿入' : '👁️ Insert into Preview',
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+            });
+          } else if (editorEl) {
+            const r = editorEl.getBoundingClientRect();
+            setDropZoneHover({
+              zone: 'editor',
+              label: isJa ? '📝 エディタへ挿入' : '📝 Insert into Editor',
+              rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+            });
+          } else {
+            setDropZoneHover(null);
+          }
           return;
         }
         if (!isTauri()) {
@@ -6278,12 +6550,22 @@ export function App() {
       {mode === 'advanced' && !zenMode && (
         <TabBar
           t={t}
+          locale={locale}
           tabs={tabs}
           activeTabId={activeTab.id}
           sideTabId={sideTab?.id ?? null}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onNewTab={() => handleNewFile()}
+          onNewTabWithLanguage={(opt) => {
+            const dotIdx = opt.sampleFilename.lastIndexOf('.');
+            const baseStem = t.dialogs.untitledName.replace(/\.[^.]+$/, '');
+            const title =
+              dotIdx >= 0
+                ? `${baseStem}${opt.sampleFilename.slice(dotIdx)}`
+                : opt.sampleFilename;
+            handleNewFile({ title, languageOverride: opt.id });
+          }}
           onReorderTabs={handleReorderTabs}
           onTogglePinTab={handleTogglePinTab}
           onOpenTabToSide={handleOpenTabToSide}
@@ -6315,6 +6597,20 @@ export function App() {
             onChooseFolder={handleOpenFolder}
             onCloseFolder={handleCloseFolder}
             onRefreshFolder={() => workspaceRoot && refreshWorkspace(workspaceRoot)}
+            showAllFiles={Boolean(settings.showAllWorkspaceFiles)}
+            onToggleShowAllFiles={() => {
+              const nextVal = !settings.showAllWorkspaceFiles;
+              showAllWorkspaceFilesRef.current = nextVal;
+              setSettings((prev) => ({ ...prev, showAllWorkspaceFiles: nextVal }));
+              if (workspaceRoot) {
+                void scanWorkspaceDir(workspaceRoot, nextVal)
+                  .then(setWorkspaceEntries)
+                  .catch(() => {});
+              }
+            }}
+            onInternalFileDragMove={handleInternalFileDragMove}
+            onInternalFileDragEnd={handleInternalFileDragEnd}
+            onInternalFileDragCancel={handleInternalFileDragCancel}
             onOpenWorkspaceFile={(p) => {
               void openPathInTab(p);
             }}
@@ -6462,6 +6758,42 @@ export function App() {
                 ref={editorPaneRef}
                 className={`pane editor-pane ${editorSplitVertical ? 'is-split-vertical' : ''}`}
                 style={layout === 'split' ? { width: `${splitRatio * 100}%` } : undefined}
+                onDragOver={(e) => {
+                  if (
+                    e.dataTransfer?.types?.includes('application/x-onigiri-workspace-entry') ||
+                    getActiveWorkspaceDragEntry()
+                  ) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                  }
+                }}
+                onDrop={(e) => {
+                  setDropZoneHover(null);
+                  const fallback = getActiveWorkspaceDragEntry();
+                  setActiveWorkspaceDragEntry(null);
+                  if (e.defaultPrevented) return;
+                  const rawEntry = e.dataTransfer?.getData('application/x-onigiri-workspace-entry');
+                  let entry: WorkspaceDragEntry | null = null;
+                  if (rawEntry) {
+                    try {
+                      entry = JSON.parse(rawEntry) as WorkspaceDragEntry;
+                    } catch {
+                      entry = null;
+                    }
+                  }
+                  if (!entry) entry = fallback;
+                  if (entry?.path && entry?.name && !entry.isDir) {
+                    e.preventDefault();
+                    const snippet = buildMarkdownDropLink({
+                      targetPath: entry.path,
+                      targetName: entry.name,
+                      relativePathFromRoot: entry.relPath,
+                      activeDocPath: activeTab.filePath,
+                      workspaceRoot,
+                    });
+                    getActiveEditorTarget()?.insertText(snippet);
+                  }
+                }}
               >
                 {editorSplitVertical ? (
                   <>
@@ -6732,6 +7064,42 @@ export function App() {
                 style={
                   layout === 'split' ? { width: `${(1 - splitRatio) * 100}%` } : undefined
                 }
+                onDragOver={(e) => {
+                  if (
+                    e.dataTransfer?.types?.includes('application/x-onigiri-workspace-entry') ||
+                    getActiveWorkspaceDragEntry()
+                  ) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'copy';
+                  }
+                }}
+                onDrop={(e) => {
+                  setDropZoneHover(null);
+                  const fallback = getActiveWorkspaceDragEntry();
+                  setActiveWorkspaceDragEntry(null);
+                  if (e.defaultPrevented) return;
+                  const rawEntry = e.dataTransfer?.getData('application/x-onigiri-workspace-entry');
+                  let entry: WorkspaceDragEntry | null = null;
+                  if (rawEntry) {
+                    try {
+                      entry = JSON.parse(rawEntry) as WorkspaceDragEntry;
+                    } catch {
+                      entry = null;
+                    }
+                  }
+                  if (!entry) entry = fallback;
+                  if (entry?.path && entry?.name && !entry.isDir) {
+                    e.preventDefault();
+                    const snippet = buildMarkdownDropLink({
+                      targetPath: entry.path,
+                      targetName: entry.name,
+                      relativePathFromRoot: entry.relPath,
+                      activeDocPath: activeTab.filePath,
+                      workspaceRoot,
+                    });
+                    getActiveEditorTarget()?.insertText(snippet);
+                  }
+                }}
               >
                 {showRightPaneHeader && (
                   <div className="right-pane-header">
@@ -6894,6 +7262,8 @@ export function App() {
                       editorSelection={editorSelectionRange}
                       editorCursorOffset={editorCaretOffset}
                       copyCellEnabled={settings.dataPreviewCellCopyEnabled ?? true}
+                      onUpdateContent={updateActiveContent}
+                      onInsertToEditor={(text) => getActiveEditorTarget()?.insertText(text)}
                       onSyncEditorRange={(range) => {
                         setActivePane('visual');
                         setDataPreviewSyncRange(range);
@@ -6903,6 +7273,83 @@ export function App() {
                       }}
                       onJumpToLine={(ln) => handleGoToLine(ln)}
                       onCopyNotify={() => notify(t.toasts.copiedMarkdown)}
+                    />
+                  ) : previewKind === 'json' ? (
+                    <JsonPreviewPane
+                      locale={locale}
+                      fileName={activeTab.title}
+                      content={activeTab.content}
+                      onUpdateContent={updateActiveContent}
+                      onJumpToLine={(ln) => handleGoToLine(ln)}
+                      onCopyNotify={() => notify(t.toasts.copiedMarkdown)}
+                    />
+                  ) : previewKind === 'yaml' || previewKind === 'toml' ? (
+                    <YamlTomlPreviewPane
+                      locale={locale}
+                      fileName={activeTab.title}
+                      mode={previewKind}
+                      content={activeTab.content}
+                      onUpdateContent={updateActiveContent}
+                      onJumpToLine={(ln) => handleGoToLine(ln)}
+                      onCopyNotify={() => notify(t.toasts.copiedMarkdown)}
+                    />
+                  ) : previewKind === 'env' ? (
+                    <EnvPreviewPane
+                      locale={locale}
+                      fileName={activeTab.title}
+                      content={activeTab.content}
+                      onUpdateContent={updateActiveContent}
+                      onJumpToLine={(ln) => handleGoToLine(ln)}
+                    />
+                  ) : previewKind === 'svg' ? (
+                    <SvgPreviewPane
+                      locale={locale}
+                      fileName={activeTab.title}
+                      content={activeTab.content}
+                      onCopyNotify={() => notify(t.toasts.copiedMarkdown)}
+                    />
+                  ) : previewKind === 'diagram' ? (
+                    <DiagramPreviewPane
+                      locale={locale}
+                      theme={theme}
+                      fileName={activeTab.title}
+                      content={activeTab.content}
+                    />
+                  ) : previewKind === 'css' ? (
+                    <CssPreviewPane
+                      locale={locale}
+                      fileName={activeTab.title}
+                      content={activeTab.content}
+                      onUpdateContent={updateActiveContent}
+                      onJumpToLine={(ln) => handleGoToLine(ln)}
+                      onCopyNotify={() => notify(t.toasts.copiedMarkdown)}
+                    />
+                  ) : previewKind === 'diff' ? (
+                    <DiffPreviewPane
+                      locale={locale}
+                      content={activeTab.content}
+                    />
+                  ) : previewKind === 'log' ? (
+                    <LogPreviewPane
+                      locale={locale}
+                      content={activeTab.content}
+                      onJumpToLine={(ln) => handleGoToLine(ln)}
+                    />
+                  ) : previewKind === 'latex' ? (
+                    <LatexPreviewPane
+                      locale={locale}
+                      content={activeTab.content}
+                    />
+                  ) : previewKind === 'http' ? (
+                    <HttpPreviewPane
+                      locale={locale}
+                      content={activeTab.content}
+                      onJumpToLine={(ln) => handleGoToLine(ln)}
+                    />
+                  ) : previewKind === 'openapi' ? (
+                    <OpenApiPreviewPane
+                      locale={locale}
+                      content={activeTab.content}
                     />
                   ) : previewKind === 'code' ? (
                     <CodePreviewPane
@@ -7047,6 +7494,53 @@ export function App() {
             activeDocTitle={activeTab.title}
             activeFilePath={activeTab.filePath}
             pendingDropFiles={aiPendingDropFiles}
+            onDropWorkspacePathsToAi={(paths) => {
+              void (async () => {
+                const items: AiDroppedAttachment[] = [];
+                for (const p of paths) {
+                  const name = p.split(/[/\\]/).pop() || p;
+                  if (/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(p)) {
+                    try {
+                      const dataUrl = await readImageDataUrl(p, workspaceRootRef.current);
+                      if (dataUrl) {
+                        const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+                        if (m) {
+                          items.push({
+                            id: `drop-img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                            kind: 'image',
+                            name,
+                            path: p,
+                            mimeType: m[1],
+                            base64: m[2],
+                            dataUrl,
+                          });
+                        }
+                      }
+                    } catch (err) {
+                      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+                    }
+                  } else if (!/\.(pdf|zip|tar|gz|dmg|exe|msi|app|bin|wasm|mp4|mov|mp3|wav)$/i.test(p)) {
+                    try {
+                      const loaded = await readFileByPath(p);
+                      items.push({
+                        id: `drop-file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                        kind: 'file',
+                        name,
+                        path: p,
+                        textContent: loaded.content,
+                      });
+                    } catch (err) {
+                      notify(`${t.toasts.errorPrefix} ${formatErrorMessage(err)}`);
+                    }
+                  }
+                }
+                if (items.length > 0) {
+                  setShowInspector(true);
+                  setInspectorTab('chat');
+                  setAiPendingDropFiles({ seq: Date.now(), items });
+                }
+              })();
+            }}
             savedContent={activeTab.savedContent}
             stats={stats}
             snapshots={activeTab.snapshots}
@@ -7424,6 +7918,16 @@ export function App() {
         }}
         onCloseFeatureGuideModal={() => setShowFeatureGuideModal(false)}
       />
+
+      {internalDragGhost && (
+        <div
+          className="internal-drag-ghost"
+          style={{ left: internalDragGhost.x, top: internalDragGhost.y }}
+        >
+          <FileText size={13} />
+          <span>{internalDragGhost.name}</span>
+        </div>
+      )}
 
       {dropZoneHover && (
         <div

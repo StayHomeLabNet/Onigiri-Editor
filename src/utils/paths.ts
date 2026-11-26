@@ -182,3 +182,20 @@ export function formatMarkdownImageSyntax(
   return `![${safeAlt}](${dest})`;
 }
 
+
+export interface WorkspaceDragEntry {
+  path: string;
+  name: string;
+  relPath?: string;
+  isDir?: boolean;
+}
+
+let activeWorkspaceDragEntry: WorkspaceDragEntry | null = null;
+
+export function setActiveWorkspaceDragEntry(entry: WorkspaceDragEntry | null): void {
+  activeWorkspaceDragEntry = entry;
+}
+
+export function getActiveWorkspaceDragEntry(): WorkspaceDragEntry | null {
+  return activeWorkspaceDragEntry;
+}

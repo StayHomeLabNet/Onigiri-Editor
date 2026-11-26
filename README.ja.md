@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v155-の更新内容">v1.5.5 の更新内容</a> ・
+    <a href="#v156-の更新内容">v1.5.6 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.5-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-1.5.6-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、**8言語**（**English** / **日本語** / **简体中文** / **繁體中文** / **한국어** / **Español** / **Français** / **Deutsch**）の中から最適な UI とネイティブメニューバーで起動します。
 
-現在のバージョン: `v1.5.5`
+現在のバージョン: `v1.5.6`
 
 ## 主な機能
 
@@ -100,12 +100,24 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.5.5 の更新内容
+## v1.5.6 の更新内容
+
+- **Excel ライクな表計算編集＆数式エンジン（CSV / TSV）**:
+  - **直接タイピング入力＆ナビゲーション**: ダブルクリック不要でセル選択中にそのまま文字や `=`、日本語 IME を入力でき、`Enter` / `Shift+Enter`・`Tab` / `Shift+Tab`・矢印キー・`F2`・`Escape` で快適に操作できます。
+  - **数式バー＆内蔵数式エンジン**: `=` 数式（`SUM` / `AVERAGE` / `MIN` / `MAX` / `COUNT` / `COUNTA` / `COUNTIF` / `SUMIF` / `IF` / `IFERROR` / `ISERROR` / `ISBLANK` / `ISNUMBER` / `AND` / `OR` / `NOT` / `ROUND` / `ROUNDUP` / `ROUNDDOWN` / `ABS` / `SQRT` / `POWER` / `MOD` / `INT` / `FLOOR` / `CEILING` / `CONCAT` / `LEN` / `UPPER` / `LOWER` / `TRIM` / `LEFT` / `RIGHT` / `MID` / `SUBSTITUTE` / `TODAY` / `NOW`、`%` 演算子、循環参照検出）を評価し、**`.xlsx` / `.ods` バイナリ保存**に対応しました。
+  - **数式ポイントモード**: `=` 数式入力中に他セルをクリックすると `B2`、ドラッグすると `B2:D2` が自動入力され、参照セルをハイライトします。
+  - **範囲選択・オートフィル・充実した右クリックメニュー**: 複数セル範囲選択（外周枠線＆合計/平均/個数表示）、右下角 `+` ドラッグ／ダブルクリックのオートフィル（スマートタグ付き）、切り取り（`⌘X`）・コピー（`⌘C`）・計算結果をコピー・貼り付け（`⌘V`・数式相対参照シフト対応）・値のみ貼り付け・行/列の挿入と削除（数式参照自動調整付き）に対応しました。
+- **専用ライブプレビューの拡充**: JSON / YAML / TOML / `.env` / CSS / Diff / HTTP / Log / OpenAPI / Mermaid 図表 / LaTeX / SVG の専用ライブプレビューを整備しました。
+
+<details>
+<summary>以前のリリース: v1.5.5</summary>
 
 - **領域別ドラッグ＆ドロップ対応（フォルダツリー / エディタ＆プレビュー / AI チャット）**:
   - **拡張モードのフォルダツリー**: カーソル下のフォルダ行（ファイル上の場合はその親フォルダ）を個別ハイライト表示します。通常ドロップでそのフォルダへ**コピー**、**`Shift` キーを押しながら**離すと**移動**します。
   - **エディタ / プレビュー領域**: 画像ドロップ時はアセットフォルダへ保存してカーソル位置へ挿入します。非画像ファイル（`.md` / `.txt` / `.csv` 等）は通常ドロップで**新しいタブで開き**、**`Shift` または `Ctrl`（Mac は `⌘`）を押しながら**離すと相対パスの Markdown リンク `[ファイル名](パス)` を挿入します。
   - **AI チャット領域（マルチモーダル画像＆ファイル添付）**: テキスト／コード／Markdown 等をドロップすると添付チップとして文脈に追加され、画像をドロップするとサムネイル付きチップとして添付し、Cloud API（OpenAI / Anthropic / Gemini）・Ollama 等には Base64 画像として、CLI プロバイダーには画像パスとして送信します。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.5.4</summary>

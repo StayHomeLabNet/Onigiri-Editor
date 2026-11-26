@@ -339,6 +339,7 @@ export interface EditorSettings {
   aiAuditLogEnabled?: boolean;
   aiMemoryEnabled?: boolean;
   aiNoteSuggestEnabled?: boolean;
+  showAllWorkspaceFiles?: boolean;
 }
 
 export type MarkdownCompatTarget = 'github' | 'commonmark' | 'onigiri';

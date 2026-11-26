@@ -1,16 +1,19 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Plus, X, FileText, Pin } from 'lucide-react';
-import type { DocumentTab } from '../types';
+import type { DocumentTab, Locale } from '../types';
 import type { Translations } from '../i18n/types';
+import { LANGUAGE_OPTIONS, type LanguageOption } from '../utils/language';
 
 interface TabBarProps {
   t: Translations;
+  locale?: Locale;
   tabs: DocumentTab[];
   activeTabId: string;
   sideTabId?: string | null;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: () => void;
+  onNewTabWithLanguage?: (opt: LanguageOption) => void;
   onReorderTabs?: (draggedId: string, targetId: string) => void;
   onTogglePinTab?: (id: string) => void;
   onOpenTabToSide?: (id: string) => void;
@@ -24,12 +27,14 @@ interface TabBarProps {
 
 export const TabBar: React.FC<TabBarProps> = ({
   t,
+  locale = 'en',
   tabs,
   activeTabId,
   sideTabId,
   onSelectTab,
   onCloseTab,
   onNewTab,
+  onNewTabWithLanguage,
   onReorderTabs,
   onTogglePinTab,
   onOpenTabToSide,
@@ -45,6 +50,44 @@ export const TabBar: React.FC<TabBarProps> = ({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; tabId: string } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [newTypeMenu, setNewTypeMenu] = useState<{ right: number; top: number } | null>(null);
+  const newTypeMenuRef = useRef<HTMLDivElement | null>(null);
+  const addBtnRef = useRef<HTMLButtonElement | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (!newTypeMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (
+        newTypeMenuRef.current &&
+        !newTypeMenuRef.current.contains(e.target as Node) &&
+        addBtnRef.current &&
+        !addBtnRef.current.contains(e.target as Node)
+      ) {
+        setNewTypeMenu(null);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNewTypeMenu(null);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [newTypeMenu]);
+
+  const openNewTypeMenu = () => {
+    if (!onNewTabWithLanguage) return;
+    const rect = addBtnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setNewTypeMenu({
+      right: Math.max(8, window.innerWidth - rect.right),
+      top: rect.bottom + 4,
+    });
+  };
 
   useLayoutEffect(() => {
     if (!ctxMenu || !menuRef.current) return;
@@ -198,9 +241,98 @@ export const TabBar: React.FC<TabBarProps> = ({
           );
         })}
       </div>
-      <button type="button" className="tab-add-btn" onClick={onNewTab} title={t.actions.newFile}>
+      <button
+        ref={addBtnRef}
+        type="button"
+        className={`tab-add-btn ${onNewTabWithLanguage ? 'has-submenu' : ''}`}
+        onPointerDown={(e) => {
+          if (e.button !== 0 || !onNewTabWithLanguage) return;
+          longPressTriggeredRef.current = false;
+          if (longPressTimerRef.current !== null) {
+            window.clearTimeout(longPressTimerRef.current);
+          }
+          longPressTimerRef.current = window.setTimeout(() => {
+            longPressTimerRef.current = null;
+            longPressTriggeredRef.current = true;
+            openNewTypeMenu();
+          }, 380);
+        }}
+        onPointerUp={() => {
+          if (longPressTimerRef.current !== null) {
+            window.clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+        }}
+        onPointerLeave={() => {
+          if (longPressTimerRef.current !== null) {
+            window.clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+        }}
+        onPointerCancel={() => {
+          if (longPressTimerRef.current !== null) {
+            window.clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+        }}
+        onContextMenu={(e) => {
+          if (!onNewTabWithLanguage) return;
+          e.preventDefault();
+          openNewTypeMenu();
+        }}
+        onClick={() => {
+          if (longPressTriggeredRef.current) {
+            longPressTriggeredRef.current = false;
+            return;
+          }
+          onNewTab();
+        }}
+        title={
+          onNewTabWithLanguage
+            ? `${t.actions.newFile} (${locale === 'ja' ? '長押し/右クリックで拡張子を選択' : 'Hold/Right-click for file type'})`
+            : t.actions.newFile
+        }
+      >
         <Plus size={14} />
+        {onNewTabWithLanguage && <span className="tab-add-sub-dot" aria-hidden="true" />}
       </button>
+
+      {newTypeMenu && onNewTabWithLanguage && (
+        <div
+          ref={newTypeMenuRef}
+          className="tab-add-type-menu"
+          style={{ right: newTypeMenu.right, top: newTypeMenu.top }}
+          role="menu"
+        >
+          <div className="tab-add-type-header">
+            {locale === 'ja' ? '新規ファイル形式を選択' : 'New File Format'}
+          </div>
+          <div className="tab-add-type-list">
+            {LANGUAGE_OPTIONS.map((opt) => {
+              const dotIdx = opt.sampleFilename.lastIndexOf('.');
+              const extLabel =
+                dotIdx >= 0 ? opt.sampleFilename.slice(dotIdx) : opt.sampleFilename;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className="tab-add-type-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setNewTypeMenu(null);
+                    onNewTabWithLanguage(opt);
+                  }}
+                >
+                  <span className="tab-add-type-label">
+                    {locale === 'ja' && opt.labelJa ? opt.labelJa : opt.label}
+                  </span>
+                  <span className="tab-add-type-ext">{extLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {ctxMenu && ctxTab && (
         <div

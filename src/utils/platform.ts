@@ -396,10 +396,13 @@ export async function openFolderDialog(): Promise<string | null> {
   return typeof selected === 'string' ? selected : null;
 }
 
-export async function scanWorkspaceDir(rootPath: string): Promise<WorkspaceEntry[]> {
+export async function scanWorkspaceDir(
+  rootPath: string,
+  includeAllFiles = false
+): Promise<WorkspaceEntry[]> {
   if (!isTauri()) return [];
   const { invoke } = await import('@tauri-apps/api/core');
-  return invoke<WorkspaceEntry[]>('scan_workspace', { rootPath });
+  return invoke<WorkspaceEntry[]>('scan_workspace', { rootPath, includeAllFiles });
 }
 
 export async function searchWorkspaceDir(rootPath: string, query: string): Promise<SearchMatch[]> {

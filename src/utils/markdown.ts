@@ -1057,7 +1057,32 @@ export function exportStandaloneHtml(
 </html>`;
 }
 
-export type DocumentPreviewKind = 'markdown' | 'webpage' | 'code' | 'data';
+export type DocumentPreviewKind =
+  | 'markdown'
+  | 'webpage'
+  | 'code'
+  | 'data'
+  | 'json'
+  | 'yaml'
+  | 'toml'
+  | 'env'
+  | 'svg'
+  | 'diagram'
+  | 'css'
+  | 'diff'
+  | 'log'
+  | 'latex'
+  | 'http'
+  | 'openapi';
+
+function isOpenApiQuickCheck(base: string, content?: string): boolean {
+  if (/(?:openapi|swagger)\.(?:ya?ml|json)$/i.test(base)) return true;
+  if (!content) return false;
+  const head = content.slice(0, 4096);
+  const hasSpecKey = /(?:^|\n)\s*["']?(?:openapi|swagger)["']?\s*:/m.test(head);
+  const hasPathsKey = /(?:^|\n)\s*["']?paths["']?\s*:/m.test(content.slice(0, 16384));
+  return hasSpecKey && hasPathsKey;
+}
 
 export function getDocumentPreviewKind(
   fileName?: string,
@@ -1071,14 +1096,32 @@ export function getDocumentPreviewKind(
   const target = (filePath || fileName || '').trim().toLowerCase();
   const base = target.split(/[/\\]/).pop() || '';
   const isSvgFile = /\.svg$/i.test(base) || isSvgContent;
+  const dotIdx = base.lastIndexOf('.');
+  const ext = dotIdx >= 0 && dotIdx < base.length - 1 ? base.slice(dotIdx + 1) : '';
 
   if (languageOverride) {
     if (languageOverride === 'markdown') return 'markdown';
     if (languageOverride === 'html') return 'webpage';
-    if (languageOverride === 'xml' && isSvgFile) return 'webpage';
+    if (languageOverride === 'xml' && isSvgFile) return 'svg';
     if (languageOverride === 'csv' || languageOverride === 'tsv') return 'data';
+    if (languageOverride === 'json') return isOpenApiQuickCheck(base, content) ? 'openapi' : 'json';
+    if (languageOverride === 'yaml') return isOpenApiQuickCheck(base, content) ? 'openapi' : 'yaml';
+    if (languageOverride === 'toml') return 'toml';
+    if (languageOverride === 'css' || languageOverride === 'scss') return 'css';
     return 'code';
   }
+
+  if (isSvgFile) return 'svg';
+  if (base === '.env' || base.startsWith('.env.') || ext === 'env' || ext === 'ini' || ext === 'properties') {
+    return 'env';
+  }
+  if (ext === 'mmd' || ext === 'mermaid' || ext === 'dot' || ext === 'gv') return 'diagram';
+  if (ext === 'diff' || ext === 'patch') return 'diff';
+  if (ext === 'log') return 'log';
+  if (ext === 'tex' || ext === 'latex') return 'latex';
+  if (ext === 'http' || ext === 'rest') return 'http';
+  if (isOpenApiQuickCheck(base, content)) return 'openapi';
+
   const effectiveLangId = resolveEffectiveLanguageId({
     fileName,
     filePath,
@@ -1087,19 +1130,31 @@ export function getDocumentPreviewKind(
   });
   if (effectiveLangId === 'markdown') return 'markdown';
   if (effectiveLangId === 'html') return 'webpage';
-  if (effectiveLangId === 'xml' && isSvgFile) return 'webpage';
   if (effectiveLangId === 'csv' || effectiveLangId === 'tsv') return 'data';
-  if (isSvgFile) return 'webpage';
+  if (effectiveLangId === 'json') return 'json';
+  if (effectiveLangId === 'yaml') return 'yaml';
+  if (effectiveLangId === 'toml') return 'toml';
+  if (effectiveLangId === 'css' || effectiveLangId === 'scss') return 'css';
   if (effectiveLangId) return 'code';
 
-  const dotIdx = base.lastIndexOf('.');
   if (dotIdx <= 0 || dotIdx === base.length - 1) return 'markdown';
-  const ext = base.slice(dotIdx + 1);
-  if (ext === 'html' || ext === 'htm' || ext === 'xhtml' || ext === 'svg') {
+  if (ext === 'html' || ext === 'htm' || ext === 'xhtml') {
     return 'webpage';
   }
   if (ext === 'csv' || ext === 'tsv') {
     return 'data';
+  }
+  if (ext === 'json' || ext === 'jsonc' || ext === 'json5') {
+    return 'json';
+  }
+  if (ext === 'yaml' || ext === 'yml') {
+    return 'yaml';
+  }
+  if (ext === 'toml') {
+    return 'toml';
+  }
+  if (ext === 'css' || ext === 'scss' || ext === 'sass') {
+    return 'css';
   }
   if (ext === 'md' || ext === 'markdown' || ext === 'mdown' || ext === 'mdx') {
     return 'markdown';

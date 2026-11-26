@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.5)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.6)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -195,7 +195,7 @@ Right-click inside the editor to access:
 - **100+ Languages & Status Bar Override**: Automatic syntax highlighting by file extension and content, plus a **clickable Status Bar language pill** to override highlighting and preview mode per tab.
 - **Presets & Per-Token Colors**: Choose from 7 syntax presets (`Auto`, `GitHub`, `One Dark`, `Dracula`, `Nord`, `Monokai`, `Solarized`) and customize 10 token categories.
 - **Structured Data Tools (CSV / TSV / JSON / YAML / `.env`)**:
-  - **CSV / TSV Preview**: Virtualized for multi-MB files with sticky row numbers, filterable & column-sortable table view, delimiter switcher (`Auto` / `,` / `Tab` / `;`), wrap toggle, right-aligned numeric columns with `Σ / Avg / Min / Max` stats, **bidirectional editor ⇔ table cell/substring highlight**, double-click cell copy (toggleable in **Settings → Editor**), and one-click **Copy MD Table** / **Copy CSV**.
+  - **CSV / TSV Interactive Spreadsheet (`v1.5.6`)**: Virtualized for multi-MB files with sticky row numbers, filterable & column-sortable table view, delimiter switcher (`Auto` / `,` / `Tab` / `;`), wrap toggle, **direct cell typing (IME-aware)**, `Enter`/`Tab`/arrow-key navigation, **formula bar & built-in formula engine** (`SUM`, `AVERAGE`, `IF`, `IFERROR`, `COUNTIF`, `SUMIF`, `%`, etc.), **formula pointing mode** (click cell → `B2`, drag → `B2:D2`), **range selection & AutoFill handle** (`+` drag / double-click with smart tag), **rich right-click context menu** (Cut, Copy, Copy Value, Paste with relative ref shift, Paste Values Only, Insert/Delete Row & Column with formula adjustment), **`.xlsx` / `.ods` export**, and **Copy MD Table** / **Copy CSV**.
   - **JSON / YAML / `.env` Commands**: Run **Format JSON**, **Minify JSON**, **Sort JSON Keys**, **Convert JSON → YAML**, **Convert YAML → JSON**, and **Sort & Format `.env`** from the Command Palette.
 - **Specialized Live Previews**:
   - **HTML (`.html` / `.htm`)**: **HTML Live Page Preview** with **Visual / Code toggle**, **Full Width / Mobile (390px)** viewport switcher, relative CSS/image resolution, and dev-server prompts when an app entry is detected.

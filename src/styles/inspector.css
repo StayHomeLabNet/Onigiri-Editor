@@ -1033,6 +1033,25 @@
   white-space: nowrap;
 }
 
+.internal-drag-ghost {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 7px;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  color: var(--fg-primary);
+  font-size: 12px;
+  font-weight: 500;
+  box-shadow: var(--shadow-lg);
+  transform: translate(12px, 12px);
+  white-space: nowrap;
+}
+
 .drop-card {
   padding: 26px 40px;
   border-radius: 14px;

@@ -262,6 +262,19 @@ interface SidebarProps {
   onChooseFolder: () => void;
   onCloseFolder?: () => void;
   onRefreshFolder: () => void;
+  showAllFiles?: boolean;
+  onToggleShowAllFiles?: () => void;
+  onInternalFileDragMove?: (
+    entry: { path: string; name: string; relPath: string },
+    clientX: number,
+    clientY: number
+  ) => void;
+  onInternalFileDragEnd?: (
+    entry: { path: string; name: string; relPath: string },
+    clientX: number,
+    clientY: number
+  ) => void;
+  onInternalFileDragCancel?: () => void;
   onOpenWorkspaceFile: (path: string) => void;
   onOpenFileToSide?: (path: string) => void;
   onOpenWorkspaceImage?: (path: string) => void;
@@ -356,6 +369,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onChooseFolder,
   onCloseFolder,
   onRefreshFolder,
+  showAllFiles = false,
+  onToggleShowAllFiles,
+  onInternalFileDragMove,
+  onInternalFileDragEnd,
+  onInternalFileDragCancel,
   onOpenWorkspaceFile,
   onOpenFileToSide,
   onOpenWorkspaceImage,
@@ -424,6 +442,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onGitAiCommitMessage,
 }) => {
   const [fileFilter, setFileFilter] = useState('');
+  const suppressNextFileClickRef = useRef(false);
+  const [sidebarPrompt, setSidebarPrompt] = useState<{
+    title: string;
+    value: string;
+    selectStem?: boolean;
+    onSubmit: (val: string) => void;
+  } | null>(null);
+  const sidebarPromptInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!sidebarPrompt) return;
+    const raf = window.requestAnimationFrame(() => {
+      const inp = sidebarPromptInputRef.current;
+      if (!inp) return;
+      inp.focus();
+      if (sidebarPrompt.selectStem) {
+        const dotIdx = inp.value.lastIndexOf('.');
+        if (dotIdx > 0) {
+          inp.setSelectionRange(0, dotIdx);
+          return;
+        }
+      }
+      inp.select();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [Boolean(sidebarPrompt)]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [commitMessage, setCommitMessage] = useState('');
@@ -670,29 +714,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           key={`file:${node.relativePath}`}
           type="button"
-          draggable
           data-drop-folder-path={parentDirPath}
           data-drop-folder-label={parentRelPath}
-          onDragStart={(e) => {
-            try {
-              e.dataTransfer.setData(
-                'application/x-onigiri-workspace-entry',
-                JSON.stringify({
-                  path: node.path,
-                  name: node.name,
-                  relPath: node.relativePath,
-                  isDir: false,
-                })
-              );
-              e.dataTransfer.setData('text/plain', node.relativePath);
-              e.dataTransfer.effectAllowed = 'copyLink';
-            } catch {
-              // ignore
-            }
+          onPointerDown={(e) => {
+            if (e.button !== 0 || !onInternalFileDragMove || !onInternalFileDragEnd) return;
+            const startX = e.clientX;
+            const startY = e.clientY;
+            let dragging = false;
+            const entry = {
+              path: node.path,
+              name: node.name,
+              relPath: node.relativePath,
+            };
+
+            const onMove = (ev: PointerEvent) => {
+              if (!dragging) {
+                if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 6) return;
+                dragging = true;
+                suppressNextFileClickRef.current = true;
+              }
+              onInternalFileDragMove(entry, ev.clientX, ev.clientY);
+            };
+
+            const finish = (ev: PointerEvent, cancelled: boolean) => {
+              window.removeEventListener('pointermove', onMove, true);
+              window.removeEventListener('pointerup', onUp, true);
+              window.removeEventListener('pointercancel', onCancel, true);
+              if (dragging) {
+                if (cancelled) {
+                  onInternalFileDragCancel?.();
+                } else {
+                  onInternalFileDragEnd(entry, ev.clientX, ev.clientY);
+                }
+                window.setTimeout(() => {
+                  suppressNextFileClickRef.current = false;
+                }, 50);
+              }
+            };
+
+            const onUp = (ev: PointerEvent) => finish(ev, false);
+            const onCancel = (ev: PointerEvent) => finish(ev, true);
+
+            window.addEventListener('pointermove', onMove, true);
+            window.addEventListener('pointerup', onUp, true);
+            window.addEventListener('pointercancel', onCancel, true);
           }}
           className={`tree-row is-file ${isActive ? 'is-active' : ''}`}
           style={{ paddingLeft: `${6 + depth * 14}px` }}
-          onClick={() => handleFileClick(node)}
+          onClick={() => {
+            if (suppressNextFileClickRef.current) {
+              suppressNextFileClickRef.current = false;
+              return;
+            }
+            handleFileClick(node);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -759,20 +834,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const gitChangeCount = gitPanelState?.files?.length ?? Object.keys(gitStatusEntries).length;
 
   const handleNewNote = () => {
-    const name = window.prompt(t.sidebar.newFilePrompt, 'note.md');
-    if (name && name.trim()) {
-      const trimmed = name.trim();
-      const normalized = trimmed.includes('.') ? trimmed : `${trimmed}.md`;
-      onCreateFileInFolder(normalized);
-    }
+    setSidebarPrompt({
+      title: t.sidebar.newFilePrompt,
+      value: 'note.md',
+      selectStem: true,
+      onSubmit: (name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const normalized = trimmed.includes('.') ? trimmed : `${trimmed}.md`;
+        onCreateFileInFolder(normalized);
+      },
+    });
   };
 
   const handleNewFolderAtRoot = () => {
     if (!workspaceRoot || !onCreateFolderInDir) return;
-    const name = window.prompt(t.sidebar.newFolderPrompt, 'new-folder');
-    if (name && name.trim()) {
-      onCreateFolderInDir(workspaceRoot, name.trim());
-    }
+    setSidebarPrompt({
+      title: t.sidebar.newFolderPrompt,
+      value: 'new-folder',
+      onSubmit: (name) => {
+        const trimmed = name.trim();
+        if (trimmed) onCreateFolderInDir(workspaceRoot, trimmed);
+      },
+    });
   };
 
   const handleRunReplaceInFolder = async () => {
@@ -797,7 +881,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 
   return (
-    <aside className="sidebar">
+    <aside
+      className="sidebar"
+      data-drop-zone={workspaceRoot ? 'sidebar' : undefined}
+      data-drop-folder-path={workspaceRoot || undefined}
+      data-drop-folder-label=""
+    >
       <div className="sidebar-tabs" role="tablist">
         <button
           type="button"
@@ -1006,6 +1095,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <ChevronsDownUp size={13} />
                     </button>
+                    {onToggleShowAllFiles && (
+                      <button
+                        type="button"
+                        className={`icon-btn-sm ${showAllFiles ? 'is-active' : ''}`}
+                        onClick={onToggleShowAllFiles}
+                        title={
+                          showAllFiles
+                            ? locale === 'ja'
+                              ? 'すべてのファイルを表示中（クリックで対応形式のみ）'
+                              : 'Showing all files (click for supported files only)'
+                            : locale === 'ja'
+                              ? 'すべてのファイルを表示'
+                              : 'Show all files'
+                        }
+                        aria-pressed={Boolean(showAllFiles)}
+                      >
+                        <Eye size={13} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="icon-btn-sm"
@@ -2486,10 +2594,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => {
                     const node = treeCtx.node;
                     setTreeCtx(null);
-                    const nextName = window.prompt(t.sidebar.renamePrompt, node.name);
-                    if (nextName && nextName.trim() && nextName.trim() !== node.name) {
-                      onRenameEntry(node.path, nextName.trim());
-                    }
+                    setSidebarPrompt({
+                      title: t.sidebar.renamePrompt,
+                      value: node.name,
+                      selectStem: true,
+                      onSubmit: (nextName) => {
+                        const trimmed = nextName.trim();
+                        if (trimmed && trimmed !== node.name) {
+                          onRenameEntry(node.path, trimmed);
+                        }
+                      },
+                    });
                   }}
                 >
                   <span className="editor-ctx-label">{t.sidebar.ctxRename}</span>
@@ -2531,13 +2646,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => {
                     const node = treeCtx.node;
                     setTreeCtx(null);
-                    const name = window.prompt(t.sidebar.newFilePrompt, 'note.md');
-                    if (name && name.trim()) {
-                      const trimmed = name.trim();
-                      const normalized = trimmed.includes('.') ? trimmed : `${trimmed}.md`;
-                      setExpandedDirs((prev) => ({ ...prev, [node.relativePath]: true }));
-                      onCreateFileInDir(node.path, normalized);
-                    }
+                    setSidebarPrompt({
+                      title: t.sidebar.newFilePrompt,
+                      value: 'note.md',
+                      selectStem: true,
+                      onSubmit: (name) => {
+                        const trimmed = name.trim();
+                        if (!trimmed) return;
+                        const normalized = trimmed.includes('.') ? trimmed : `${trimmed}.md`;
+                        setExpandedDirs((prev) => ({ ...prev, [node.relativePath]: true }));
+                        onCreateFileInDir(node.path, normalized);
+                      },
+                    });
                   }}
                 >
                   <span className="editor-ctx-label">{t.sidebar.ctxNewFile}</span>
@@ -2550,11 +2670,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => {
                     const node = treeCtx.node;
                     setTreeCtx(null);
-                    const name = window.prompt(t.sidebar.newFolderPrompt, 'subfolder');
-                    if (name && name.trim()) {
-                      setExpandedDirs((prev) => ({ ...prev, [node.relativePath]: true }));
-                      onCreateFolderInDir(node.path, name.trim());
-                    }
+                    setSidebarPrompt({
+                      title: t.sidebar.newFolderPrompt,
+                      value: 'subfolder',
+                      onSubmit: (name) => {
+                        const trimmed = name.trim();
+                        if (!trimmed) return;
+                        setExpandedDirs((prev) => ({ ...prev, [node.relativePath]: true }));
+                        onCreateFolderInDir(node.path, trimmed);
+                      },
+                    });
                   }}
                 >
                   <span className="editor-ctx-label">{t.sidebar.ctxNewFolder}</span>
@@ -2568,10 +2693,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => {
                     const node = treeCtx.node;
                     setTreeCtx(null);
-                    const nextName = window.prompt(t.sidebar.renamePrompt, node.name);
-                    if (nextName && nextName.trim() && nextName.trim() !== node.name) {
-                      onRenameEntry(node.path, nextName.trim());
-                    }
+                    setSidebarPrompt({
+                      title: t.sidebar.renamePrompt,
+                      value: node.name,
+                      selectStem: true,
+                      onSubmit: (nextName) => {
+                        const trimmed = nextName.trim();
+                        if (trimmed && trimmed !== node.name) {
+                          onRenameEntry(node.path, trimmed);
+                        }
+                      },
+                    });
                   }}
                 >
                   <span className="editor-ctx-label">{t.sidebar.ctxRename}</span>
@@ -2631,6 +2763,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="editor-ctx-label">{t.sidebar.ctxReveal}</span>
             </button>
           )}
+        </div>
+      )}
+
+      {sidebarPrompt && (
+        <div
+          className="modal-backdrop"
+          style={{ zIndex: 140 }}
+          onClick={() => setSidebarPrompt(null)}
+        >
+          <form
+            className="modal-card"
+            style={{ width: 'min(380px, 92vw)', padding: '16px 18px' }}
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              const current = sidebarPrompt;
+              setSidebarPrompt(null);
+              current.onSubmit(current.value);
+            }}
+          >
+            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 10 }}>
+              {sidebarPrompt.title}
+            </div>
+            <input
+              ref={sidebarPromptInputRef}
+              type="text"
+              className="text-input"
+              style={{ width: '100%', marginBottom: 12 }}
+              value={sidebarPrompt.value}
+              onChange={(e) =>
+                setSidebarPrompt((prev) => (prev ? { ...prev, value: e.target.value } : null))
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setSidebarPrompt(null);
+                }
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => setSidebarPrompt(null)}
+              >
+                {t.actions.cancel}
+              </button>
+              <button type="submit" className="primary-btn">
+                OK
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </aside>
