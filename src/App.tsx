@@ -5230,6 +5230,10 @@ export function App() {
       document.execCommand(kind);
       return;
     }
+    if (activeEl?.closest('.data-preview-pane')) {
+      window.dispatchEvent(new CustomEvent('onigiri-data-undo', { detail: { kind } }));
+      return;
+    }
     handleToolbarAction(kind);
   };
 

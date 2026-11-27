@@ -5456,8 +5456,13 @@
   font-family: var(--font-mono, monospace);
 }
 
-.data-cell-context-menu button:hover {
+.data-cell-context-menu button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.data-cell-context-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .data-cell-context-menu button.is-danger {
