@@ -109,6 +109,7 @@ interface InspectorDrawerProps {
   onJumpToLine?: (line: number) => void;
   onApplyReviewFix?: (finding: ReviewFinding) => void;
   onOpenFullSettings: () => void;
+  onSendToHarness?: (draftText: string) => void;
 }
 
 export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
@@ -154,6 +155,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   onJumpToLine,
   onApplyReviewFix,
   onOpenFullSettings,
+  onSendToHarness,
 }) => {
   const [snapLabel, setSnapLabel] = useState('');
   const [compareId, setCompareId] = useState<string>('saved');
@@ -496,6 +498,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             activeFilePath={activeFilePath}
             pendingDropFiles={pendingDropFiles}
             onRequestDiffPreview={onRequestDiffPreview}
+            onSendToHarness={onSendToHarness}
           />
         )}
 

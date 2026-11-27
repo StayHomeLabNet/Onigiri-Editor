@@ -3,11 +3,27 @@ import type { Translations } from './types';
 
 export const zhCN: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.6',
+  versionLabel: 'v2.0.0',
   modes: {
     simple: '简洁',
     basic: '标准',
     advanced: '高级',
+  },
+  harness: {
+    modeLabel: 'AI Harness',
+    editorLabel: '编辑器',
+    newThread: '新建线程',
+    threadsHeading: '线程列表',
+    permPlan: '计划（只读）',
+    permApprove: '逐项审批',
+    permAuto: '自动编辑',
+    permFull: '完全访问',
+    executePlanBtn: '执行此计划',
+    diffCardTitle: '已更改的文件',
+    acceptChangesBtn: '保留更改',
+    revertTurnBtn: '撤回本轮更改',
+    openInEditorBtn: '在编辑器中打开',
+    sendToHarnessBtn: '发送到 AI Harness',
   },
   layouts: {
     editor: '编辑器',

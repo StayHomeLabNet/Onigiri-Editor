@@ -103,7 +103,7 @@ pub struct ChatMessageInput {
     pub content: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct AiImageAttachment {
     #[serde(default)]
@@ -152,7 +152,7 @@ fn home_dir() -> Option<PathBuf> {
         })
 }
 
-fn extended_path() -> String {
+pub(crate) fn extended_path() -> String {
     let mut dirs: Vec<PathBuf> = Vec::new();
 
     #[cfg(unix)]
@@ -446,7 +446,7 @@ fn resolve_windows_cmd_shim(bin: &str, args: &[String]) -> Option<(String, Vec<S
     Some((node_exe, full_args))
 }
 
-fn build_cli_command(bin: &str, args: &[String]) -> Command {
+pub(crate) fn build_cli_command(bin: &str, args: &[String]) -> Command {
     #[cfg(target_os = "windows")]
     {
         if let Some((node_exe, node_args)) = resolve_windows_cmd_shim(bin, args) {
@@ -483,7 +483,7 @@ fn resolve_windows_executable_candidate(dir: &Path, name: &str) -> Option<PathBu
     None
 }
 
-fn find_executable(names: &[&str]) -> Option<String> {
+pub(crate) fn find_executable(names: &[&str]) -> Option<String> {
     #[cfg(target_os = "windows")]
     for name in names {
         let raw = Path::new(name);

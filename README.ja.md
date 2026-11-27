@@ -11,13 +11,13 @@
     <a href="#主な機能">主な機能</a> ・
     <a href="#動作環境">動作環境</a> ・
     <a href="#ビルド">ビルド</a> ・
-    <a href="#v156-の更新内容">v1.5.6 の更新内容</a> ・
+    <a href="#v200-の更新内容">v2.0.0 の更新内容</a> ・
     <a href="#基本的な使い方">基本的な使い方</a> ・
     <a href="#ダウンロード">ダウンロード</a> ・
     <a href="#ライセンス">ライセンス</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.6-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 初回起動時は OS の言語設定を自動判定し、**8言語**（**English** / **日本語** / **简体中文** / **繁體中文** / **한국어** / **Español** / **Français** / **Deutsch**）の中から最適な UI とネイティブメニューバーで起動します。
 
-現在のバージョン: `v1.5.6`
+現在のバージョン: `v2.0.0`
 
 ## 主な機能
 
@@ -100,7 +100,17 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## v1.5.6 の更新内容
+## v2.0.0 の更新内容
+
+- **AI ハーネスモード（`AIハーネス` ⇄ `エディタ` 切替）**:
+  - **スレッド中心のエージェント作業空間**: 作業フォルダ単位で複数の AI スレッドを管理し、思考プロセス・実行計画カード（`この計画で実行`）・承認ゲート（`許可` / `このターン中は自動許可` / `拒否`）をタイムラインで操作できます。
+  - **4段階の権限モード＆ターンロールバック**: **計画（読み取り専用）**・**編集ごとに承認**・**自動編集**・**フルアクセス** を切替可能。ターン単位のスナップショットにより、競合警告付きで **`変更を確定`** または **`このターンを元に戻す`** ことができます。
+  - **ライブ作業台（Workbench）**: **プレビュー / 差分 / ファイル / ブラウザ** の作業台ペインを併設し、CLI（Codex / Claude / Gemini / Antigravity）と API / ローカル LLM の両方で動作します。
+- **CSV / TSV スプレッドシート Undo / Redo ＆ UI 改善**:
+  - セル編集・オートフィル・コピペ・行列操作に対応した **元に戻す（`⌘Z` / `Ctrl+Z`）・やり直し（`⇧⌘Z` / `Ctrl+Y`）** を実装し、右クリックメニューおよび「編集」メニューからも実行可能にしました。初期セルの自動選択と集中モード時のボタン重なりも修正しています。
+
+<details>
+<summary>以前のリリース: v1.5.6</summary>
 
 - **Excel ライクな表計算編集＆数式エンジン（CSV / TSV）**:
   - **直接タイピング入力＆ナビゲーション**: ダブルクリック不要でセル選択中にそのまま文字や `=`、日本語 IME を入力でき、`Enter` / `Shift+Enter`・`Tab` / `Shift+Tab`・矢印キー・`F2`・`Escape` で快適に操作できます。
@@ -108,6 +118,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **数式ポイントモード**: `=` 数式入力中に他セルをクリックすると `B2`、ドラッグすると `B2:D2` が自動入力され、参照セルをハイライトします。
   - **範囲選択・オートフィル・充実した右クリックメニュー**: 複数セル範囲選択（外周枠線＆合計/平均/個数表示）、右下角 `+` ドラッグ／ダブルクリックのオートフィル（スマートタグ付き）、切り取り（`⌘X`）・コピー（`⌘C`）・計算結果をコピー・貼り付け（`⌘V`・数式相対参照シフト対応）・値のみ貼り付け・行/列の挿入と削除（数式参照自動調整付き）に対応しました。
 - **専用ライブプレビューの拡充**: JSON / YAML / TOML / `.env` / CSS / Diff / HTTP / Log / OpenAPI / Mermaid 図表 / LaTeX / SVG の専用ライブプレビューを整備しました。
+
+</details>
 
 <details>
 <summary>以前のリリース: v1.5.5</summary>

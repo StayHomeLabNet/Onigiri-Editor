@@ -10,6 +10,11 @@ import type {
   GitHeadFileResult,
   GitPanelState,
   GitStatusResult,
+  HarnessEventPayload,
+  HarnessPermissionMode,
+  HarnessStorageSummary,
+  HarnessThread,
+  HarnessTimelineEntry,
   ImageAssetPayload,
   Locale,
   MigrateTempImagesResult,
@@ -1523,6 +1528,138 @@ export async function listenTerminalExit(
   try {
     const { listen } = await import('@tauri-apps/api/event');
     return await listen<TerminalExitEvent>('terminal-exit', (ev) => {
+      handler(ev.payload);
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+export async function harnessListThreads(): Promise<HarnessThread[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HarnessThread[]>('harness_list_threads');
+}
+
+export async function harnessCreateThread(request: {
+  title?: string;
+  workspaceRoot: string;
+  provider: string;
+  model: string;
+  permissionMode?: HarnessPermissionMode;
+}): Promise<HarnessThread> {
+  if (!isTauri()) {
+    throw new Error('AI Harness requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HarnessThread>('harness_create_thread', { request });
+}
+
+export async function harnessUpdateThread(request: {
+  threadId: string;
+  title?: string;
+  provider?: string;
+  model?: string;
+  permissionMode?: HarnessPermissionMode;
+  unread?: boolean;
+}): Promise<HarnessThread> {
+  if (!isTauri()) {
+    throw new Error('AI Harness requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HarnessThread>('harness_update_thread', { request });
+}
+
+export async function harnessDeleteThread(threadId: string): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('harness_delete_thread', { threadId });
+}
+
+export async function harnessGetTimeline(threadId: string): Promise<HarnessTimelineEntry[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HarnessTimelineEntry[]>('harness_get_timeline', { threadId });
+}
+
+export async function harnessSendMessage(request: {
+  threadId: string;
+  content: string;
+  provider?: string;
+  model?: string;
+  permissionMode?: HarnessPermissionMode;
+  apiKey?: string;
+  baseUrl?: string;
+  customCliCmd?: string;
+  systemPromptExtra?: string;
+  contextFiles?: string[];
+  dirtyPaths?: string[];
+  images?: Array<{ path: string; name: string; mimeType: string; base64: string }>;
+  executePlanEntryId?: string;
+}): Promise<HarnessThread> {
+  if (!isTauri()) {
+    throw new Error('AI Harness requires the desktop application');
+  }
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HarnessThread>('harness_send_message', { request });
+}
+
+export async function harnessCancelTurn(threadId: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('harness_cancel_turn', { threadId });
+}
+
+export async function harnessRespondApproval(
+  approvalId: string,
+  decision: 'allow' | 'allow_session' | 'deny'
+): Promise<boolean> {
+  if (!isTauri()) return false;
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('harness_respond_approval', { approvalId, decision });
+}
+
+export async function harnessRevertTurn(
+  threadId: string,
+  diffEntryId: string
+): Promise<string[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<string[]>('harness_revert_turn', { threadId, diffEntryId });
+}
+
+export async function harnessAcceptTurn(
+  threadId: string,
+  diffEntryId: string
+): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('harness_accept_turn', { threadId, diffEntryId });
+}
+
+export async function harnessGetStorageSummary(): Promise<HarnessStorageSummary> {
+  if (!isTauri()) return { threadCount: 0, totalBytes: 0 };
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<HarnessStorageSummary>('harness_get_storage_summary');
+  } catch {
+    return { threadCount: 0, totalBytes: 0 };
+  }
+}
+
+export async function harnessClearData(): Promise<HarnessStorageSummary> {
+  if (!isTauri()) return { threadCount: 0, totalBytes: 0 };
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<HarnessStorageSummary>('harness_clear_data');
+}
+
+export async function listenHarnessEvents(
+  handler: (event: HarnessEventPayload) => void
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<HarnessEventPayload>('harness-event', (ev) => {
       handler(ev.payload);
     });
   } catch {

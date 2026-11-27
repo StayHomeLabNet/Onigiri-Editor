@@ -1,6 +1,7 @@
 mod ai;
 mod apple_fm;
 mod browser;
+mod harness;
 mod images;
 mod live_preview;
 mod menu;
@@ -372,9 +373,9 @@ pub(crate) fn should_skip_dir(name: &str) -> bool {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DecodedTextFile {
-    content: String,
-    encoding: String,
-    eol: String,
+    pub(crate) content: String,
+    pub(crate) encoding: String,
+    pub(crate) eol: String,
 }
 
 fn normalize_encoding_id(raw: &str) -> Option<&'static str> {
@@ -500,7 +501,7 @@ pub(crate) fn decode_bytes_with_encoding(
     })
 }
 
-fn encode_text_with_encoding(content: &str, encoding: Option<&str>) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_text_with_encoding(content: &str, encoding: Option<&str>) -> Result<Vec<u8>, String> {
     let normalized = match encoding {
         Some(raw) if !raw.trim().is_empty() => normalize_encoding_id(raw)
             .ok_or_else(|| format!("Unsupported encoding: {}", raw))?,
@@ -3075,6 +3076,7 @@ pub fn run() {
         .manage(project::ProjectServerState::new())
         .manage(window_state::WindowStateManager::new())
         .manage(ai::AiChatState::new())
+        .manage(harness::HarnessState::new())
         .manage(terminal::TerminalState::new())
         .manage(updates::UpdateManagerState::new())
         .setup(|app| {
@@ -3144,6 +3146,18 @@ pub fn run() {
             ai::assist_ai_connection,
             ai::ai_chat,
             ai::cancel_ai_chat,
+            harness::harness_list_threads,
+            harness::harness_create_thread,
+            harness::harness_update_thread,
+            harness::harness_delete_thread,
+            harness::harness_get_timeline,
+            harness::harness_send_message,
+            harness::harness_cancel_turn,
+            harness::harness_respond_approval,
+            harness::harness_revert_turn,
+            harness::harness_accept_turn,
+            harness::harness_get_storage_summary,
+            harness::harness_clear_data,
             menu::rebuild_app_menu,
             browser::browser_open_or_update,
             browser::browser_set_bounds,

@@ -5,7 +5,7 @@ export const AI_AUDIT_LOG_STORAGE_KEY = 'onigiri-markdown.ai-audit-log.v1';
 const MAX_AUDIT_ENTRIES = 80;
 const AUDIT_EVENT_NAME = 'onigiri:ai-audit-log-updated';
 
-export type AiAuditSource = 'chat' | 'inline-edit' | 'custom-button' | 'review';
+export type AiAuditSource = 'chat' | 'inline-edit' | 'custom-button' | 'review' | 'harness';
 
 export interface AiAuditEntry {
   id: string;

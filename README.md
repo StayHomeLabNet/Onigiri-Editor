@@ -11,13 +11,13 @@
     <a href="#key-features">Key Features</a> ・
     <a href="#requirements">Requirements</a> ・
     <a href="#build">Build</a> ・
-    <a href="#whats-new-in-v156">What's New in v1.5.6</a> ・
+    <a href="#whats-new-in-v200">What's New in v2.0.0</a> ・
     <a href="#quick-start">Quick Start</a> ・
     <a href="#downloads">Downloads</a> ・
     <a href="#license">License</a>
   </p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.5.6-blue" alt="version" />
+    <img src="https://img.shields.io/badge/version-2.0.0-blue" alt="version" />
     <img src="https://img.shields.io/badge/license-MIT-green" alt="license" />
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-orange" alt="platform" />
     <img src="https://img.shields.io/badge/framework-Tauri%20v2-purple" alt="framework" />
@@ -39,7 +39,7 @@
 
 On first launch, it automatically detects the OS language across **8 supported languages** (**English**, **日本語**, **简体中文**, **繁體中文**, **한국어**, **Español**, **Français**, **Deutsch**) and switches both the UI and the native application menu bar accordingly.
 
-Current version: `v1.5.6`
+Current version: `v2.0.0`
 
 ## Key Features
 
@@ -100,7 +100,17 @@ npx tsc --noEmit && npm run build
 cargo test --manifest-path "src-tauri/Cargo.toml"
 ```
 
-## What's New in v1.5.6
+## What's New in v2.0.0
+
+- **AI Harness Mode (`AI Harness` ⇄ `Editor`)**:
+  - **Thread-Centric Agentic Workspace**: Run multi-step AI tasks per project folder across persistent threads with live thinking process, proposed execution plans (`Execute This Plan`), and interactive approval gates (`Allow` / `Allow for Turn` / `Deny`).
+  - **4 Permission Modes & Turn Rollback**: Switch between **Plan (Read-only)**, **Approve Edits**, **Auto-Edit**, and **Full Access**; automatically snapshots changed files per turn with dirty-editor conflict warnings and 1-click **`Keep Changes`** / **`Revert This Turn`**.
+  - **Live Workbench Pane**: Inspect **Preview**, **Diff**, **Files**, and **Browser** tabs alongside the agent timeline across CLI (Codex, Claude, Gemini, Antigravity) and Cloud API / local LLM runners.
+- **CSV / TSV Spreadsheet Undo/Redo & Zen Mode Polish**:
+  - Added full **Undo (`⌘Z` / `Ctrl+Z`) / Redo (`⇧⌘Z` / `Ctrl+Y`)** history across cell edits, AutoFill, paste, cut, and row/column operations (via shortcuts, right-click menu, and the native **Edit** menu), auto-selected initial cell on table load, and fixed Zen Mode exit button overlap with the **External Browser** button.
+
+<details>
+<summary>Previous release: v1.5.6</summary>
 
 - **Excel-Like Spreadsheet Editing & Formula Engine (CSV / TSV)**:
   - **Direct Cell Typing & Keyboard Navigation**: Type directly (including CJK/IME) into any selected cell without double-clicking; navigate with `Enter` / `Shift+Enter`, `Tab` / `Shift+Tab`, `Arrow` keys, `F2`, and `Escape`.
@@ -108,6 +118,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Formula Pointing Mode**: Click another cell while entering a `=` formula to insert `B2`, or drag across cells to insert `B2:D2`, with live reference highlights.
   - **Range Selection, AutoFill & Rich Context Menu**: Drag-select ranges with live `Σ / Avg / Count` stats, AutoFill handle (`+` drag / double-click with smart tag options), Cut/Copy/Copy Value/Paste (with relative formula shifting)/Paste Values Only, and Row/Column Insert & Delete (auto-adjusting formulas).
 - **Expanded Specialized Live Previews**: Dedicated live preview panes for JSON, YAML/TOML, `.env`, CSS, Diff, HTTP, Logs, OpenAPI, Mermaid/Diagrams, LaTeX, and SVG.
+
+</details>
 
 <details>
 <summary>Previous release: v1.5.5</summary>
