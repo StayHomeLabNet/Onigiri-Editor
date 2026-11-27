@@ -268,6 +268,20 @@ export const DataPreviewPane: React.FC<DataPreviewPaneProps> = ({
     strEnd: number;
     target: 'cell' | 'formulaBar';
   } | null>(null);
+  const historyRef = useRef<{
+    undoStack: Array<{
+      content: string;
+      selection: { anchor: { row: number; col: number }; focus: { row: number; col: number } } | null;
+    }>;
+    redoStack: Array<{
+      content: string;
+      selection: { anchor: { row: number; col: number }; focus: { row: number; col: number } } | null;
+    }>;
+  }>({ undoStack: [], redoStack: [] });
+  const undoRedoHandlerRef = useRef<{ undo: () => boolean; redo: () => boolean }>({
+    undo: () => false,
+    redo: () => false,
+  });
   const [tableScrollTop, setTableScrollTop] = useState(0);
   const [tableViewportH, setTableViewportH] = useState(600);
   const [rawScrollTop, setRawScrollTop] = useState(0);
@@ -384,6 +398,26 @@ export const DataPreviewPane: React.FC<DataPreviewPaneProps> = ({
     ro.observe(el);
     return () => ro.disconnect();
   }, [viewMode, parsed.headers.length]);
+
+  // Initialize default grid selection when table loads so arrow keys & direct typing work immediately
+  useEffect(() => {
+    if (viewMode !== 'table' || parsed.headers.length === 0 || gridSelection !== null) return;
+    const initRow = parsed.rows.length > 0 ? 1 : 0;
+    const rawVal =
+      initRow === 0
+        ? parsed.headers[0]?.value ?? ''
+        : parsed.rows[0]?.[0]?.value ?? '';
+    const evalCell = evaluatedGrid.rows[initRow]?.[0];
+    setGridSelection({ anchor: { row: initRow, col: 0 }, focus: { row: initRow, col: 0 } });
+    setActiveFormulaCell({
+      coord: `${colIndexToLetters(0)}${initRow + 1}`,
+      row: initRow,
+      col: 0,
+      value: rawVal,
+      display: evalCell?.isFormula ? evalCell.display : rawVal,
+    });
+    setFormulaBarText(rawVal);
+  }, [viewMode, parsed.headers.length, parsed.rows.length, gridSelection]);
 
   // Clear preview-side active cell marker when editor selection changes
   useEffect(() => {
@@ -595,6 +629,75 @@ export const DataPreviewPane: React.FC<DataPreviewPaneProps> = ({
     return [headerRaw, ...bodyRaw];
   };
 
+  const commitNextContent = (nextContent: string) => {
+    if (!onUpdateContent || nextContent === content) return;
+    historyRef.current.undoStack.push({
+      content,
+      selection: gridSelection
+        ? { anchor: { ...gridSelection.anchor }, focus: { ...gridSelection.focus } }
+        : null,
+    });
+    if (historyRef.current.undoStack.length > 100) {
+      historyRef.current.undoStack.shift();
+    }
+    historyRef.current.redoStack = [];
+    onUpdateContent(nextContent);
+  };
+
+  const performUndo = (): boolean => {
+    if (!onUpdateContent) return false;
+    const entry = historyRef.current.undoStack.pop();
+    if (!entry) return false;
+    historyRef.current.redoStack.push({
+      content,
+      selection: gridSelection
+        ? { anchor: { ...gridSelection.anchor }, focus: { ...gridSelection.focus } }
+        : null,
+    });
+    setEditingCell(null);
+    setAutoFillSmartTag(null);
+    onUpdateContent(entry.content);
+    if (entry.selection) {
+      setGridSelection(entry.selection);
+    }
+    return true;
+  };
+
+  const performRedo = (): boolean => {
+    if (!onUpdateContent) return false;
+    const entry = historyRef.current.redoStack.pop();
+    if (!entry) return false;
+    historyRef.current.undoStack.push({
+      content,
+      selection: gridSelection
+        ? { anchor: { ...gridSelection.anchor }, focus: { ...gridSelection.focus } }
+        : null,
+    });
+    setEditingCell(null);
+    setAutoFillSmartTag(null);
+    onUpdateContent(entry.content);
+    if (entry.selection) {
+      setGridSelection(entry.selection);
+    }
+    return true;
+  };
+
+  undoRedoHandlerRef.current = { undo: performUndo, redo: performRedo };
+
+  useEffect(() => {
+    historyRef.current = { undoStack: [], redoStack: [] };
+  }, [fileName]);
+
+  useEffect(() => {
+    const onMenuUndoRedo = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ kind?: 'undo' | 'redo' }>).detail;
+      if (detail?.kind === 'undo') undoRedoHandlerRef.current.undo();
+      else if (detail?.kind === 'redo') undoRedoHandlerRef.current.redo();
+    };
+    window.addEventListener('onigiri-data-undo', onMenuUndoRedo);
+    return () => window.removeEventListener('onigiri-data-undo', onMenuUndoRedo);
+  }, []);
+
   const commitGridMatrix = (matrix: string[][]) => {
     if (!onUpdateContent || matrix.length === 0) return;
     const delim =
@@ -602,9 +705,7 @@ export const DataPreviewPane: React.FC<DataPreviewPaneProps> = ({
         ? delimiterOverride
         : parsed.delimiter || (isTsv ? '\t' : ',');
     const nextContent = tableRowsToDelimited(matrix[0] || [], matrix.slice(1), delim);
-    if (nextContent !== content) {
-      onUpdateContent(nextContent);
-    }
+    commitNextContent(nextContent);
   };
 
   const commitFormulaBarEdit = () => {
@@ -1304,6 +1405,20 @@ export const DataPreviewPane: React.FC<DataPreviewPaneProps> = ({
       commitGridMatrix(matrix);
       return;
     }
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && onUpdateContent) {
+      e.preventDefault();
+      performUndo();
+      return;
+    }
+    if (
+      (((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'z') ||
+        ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'y')) &&
+      onUpdateContent
+    ) {
+      e.preventDefault();
+      performRedo();
+      return;
+    }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c' && selectionBounds) {
       e.preventDefault();
       await copySelectionRange(false);
@@ -1472,13 +1587,13 @@ export const DataPreviewPane: React.FC<DataPreviewPaneProps> = ({
     const lines = new Array(rCount).fill(emptyRow).join('\n');
     setShowInsertTable(false);
     if (content.trim().length === 0 && onUpdateContent) {
-      onUpdateContent(lines);
+      commitNextContent(lines);
     } else if (onInsertToEditor) {
       const prefix = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
       onInsertToEditor(`${prefix}${lines}`);
     } else if (onUpdateContent) {
       const prefix = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
-      onUpdateContent(`${content}${prefix}${lines}`);
+      commitNextContent(`${content}${prefix}${lines}`);
     }
   };
 
@@ -2464,10 +2579,35 @@ export const DataPreviewPane: React.FC<DataPreviewPaneProps> = ({
               onClick={(e) => e.stopPropagation()}
             >
               {onUpdateContent && (
-                <button type="button" onClick={() => applyRowColAction('cut')}>
-                  <span>{isJa ? '切り取り' : 'Cut'}</span>
-                  <span className="data-ctx-shortcut">⌘X</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    disabled={historyRef.current.undoStack.length === 0}
+                    onClick={() => {
+                      setCellCtxMenu(null);
+                      performUndo();
+                    }}
+                  >
+                    <span>{isJa ? '元に戻す' : 'Undo'}</span>
+                    <span className="data-ctx-shortcut">⌘Z</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={historyRef.current.redoStack.length === 0}
+                    onClick={() => {
+                      setCellCtxMenu(null);
+                      performRedo();
+                    }}
+                  >
+                    <span>{isJa ? 'やり直し' : 'Redo'}</span>
+                    <span className="data-ctx-shortcut">⇧⌘Z</span>
+                  </button>
+                  <hr />
+                  <button type="button" onClick={() => applyRowColAction('cut')}>
+                    <span>{isJa ? '切り取り' : 'Cut'}</span>
+                    <span className="data-ctx-shortcut">⌘X</span>
+                  </button>
+                </>
               )}
               <button type="button" onClick={() => applyRowColAction('copy')}>
                 <span>{isJa ? 'コピー' : 'Copy'}</span>

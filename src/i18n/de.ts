@@ -3,11 +3,27 @@ import type { Translations } from './types';
 
 export const de: DeepPartial<Translations> = {
   appName: 'Onigiri Editor',
-  versionLabel: 'v1.5.6',
+  versionLabel: 'v2.0.0',
   modes: {
     simple: 'Einfach',
     basic: 'Standard',
     advanced: 'Erweitert',
+  },
+  harness: {
+    modeLabel: 'AI Harness',
+    editorLabel: 'Editor',
+    newThread: 'Neuer Thread',
+    threadsHeading: 'Threads',
+    permPlan: 'Plan (Schreibgeschützt)',
+    permApprove: 'Änderungen bestätigen',
+    permAuto: 'Auto-Bearbeiten',
+    permFull: 'Vollzugriff',
+    executePlanBtn: 'Diesen Plan ausführen',
+    diffCardTitle: 'Geänderte Dateien',
+    acceptChangesBtn: 'Änderungen behalten',
+    revertTurnBtn: 'Diesen Schritt rückgängig machen',
+    openInEditorBtn: 'Im Editor öffnen',
+    sendToHarnessBtn: 'In AI Harness fortsetzen',
   },
   layouts: {
     editor: 'Editor',

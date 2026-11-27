@@ -67,6 +67,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
         mode_simple: &'static str,
         mode_basic: &'static str,
         mode_adv: &'static str,
+        mode_harness: &'static str,
         top_bar: &'static str,
         format_toolbar: &'static str,
         editor_split: &'static str,
@@ -129,6 +130,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "シンプルモード",
             mode_basic: "標準モード",
             mode_adv: "拡張モード",
+            mode_harness: "AIハーネス",
             top_bar: "上部ヘッダーバーを表示",
             format_toolbar: "書式ツールバーを表示",
             editor_split: "エディタを上下に分割表示",
@@ -189,6 +191,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "简洁模式",
             mode_basic: "标准模式",
             mode_adv: "高级模式",
+            mode_harness: "AI Harness",
             top_bar: "显示顶部标题栏",
             format_toolbar: "显示格式工具栏",
             editor_split: "上下拆分编辑器",
@@ -249,6 +252,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "簡潔模式",
             mode_basic: "標準模式",
             mode_adv: "進階模式",
+            mode_harness: "AI Harness",
             top_bar: "顯示頂部標題列",
             format_toolbar: "顯示格式工具列",
             editor_split: "上下分割編輯器",
@@ -309,6 +313,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "심플 모드",
             mode_basic: "기본 모드",
             mode_adv: "고급 모드",
+            mode_harness: "AI 하네스",
             top_bar: "상단 헤더 바 표시",
             format_toolbar: "서식 도구 모음 표시",
             editor_split: "편집기 위/아래 분할",
@@ -369,6 +374,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "Modo Simple",
             mode_basic: "Modo Básico",
             mode_adv: "Modo Avanzado",
+            mode_harness: "AI Harness",
             top_bar: "Mostrar barra superior",
             format_toolbar: "Mostrar barra de formato",
             editor_split: "Dividir editor arriba / abajo",
@@ -429,6 +435,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "Mode Simple",
             mode_basic: "Mode Standard",
             mode_adv: "Mode Avancé",
+            mode_harness: "AI Harness",
             top_bar: "Afficher la barre d'en-tête",
             format_toolbar: "Afficher la barre de mise en forme",
             editor_split: "Fractionner l'éditeur haut / bas",
@@ -489,6 +496,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "Einfacher Modus",
             mode_basic: "Standardmodus",
             mode_adv: "Erweiterter Modus",
+            mode_harness: "AI Harness",
             top_bar: "Kopfzeile anzeigen",
             format_toolbar: "Formatierungsleiste anzeigen",
             editor_split: "Editor oben / unten teilen",
@@ -549,6 +557,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
             mode_simple: "Simple Mode",
             mode_basic: "Basic Mode",
             mode_adv: "Advanced Mode",
+            mode_harness: "AI Harness",
             top_bar: "Show Header Bar",
             format_toolbar: "Show Format Toolbar",
             editor_split: "Split Editor Top / Bottom",
@@ -613,6 +622,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
     let mode_simple_label = lbl.mode_simple;
     let mode_basic_label = lbl.mode_basic;
     let mode_adv_label = lbl.mode_adv;
+    let mode_harness_label = lbl.mode_harness;
     let top_bar_label = lbl.top_bar;
     let format_toolbar_label = lbl.format_toolbar;
     let editor_split_label = lbl.editor_split;
@@ -743,6 +753,9 @@ pub fn build_app_menu_with_state<R: Runtime>(
     let view_simple = MenuItemBuilder::with_id("mode-simple", mode_simple_label).build(app)?;
     let view_basic = MenuItemBuilder::with_id("mode-basic", mode_basic_label).build(app)?;
     let view_adv = MenuItemBuilder::with_id("mode-advanced", mode_adv_label).build(app)?;
+    let view_harness = MenuItemBuilder::with_id("toggle-harness", mode_harness_label)
+        .accelerator("CmdOrCtrl+Shift+H")
+        .build(app)?;
     let view_top_bar = CheckMenuItemBuilder::with_id("toggle-top-bar", top_bar_label)
         .checked(show_top_bar)
         .build(app)?;
@@ -835,6 +848,7 @@ pub fn build_app_menu_with_state<R: Runtime>(
         .item(&view_simple)
         .item(&view_basic)
         .item(&view_adv)
+        .item(&view_harness)
         .separator()
         .item(&view_top_bar)
         .item(&view_format_toolbar)

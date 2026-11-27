@@ -102,6 +102,9 @@ interface TopBarProps {
   updateAvailableVersion?: string | null;
   updateReadyToInstall?: boolean;
   onOpenUpdateModal?: () => void;
+  onEnterHarness?: () => void;
+  harnessRunning?: boolean;
+  harnessUnread?: boolean;
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
@@ -152,6 +155,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   updateAvailableVersion,
   updateReadyToInstall,
   onOpenUpdateModal,
+  onEnterHarness,
+  harnessRunning,
+  harnessUnread,
 }) => {
   const isMac = isMacOs();
   const topbarRef = useRef<HTMLElement>(null);
@@ -526,6 +532,25 @@ export const TopBar: React.FC<TopBarProps> = ({
             {t.modes.advanced}
           </button>
         </div>
+
+        {onEnterHarness && (
+          <button
+            type="button"
+            className="topbar-harness-jump-btn"
+            onClick={onEnterHarness}
+            data-tooltip={t.harness.modeHint}
+            data-tooltip-shortcut={formatShortcut('⌘⇧H')}
+            aria-label={t.harness.modeLabel}
+          >
+            <Bot size={14} />
+            <span className="topbar-layout-label">{t.harness.modeLabel}</span>
+            {(harnessRunning || harnessUnread) && (
+              <span
+                className={`topbar-harness-badge-dot ${harnessRunning ? 'is-running' : ''}`}
+              />
+            )}
+          </button>
+        )}
 
         {mode !== 'simple' && (
           <div className="segmented-control layout-switch" ref={layoutSwitchRef}>

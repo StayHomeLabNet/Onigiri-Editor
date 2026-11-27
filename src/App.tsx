@@ -45,6 +45,7 @@ import type {
   ViewLayout,
   WorkspaceEntry,
   WorkspaceNoteIndexEntry,
+  WorkspaceSurface,
 } from './types';
 import { decodeBytesBrowser, getEncodingShortLabel } from './utils/encodings';
 import { detectInitialLocale, getTranslations, hasSavedLocalePreference } from './i18n';
@@ -287,7 +288,10 @@ function formatErrorMessage(err: unknown): string {
 }
 
 import { shouldShowAutoUpdateNotification } from './components/UpdateModal';
+import { HarnessTopBar } from './components/harness/HarnessTopBar';
+import { HarnessWorkspace } from './components/harness/HarnessWorkspace';
 import { useAppUpdates } from './hooks/useAppUpdates';
+import { useHarness } from './hooks/useHarness';
 import { useProjectServer } from './hooks/useProjectServer';
 
 const ONLINE_MANUAL_URL = 'https://stayhomelab.net/help/onigiri-editor/';
@@ -4796,6 +4800,60 @@ export function App() {
     setShowSettings(true);
   }, []);
 
+  const [workspaceSurface, setWorkspaceSurfaceState] = useState<WorkspaceSurface>(() => {
+    try {
+      const saved = localStorage.getItem('onigiri-markdown.surface');
+      return saved === 'harness' && isTauri() ? 'harness' : 'editor';
+    } catch {
+      return 'editor';
+    }
+  });
+  const [showHarnessSidebar, setShowHarnessSidebar] = useState(true);
+  const [showHarnessWorkbench, setShowHarnessWorkbench] = useState(true);
+  const [harnessInitialDraft, setHarnessInitialDraft] = useState('');
+
+  const handleSurfaceChange = useCallback((next: WorkspaceSurface) => {
+    void browserClose().catch(() => {});
+    setWorkspaceSurfaceState(next);
+    try {
+      localStorage.setItem('onigiri-markdown.surface', next);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const dirtyFilePaths = useMemo(
+    () =>
+      tabs
+        .filter((tb) => tb.dirty && tb.filePath)
+        .map((tb) => tb.filePath as string),
+    [tabs]
+  );
+
+  const harness = useHarness({
+    aiConfig,
+    settings: effectiveSettings,
+    dirtyFilePaths,
+    onWorkspaceFilesChanged: (wsRoot) => {
+      void syncOpenTabsWithDisk();
+      if (workspaceRoot && wsRoot === workspaceRoot) {
+        void refreshWorkspace(workspaceRoot);
+      }
+    },
+  });
+
+  const harnessRunning = useMemo(
+    () =>
+      harness.threads.some(
+        (th) => th.status === 'running' || th.status === 'waiting_approval'
+      ),
+    [harness.threads]
+  );
+  const harnessUnread = useMemo(
+    () => harness.threads.some((th) => th.unread),
+    [harness.threads]
+  );
+
   const storedDataSummary = useMemo<StoredDataSummary>(() => {
     if (!showSettings) {
       return {
@@ -4813,7 +4871,7 @@ export function App() {
       workspaceSessionCount: Object.keys(loadWorkspaceSessionsMap()).length,
       recentFileCount: recentFiles.length,
       recentFolderCount: recentFolders.length,
-      aiThreadCount: countSavedAiThreadEntries(),
+      aiThreadCount: countSavedAiThreadEntries() + harness.threads.length,
       customSnippetCount: customSnippets.length,
       customTemplateCount: loadCustomTemplates().length,
       macroStepCount: macroSteps.length,
@@ -4827,15 +4885,28 @@ export function App() {
     customSnippets.length,
     macroSteps.length,
     tabs,
+    harness.threads.length,
   ]);
 
   // Dynamic shortcut command handlers (kept fresh via ref every render)
   const shortcutHandlersRef = useRef<Record<string, () => void>>({});
   shortcutHandlersRef.current = {
     // Mode
-    'mode-simple': () => handleModeChange('simple'),
-    'mode-basic': () => handleModeChange('basic'),
-    'mode-advanced': () => handleModeChange('advanced'),
+    'mode-simple': () => {
+      handleSurfaceChange('editor');
+      handleModeChange('simple');
+    },
+    'mode-basic': () => {
+      handleSurfaceChange('editor');
+      handleModeChange('basic');
+    },
+    'mode-advanced': () => {
+      handleSurfaceChange('editor');
+      handleModeChange('advanced');
+    },
+    'toggle-harness': () => {
+      handleSurfaceChange(workspaceSurface === 'harness' ? 'editor' : 'harness');
+    },
     'cycle-mode': () => {
       const nextMode: AppMode =
         mode === 'simple' ? 'basic' : mode === 'basic' ? 'advanced' : 'simple';
@@ -5230,6 +5301,10 @@ export function App() {
       document.execCommand(kind);
       return;
     }
+    if (activeEl?.closest('.data-preview-pane')) {
+      window.dispatchEvent(new CustomEvent('onigiri-data-undo', { detail: { kind } }));
+      return;
+    }
     handleToolbarAction(kind);
   };
 
@@ -5269,7 +5344,13 @@ export function App() {
     },
     'mode-simple': () => handleModeChange('simple'),
     'mode-basic': () => handleModeChange('basic'),
-    'mode-advanced': () => handleModeChange('advanced'),
+    'mode-advanced': () => {
+      handleSurfaceChange('editor');
+      handleModeChange('advanced');
+    },
+    'toggle-harness': () => {
+      handleSurfaceChange(workspaceSurface === 'harness' ? 'editor' : 'harness');
+    },
     'quick-open': () => setShowQuickOpen((v) => !v),
     palette: () => setShowPalette((v) => !v),
     'toggle-top-bar': handleToggleTopBar,
@@ -5373,7 +5454,18 @@ export function App() {
         category: 'Mode',
         label: t.modes.advanced,
         shortcut: shortcutDisplay('mode-advanced'),
-        action: () => handleModeChange('advanced'),
+        action: () => {
+          handleSurfaceChange('editor');
+          handleModeChange('advanced');
+        },
+      },
+      {
+        id: 'toggle-harness',
+        category: 'Mode',
+        label: t.harness.modeLabel,
+        shortcut: shortcutDisplay('toggle-harness'),
+        action: () =>
+          handleSurfaceChange(workspaceSurface === 'harness' ? 'editor' : 'harness'),
       },
       {
         id: 'toggle-top-bar',
@@ -6335,6 +6427,122 @@ export function App() {
       }}
       onDrop={handleHtmlDrop}
     >
+      {workspaceSurface === 'harness' ? (
+        <>
+          <HarnessTopBar
+            t={t}
+            surface={workspaceSurface}
+            onSurfaceChange={handleSurfaceChange}
+            workspaceRoot={harness.activeThread?.workspaceRoot || workspaceRoot}
+            branch={harness.activeThread?.branch || gitBranch}
+            onChooseFolder={handleOpenFolder}
+            showSidebar={showHarnessSidebar}
+            onToggleSidebar={() => setShowHarnessSidebar((v) => !v)}
+            showWorkbench={showHarnessWorkbench}
+            onToggleWorkbench={() => setShowHarnessWorkbench((v) => !v)}
+            showTerminal={showTerminal}
+            onToggleTerminal={() => setShowTerminal((v) => !v)}
+            theme={theme}
+            onThemeChange={setTheme}
+            locale={locale}
+            onLocaleChange={setLocale}
+            onOpenSettings={() => openSettingsModal('general')}
+            onOpenAbout={() => setShowAbout(true)}
+          />
+          <HarnessWorkspace
+            t={t}
+            locale={locale}
+            theme={theme}
+            settings={effectiveSettings}
+            aiConfig={aiConfig}
+            onAiConfigChange={setAiConfig}
+            workspaceRoot={workspaceRoot}
+            workspaceEntries={workspaceEntries}
+            activeEditorFilePath={activeTab.filePath}
+            activeEditorFileTitle={activeTab.title}
+            showSidebar={showHarnessSidebar}
+            showWorkbench={showHarnessWorkbench}
+            onShowWorkbenchChange={setShowHarnessWorkbench}
+            threads={harness.threads}
+            activeThread={harness.activeThread}
+            activeTimeline={harness.activeTimeline}
+            capabilities={harness.capabilities}
+            initialDraft={harnessInitialDraft}
+            onClearInitialDraft={() => setHarnessInitialDraft('')}
+            modalOverlayOpen={
+              showSettings ||
+              showAbout ||
+              showPalette ||
+              showQuickOpen ||
+              showUpdateModal ||
+              Boolean(folderSwitchGuardMode)
+            }
+            projectInfo={projectInfo}
+            projectServer={projectServer}
+            onChooseFolder={handleOpenFolder}
+            onUseCurrentFileFolder={
+              activeTab.filePath
+                ? () => {
+                    const fp = activeTab.filePath as string;
+                    const sepIdx = Math.max(fp.lastIndexOf('/'), fp.lastIndexOf('\\'));
+                    if (sepIdx > 0) {
+                      void openWorkspaceFolderPath(fp.slice(0, sepIdx));
+                    }
+                  }
+                : undefined
+            }
+            onSelectThread={(tid) => {
+              harness.selectThread(tid);
+              const target = harness.threads.find((th) => th.id === tid);
+              if (target?.workspaceRoot && target.workspaceRoot !== workspaceRoot) {
+                void openWorkspaceFolderPath(target.workspaceRoot);
+              }
+            }}
+            onCreateThread={() => {
+              const root = harness.activeThread?.workspaceRoot || workspaceRoot;
+              if (root) {
+                void harness
+                  .createNewThread(root, { title: t.harness.newThread })
+                  .catch((err) => notify(formatErrorMessage(err)));
+              }
+            }}
+            onDeleteThread={(tid) => {
+              void harness.removeThread(tid).catch((err) => notify(formatErrorMessage(err)));
+            }}
+            onUpdateThreadSettings={harness.updateThreadSettings}
+            onSendPrompt={harness.sendPrompt}
+            onCancelTurn={harness.cancelTurn}
+            onRespondApproval={harness.respondApproval}
+            onAcceptTurn={harness.acceptTurn}
+            onRevertTurn={harness.revertTurn}
+            onOpenFileInEditor={(fp) => {
+              void openPathInTab(fp);
+              handleSurfaceChange('editor');
+            }}
+            onCopyText={(txt) => {
+              void writeClipboardText(txt);
+              notify(t.toasts.copiedMarkdown);
+            }}
+            onNotify={notify}
+          />
+          {(settings.integratedTerminalEnabled ?? true) && (
+            <TerminalDrawer
+              open={showTerminal}
+              locale={locale}
+              initialCwd={harness.activeThread?.workspaceRoot || workspaceRoot}
+              onAskAi={(errSnippet) => {
+                const prompt =
+                  locale === 'ja'
+                    ? `以下のターミナル出力のエラー原因と修正方法を調査して対応してください：\n\n\`\`\`\n${errSnippet}\n\`\`\``
+                    : `Diagnose and fix the error in the following terminal output:\n\n\`\`\`\n${errSnippet}\n\`\`\``;
+                setHarnessInitialDraft(prompt);
+              }}
+              onClose={() => setShowTerminal(false)}
+            />
+          )}
+        </>
+      ) : (
+        <>
       {!zenMode && (
         <>
           {isTopBarVisible && (
@@ -6386,6 +6594,9 @@ export function App() {
               updateAvailableVersion={updateInfo?.hasUpdate ? updateInfo.latestVersion : null}
               updateReadyToInstall={Boolean(downloadedUpdate)}
               onOpenUpdateModal={() => setShowUpdateModal(true)}
+              onEnterHarness={() => handleSurfaceChange('harness')}
+              harnessRunning={harnessRunning}
+              harnessUnread={harnessUnread}
             />
           )}
           {isFormatToolbarVisible && (
@@ -7631,6 +7842,10 @@ export function App() {
             onJumpToLine={(ln) => handleGoToLine(ln)}
             onApplyReviewFix={handleApplyReviewFix}
             onOpenFullSettings={() => openSettingsModal('general')}
+            onSendToHarness={(draft) => {
+              if (draft) setHarnessInitialDraft(draft);
+              handleSurfaceChange('harness');
+            }}
           />
         )}
       </div>
@@ -7708,6 +7923,8 @@ export function App() {
           terminalOpen={showTerminal}
           onToggleTerminal={() => setShowTerminal((v) => !v)}
         />
+      )}
+        </>
       )}
 
       <AppModals

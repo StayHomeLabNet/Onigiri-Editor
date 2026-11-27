@@ -25,6 +25,7 @@ import { MACRO_STORAGE_KEY } from '../utils/macro';
 import {
   clearAppCaches,
   getOsLocale,
+  harnessClearData,
   isMacOs,
   isTauri,
   readFileByPath,
@@ -468,6 +469,11 @@ export function useBackupAndReset({
       if (selection.aiThreads) {
         try {
           localStorage.removeItem(AI_THREADS_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+        try {
+          await harnessClearData();
         } catch {
           // ignore
         }

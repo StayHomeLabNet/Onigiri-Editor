@@ -1,4 +1,13 @@
 export type AppMode = 'simple' | 'basic' | 'advanced';
+export type WorkspaceSurface = 'editor' | 'harness';
+export type HarnessPermissionMode = 'plan' | 'approve-edits' | 'auto-edits' | 'full-access';
+export type HarnessThreadStatus =
+  | 'idle'
+  | 'running'
+  | 'waiting_approval'
+  | 'completed'
+  | 'error'
+  | 'cancelled';
 export type ViewLayout = 'split' | 'editor' | 'preview';
 export type RightPaneMode = 'markdown' | 'browser';
 export type ThemeId = 'light' | 'dark' | 'sepia' | 'midnight';
@@ -713,3 +722,128 @@ export interface AppUpdateDownloadResult {
   sha256?: string;
   verified?: boolean;
 }
+
+export interface HarnessThread {
+  id: string;
+  title: string;
+  workspaceRoot: string;
+  worktreePath?: string | null;
+  branch?: string | null;
+  provider: AiProviderId | string;
+  model: string;
+  permissionMode: HarnessPermissionMode;
+  providerSessionId?: string | null;
+  status: HarnessThreadStatus;
+  unread: boolean;
+  createdAt: number;
+  updatedAt: number;
+  turnCount: number;
+}
+
+export interface TurnChangedFile {
+  path: string;
+  relativePath: string;
+  status: 'added' | 'modified' | 'deleted' | string;
+  additions: number;
+  deletions: number;
+  unifiedDiff: string;
+}
+
+export type HarnessTimelineEntry =
+  | {
+      kind: 'user_message';
+      id: string;
+      turnId: string;
+      content: string;
+      contextFiles: string[];
+      imagesCount: number;
+      timestamp: number;
+    }
+  | {
+      kind: 'assistant_message';
+      id: string;
+      turnId: string;
+      content: string;
+      model?: string | null;
+      streaming: boolean;
+      timestamp: number;
+    }
+  | {
+      kind: 'thinking';
+      id: string;
+      turnId: string;
+      content: string;
+      streaming: boolean;
+      timestamp: number;
+    }
+  | {
+      kind: 'tool_call';
+      id: string;
+      turnId: string;
+      toolName: string;
+      summary: string;
+      argsPreview: string;
+      status: 'running' | 'done' | 'failed' | 'rejected' | string;
+      outputPreview?: string | null;
+      targetPath?: string | null;
+      timestamp: number;
+    }
+  | {
+      kind: 'plan_card';
+      id: string;
+      turnId: string;
+      summary: string;
+      steps: string[];
+      rawPlan: string;
+      executed: boolean;
+      timestamp: number;
+    }
+  | {
+      kind: 'turn_diff';
+      id: string;
+      turnId: string;
+      snapshotId: string;
+      files: TurnChangedFile[];
+      reverted: boolean;
+      accepted: boolean;
+      dirtyConflicts: string[];
+      timestamp: number;
+    }
+  | {
+      kind: 'approval_request';
+      id: string;
+      turnId: string;
+      approvalId: string;
+      toolName: string;
+      summary: string;
+      targetPath?: string | null;
+      command?: string | null;
+      diffPreview?: string | null;
+      decision?: 'allow' | 'allow_session' | 'deny' | string | null;
+      isDirtyConflict: boolean;
+      timestamp: number;
+    }
+  | {
+      kind: 'notice';
+      id: string;
+      turnId: string;
+      level: 'info' | 'warning' | 'error' | string;
+      message: string;
+      timestamp: number;
+    };
+
+export interface HarnessStorageSummary {
+  threadCount: number;
+  totalBytes: number;
+}
+
+export type HarnessEventPayload =
+  | { type: 'thread_updated'; thread: HarnessThread }
+  | { type: 'threads_changed'; threads: HarnessThread[] }
+  | { type: 'entry_upserted'; threadId: string; entry: HarnessTimelineEntry }
+  | {
+      type: 'workspace_files_changed';
+      threadId: string;
+      workspaceRoot: string;
+      paths: string[];
+    };

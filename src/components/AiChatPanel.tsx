@@ -173,6 +173,7 @@ interface AiChatPanelProps {
   activeFilePath?: string | null;
   pendingDropFiles?: { seq: number; items: AiDroppedAttachment[] } | null;
   onRequestDiffPreview?: (req: DiffPreviewRequest) => void;
+  onSendToHarness?: (draftText: string) => void;
 }
 
 interface WriteProposal {
@@ -330,6 +331,7 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
   activeFilePath,
   pendingDropFiles,
   onRequestDiffPreview,
+  onSendToHarness,
 }) => {
   const [caps, setCaps] = useState<AiCapabilities | null>(null);
   const [detecting, setDetecting] = useState(false);
@@ -2144,6 +2146,24 @@ export const AiChatPanel: React.FC<AiChatPanelProps> = ({
             >
               <FilePlus2 size={11} />
               <span>{t.aiChat.saveAsNoteBtn}</span>
+            </button>
+          )}
+          {onSendToHarness && (
+            <button
+              type="button"
+              className="mini-pill-btn"
+              onClick={() => {
+                const draft =
+                  input.trim() ||
+                  (messages.length > 0
+                    ? messages[messages.length - 1].content.slice(0, 1200)
+                    : '');
+                onSendToHarness(draft);
+              }}
+              title={t.harness.sendToHarnessBtn}
+            >
+              <ExternalLink size={11} />
+              <span>{t.harness.sendToHarnessBtn}</span>
             </button>
           )}
         </div>

@@ -1,7 +1,7 @@
 <div align="center">
   <img src="../public/icon.png" alt="Onigiri Editor" width="84" height="84" />
   <h1>Onigiri Editor User Manual 🍙</h1>
-  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v1.5.6)</strong></p>
+  <p><strong>AI-era cross-platform Markdown, code &amp; dev-preview desktop editor (v2.0.0)</strong></p>
   <p>
     <strong>English</strong> | <a href="README.ja.md">日本語</a> ・
     <a href="../README.md">Repository Home (README)</a>
@@ -245,7 +245,13 @@ When you open a project folder (`⌘⇧O` / `Ctrl+Shift+O`) or project file, Oni
 
 ---
 
-## 9. AI Chat, Inline Edit, Document Review & Formatting Tools
+## 9. AI Harness Mode, AI Chat, Inline Edit & Document Review
+
+### AI Harness Mode (`v2.0.0`)
+
+- Switch between **Editor** and **AI Harness** from the TopBar switcher to work in a thread-centric, agentic workspace per project folder.
+- **Permission Modes**: Choose **Plan (Read-only)**, **Approve Edits**, **Auto-Edit**, or **Full Access**; review proposed plans (`Execute This Plan`) and tool approval prompts (`Allow` / `Allow for Turn` / `Deny`).
+- **Snapshots & Rollback**: Inspect changed files per turn in the **Workbench** (**Preview** / **Diff** / **Files** / **Browser** tabs) and click **`Keep Changes`** or **`Revert This Turn`** anytime.
 
 Click the top-right **Options / AI Chat** icon (robot icon) to open the right drawer.
 
