@@ -10,7 +10,7 @@ export const zhTW: DeepPartial<Translations> = {
     advanced: '進階',
   },
   harness: {
-    modeLabel: 'AI Harness',
+    modeLabel: 'AI 代理',
     editorLabel: '編輯器',
     newThread: '新增執行緒',
     threadsHeading: '執行緒列表',
@@ -23,7 +23,7 @@ export const zhTW: DeepPartial<Translations> = {
     acceptChangesBtn: '保留變更',
     revertTurnBtn: '復原此輪變更',
     openInEditorBtn: '在編輯器中開啟',
-    sendToHarnessBtn: '傳送至 AI Harness',
+    sendToHarnessBtn: '傳送至 AI 代理',
   },
   layouts: {
     editor: '編輯器',

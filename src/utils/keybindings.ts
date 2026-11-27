@@ -55,7 +55,7 @@ export const DEFAULT_KEYBINDING_DEFS: KeybindingDef[] = [
   { id: 'mode-simple', category: 'Mode', defaultBinding: 'Mod+Alt+1' },
   { id: 'mode-basic', category: 'Mode', defaultBinding: 'Mod+Alt+2' },
   { id: 'mode-advanced', category: 'Mode', defaultBinding: 'Mod+Alt+3' },
-  { id: 'toggle-harness', category: 'Mode', defaultBinding: 'Mod+Shift+H', label: 'AI Harness' },
+  { id: 'toggle-harness', category: 'Mode', defaultBinding: 'Mod+Shift+H', label: 'AI Agent' },
   { id: 'cycle-mode', category: 'Mode', defaultBinding: 'Mod+\\' },
 
   // File

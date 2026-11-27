@@ -10,7 +10,7 @@ export const ko: DeepPartial<Translations> = {
     advanced: '고급',
   },
   harness: {
-    modeLabel: 'AI 하네스',
+    modeLabel: 'AI 에이전트',
     editorLabel: '편집기',
     newThread: '새 스레드',
     threadsHeading: '스레드 목록',
@@ -23,7 +23,7 @@ export const ko: DeepPartial<Translations> = {
     acceptChangesBtn: '변경 유지',
     revertTurnBtn: '이번 턴 되돌리기',
     openInEditorBtn: '편집기에서 열기',
-    sendToHarnessBtn: 'AI 하네스로 보내기',
+    sendToHarnessBtn: 'AI 에이전트로 보내기',
   },
   layouts: {
     editor: '편집기',

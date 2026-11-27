@@ -362,7 +362,7 @@ export function useHarness({
           provider: effectiveProvider,
           model: effectiveModel,
           promptPreview: promptToSend,
-          responsePreview: '(running in AI Harness thread)',
+          responsePreview: '(running in AI Agent thread)',
           durationMs: Date.now() - startedAt,
         },
         settings.aiAuditLogEnabled !== false

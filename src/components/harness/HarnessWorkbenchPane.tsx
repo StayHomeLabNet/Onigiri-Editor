@@ -224,7 +224,7 @@ export const HarnessWorkbenchPane: React.FC<HarnessWorkbenchPaneProps> = ({
           inspectedDiff?.unifiedDiff ? (
             <DiffPreviewPane locale={locale} content={inspectedDiff.unifiedDiff} />
           ) : (
-            <div style={{ padding: 24, fontSize: 12.5, color: 'var(--fg-muted)', textAlign: 'center' }}>
+            <div style={{ padding: 24, fontSize: 12.5, color: 'var(--fg-secondary)', textAlign: 'center' }}>
               {t.harness.diffCardTitle}
             </div>
           )
@@ -232,11 +232,11 @@ export const HarnessWorkbenchPane: React.FC<HarnessWorkbenchPaneProps> = ({
 
         {activeTab === 'preview' && (
           !inspectedFilePath ? (
-            <div style={{ padding: 24, fontSize: 12.5, color: 'var(--fg-muted)', textAlign: 'center' }}>
+            <div style={{ padding: 24, fontSize: 12.5, color: 'var(--fg-secondary)', textAlign: 'center' }}>
               {t.harness.tabFiles}
             </div>
           ) : loadingFile ? (
-            <div style={{ padding: 24, fontSize: 12.5, color: 'var(--fg-muted)', textAlign: 'center' }}>
+            <div style={{ padding: 24, fontSize: 12.5, color: 'var(--fg-secondary)', textAlign: 'center' }}>
               Loading…
             </div>
           ) : previewKind === 'data' ? (

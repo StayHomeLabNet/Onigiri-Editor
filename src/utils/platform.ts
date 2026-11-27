@@ -1549,7 +1549,7 @@ export async function harnessCreateThread(request: {
   permissionMode?: HarnessPermissionMode;
 }): Promise<HarnessThread> {
   if (!isTauri()) {
-    throw new Error('AI Harness requires the desktop application');
+    throw new Error('AI Agent requires the desktop application');
   }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<HarnessThread>('harness_create_thread', { request });
@@ -1564,7 +1564,7 @@ export async function harnessUpdateThread(request: {
   unread?: boolean;
 }): Promise<HarnessThread> {
   if (!isTauri()) {
-    throw new Error('AI Harness requires the desktop application');
+    throw new Error('AI Agent requires the desktop application');
   }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<HarnessThread>('harness_update_thread', { request });
@@ -1598,7 +1598,7 @@ export async function harnessSendMessage(request: {
   executePlanEntryId?: string;
 }): Promise<HarnessThread> {
   if (!isTauri()) {
-    throw new Error('AI Harness requires the desktop application');
+    throw new Error('AI Agent requires the desktop application');
   }
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<HarnessThread>('harness_send_message', { request });

@@ -10,7 +10,7 @@ export const es: DeepPartial<Translations> = {
     advanced: 'Avanzado',
   },
   harness: {
-    modeLabel: 'AI Harness',
+    modeLabel: 'Agente IA',
     editorLabel: 'Editor',
     newThread: 'Nuevo hilo',
     threadsHeading: 'Hilos',
@@ -23,7 +23,7 @@ export const es: DeepPartial<Translations> = {
     acceptChangesBtn: 'Mantener cambios',
     revertTurnBtn: 'Revertir este turno',
     openInEditorBtn: 'Abrir en el editor',
-    sendToHarnessBtn: 'Continuar en AI Harness',
+    sendToHarnessBtn: 'Continuar en Agente IA',
   },
   layouts: {
     editor: 'Editor',

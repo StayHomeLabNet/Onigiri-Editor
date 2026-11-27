@@ -13,8 +13,8 @@ describe('v2.0.0 AI Harness configuration & i18n', () => {
       expect(t.harness.revertTurnBtn.length).toBeGreaterThan(0);
       expect(t.harness.openInEditorBtn.length).toBeGreaterThan(0);
     }
-    expect(getTranslations('ja').harness.modeLabel).toBe('AIハーネス');
-    expect(getTranslations('en').harness.modeLabel).toBe('AI Harness');
+    expect(getTranslations('ja').harness.modeLabel).toBe('AIエージェント');
+    expect(getTranslations('en').harness.modeLabel).toBe('AI Agent');
   });
 
   it('registers the toggle-harness default keybinding (Mod+Shift+H)', () => {

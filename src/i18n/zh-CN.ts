@@ -10,7 +10,7 @@ export const zhCN: DeepPartial<Translations> = {
     advanced: '高级',
   },
   harness: {
-    modeLabel: 'AI Harness',
+    modeLabel: 'AI 智能体',
     editorLabel: '编辑器',
     newThread: '新建线程',
     threadsHeading: '线程列表',
@@ -23,7 +23,7 @@ export const zhCN: DeepPartial<Translations> = {
     acceptChangesBtn: '保留更改',
     revertTurnBtn: '撤回本轮更改',
     openInEditorBtn: '在编辑器中打开',
-    sendToHarnessBtn: '发送到 AI Harness',
+    sendToHarnessBtn: '发送到 AI 智能体',
   },
   layouts: {
     editor: '编辑器',

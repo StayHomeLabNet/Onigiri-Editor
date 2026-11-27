@@ -25,6 +25,7 @@
 }
 
 [data-theme='dark'] {
+  color-scheme: dark;
   --bg-app: #0f1219;
   --bg-panel: #141821;
   --bg-elevated: #1c222e;
@@ -67,6 +68,7 @@
 }
 
 [data-theme='midnight'] {
+  color-scheme: dark;
   --bg-app: #05070e;
   --bg-panel: #090d16;
   --bg-elevated: #111726;

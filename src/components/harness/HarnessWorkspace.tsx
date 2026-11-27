@@ -188,29 +188,18 @@ export const HarnessWorkspace: React.FC<HarnessWorkspaceProps> = ({
     window.addEventListener('mouseup', onUp);
   }, []);
 
-  const handleChangeProvider = (nextProvider: AiProviderId) => {
-    const nextModel = aiConfig.models?.[nextProvider] ?? '';
+  const handleSelectProviderAndModel = (nextProvider: AiProviderId, nextModel: string) => {
     onAiConfigChange({
       ...aiConfig,
       provider: nextProvider,
       model: nextModel,
+      models: { ...(aiConfig.models || {}), [nextProvider]: nextModel },
     });
     if (activeThread) {
       void onUpdateThreadSettings(activeThread.id, {
         provider: nextProvider,
         model: nextModel,
       }).catch((err) => onNotify(String(err)));
-    }
-  };
-
-  const handleChangeModel = (nextModel: string) => {
-    onAiConfigChange({
-      ...aiConfig,
-      model: nextModel,
-      models: { ...(aiConfig.models || {}), [effectiveProvider]: nextModel },
-    });
-    if (activeThread) {
-      void onUpdateThreadSettings(activeThread.id, { model: nextModel }).catch(() => {});
     }
   };
 
@@ -326,8 +315,7 @@ export const HarnessWorkspace: React.FC<HarnessWorkspaceProps> = ({
           activeEditorFileTitle={activeEditorFileTitle}
           initialDraft={initialDraft}
           onClearInitialDraft={onClearInitialDraft}
-          onChangeProvider={handleChangeProvider}
-          onChangeModel={handleChangeModel}
+          onSelectProviderAndModel={handleSelectProviderAndModel}
           onChangePermissionMode={handleChangePermissionMode}
           onSend={handleSend}
           onStop={() => {
