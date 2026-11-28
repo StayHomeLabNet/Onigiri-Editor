@@ -10,6 +10,9 @@ Onigiri Editor `v2.0.0` introduces **AI Harness Mode**—a thread-centric, agent
 - **CSV / TSV Spreadsheet Undo/Redo & Zen Mode Polish**:
   - Added full **Undo (`⌘Z` / `Ctrl+Z`) / Redo (`⇧⌘Z` / `Ctrl+Y`)** history (up to 100 steps with selection restoration) for all spreadsheet edits, AutoFill, paste, cut, and row/column actions, accessible via keyboard shortcuts, right-click menu, and the native **Edit** menu.
   - Auto-selects an initial cell on table load and prevents the Zen Mode exit button from overlapping the right-pane **External Browser** button.
+- **Recent Folders & Files Pinning / Context Menu**:
+  - Added a right-side **Pin / Unpin** icon button to every item in **Recent Folders** and **Recent Files** (pinned items stay at the top and are preserved even when clicking **Clear History**).
+  - Added a right-click context menu on recent items with **Open**, **Pin / Unpin**, **Copy Path**, **Reveal in File Manager**, and **Remove from History**.
 
 ### Downloads
 - **macOS (Universal: Apple Silicon & Intel, includes Apple Foundation Models support on macOS 26+)**: `.dmg` / `.app.tar.gz`
@@ -30,6 +33,9 @@ Onigiri Editor `v2.0.0` では、これまでのエディタとワンクリッ�
 - **CSV / TSV スプレッドシート Undo / Redo ＆ UI 改善**:
   - セル編集・数式バー・オートフィル・コピペ・行列操作すべてに対応した **元に戻す（`⌘Z` / `Ctrl+Z`）・やり直し（`⇧⌘Z` / `Ctrl+Y`）** を実装し、右クリックメニューおよびアプリメニュー「編集」からも実行できるようになりました。
   - テーブル初期表示時のセル自動選択、および集中モード時の「集中モードを終了 (Esc)」ボタンと「外部ブラウザ」ボタンの重なりを解消しました。
+- **最近開いたフォルダ・ファイルのピン留め＆右クリックメニュー**:
+  - 「最近開いたフォルダ」「最近開いたファイル」の各行右端に **ピン留め／解除アイコン** を追加しました（ピン留めされた項目は上部に固定され、**「履歴をクリア」を実行しても残ります**）。
+  - 項目の右クリックメニューから **開く**・**ピン留め / 解除**・**絶対パスをコピー**・**ファイルマネージャーで表示**・**履歴から個別削除** が行えます。
 
 ### ダウンロード（バイナリ一覧）
 - **macOS（Universal: Apple Silicon / Intel 両対応・macOS 26+ Apple Foundation Models 対応）**: `.dmg` / `.app.tar.gz`

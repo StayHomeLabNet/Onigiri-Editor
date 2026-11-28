@@ -48,6 +48,8 @@ import {
   RotateCw,
   Settings,
   Terminal,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import type {
   GitPanelState,
@@ -257,8 +259,14 @@ interface SidebarProps {
   activeImagePath?: string | null;
   recentFiles?: string[];
   recentFolders?: string[];
+  pinnedRecentFiles?: string[];
+  pinnedRecentFolders?: string[];
   onOpenRecentFolder?: (path: string) => void;
   onClearRecent?: () => void;
+  onTogglePinRecentFile?: (path: string) => void;
+  onTogglePinRecentFolder?: (path: string) => void;
+  onRemoveRecentFile?: (path: string) => void;
+  onRemoveRecentFolder?: (path: string) => void;
   onChooseFolder: () => void;
   onCloseFolder?: () => void;
   onRefreshFolder: () => void;
@@ -364,8 +372,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeImagePath,
   recentFiles = [],
   recentFolders = [],
+  pinnedRecentFiles = [],
+  pinnedRecentFolders = [],
   onOpenRecentFolder,
   onClearRecent,
+  onTogglePinRecentFile,
+  onTogglePinRecentFolder,
+  onRemoveRecentFile,
+  onRemoveRecentFolder,
   onChooseFolder,
   onCloseFolder,
   onRefreshFolder,
@@ -540,6 +554,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
       window.removeEventListener('blur', onBlur);
     };
   }, [treeCtx]);
+
+  const [recentCtx, setRecentCtx] = useState<{
+    x: number;
+    y: number;
+    kind: 'folder' | 'file';
+    path: string;
+    isPinned: boolean;
+  } | null>(null);
+  const [recentCtxPos, setRecentCtxPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const recentCtxRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!recentCtx || !recentCtxRef.current) return;
+    const rect = recentCtxRef.current.getBoundingClientRect();
+    const pad = 8;
+    let left = recentCtx.x;
+    let top = recentCtx.y;
+    if (left + rect.width > window.innerWidth - pad) {
+      left = Math.max(pad, window.innerWidth - rect.width - pad);
+    }
+    if (top + rect.height > window.innerHeight - pad) {
+      top = Math.max(pad, window.innerHeight - rect.height - pad);
+    }
+    setRecentCtxPos({ left, top });
+  }, [recentCtx]);
+
+  useEffect(() => {
+    if (!recentCtx) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (recentCtxRef.current && !recentCtxRef.current.contains(e.target as Node)) {
+        setRecentCtx(null);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setRecentCtx(null);
+    };
+    const onBlur = () => setRecentCtx(null);
+    window.addEventListener('mousedown', onPointerDown, true);
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown, true);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [recentCtx]);
 
   // Reset tree expansion on root change and auto-expand ancestors of the active file/image
   useEffect(() => {
@@ -981,77 +1041,150 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   )}
                 </div>
 
-                {(recentFolders.length > 0 || recentFiles.length > 0) && (
-                  <div className="sidebar-recent-section">
-                    {recentFolders.length > 0 && (
-                      <div className="sidebar-recent-group">
-                        <div className="sidebar-recent-header">
-                          <span className="sub-label">{t.sidebar.recentFoldersTitle}</span>
-                          {onClearRecent && (
-                            <button
-                              type="button"
-                              className="sidebar-recent-clear"
-                              onClick={onClearRecent}
-                            >
-                              {t.sidebar.clearRecent}
-                            </button>
-                          )}
-                        </div>
-                        <div className="sidebar-recent-list">
-                          {recentFolders.slice(0, 6).map((fp) => {
-                            const name = fp.split(/[/\\]/).filter(Boolean).pop() || fp;
-                            return (
-                              <button
-                                key={`rf:${fp}`}
-                                type="button"
-                                className="sidebar-recent-item"
-                                onClick={() => onOpenRecentFolder?.(fp)}
-                                title={fp}
-                              >
-                                <Folder size={13} className="tree-folder-icon" />
-                                <span className="sidebar-recent-name">{name}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
+                {(() => {
+                  const pinnedFoldersSet = new Set(pinnedRecentFolders);
+                  const pinnedFilesSet = new Set(pinnedRecentFiles);
+                  const orderedFolders = [
+                    ...pinnedRecentFolders,
+                    ...recentFolders.filter((p) => !pinnedFoldersSet.has(p)).slice(0, 6),
+                  ];
+                  const orderedFiles = [
+                    ...pinnedRecentFiles,
+                    ...recentFiles.filter((p) => !pinnedFilesSet.has(p)).slice(0, 8),
+                  ];
+                  const hasClearable =
+                    recentFolders.some((p) => !pinnedFoldersSet.has(p)) ||
+                    recentFiles.some((p) => !pinnedFilesSet.has(p));
 
-                    {recentFiles.length > 0 && (
-                      <div className="sidebar-recent-group">
-                        <div className="sidebar-recent-header">
-                          <span className="sub-label">{t.sidebar.recentFilesTitle}</span>
-                          {recentFolders.length === 0 && onClearRecent && (
-                            <button
-                              type="button"
-                              className="sidebar-recent-clear"
-                              onClick={onClearRecent}
-                            >
-                              {t.sidebar.clearRecent}
-                            </button>
-                          )}
-                        </div>
-                        <div className="sidebar-recent-list">
-                          {recentFiles.slice(0, 8).map((fp) => {
-                            const name = fp.split(/[/\\]/).filter(Boolean).pop() || fp;
-                            return (
+                  if (orderedFolders.length === 0 && orderedFiles.length === 0) return null;
+                  return (
+                    <div className="sidebar-recent-section">
+                      {orderedFolders.length > 0 && (
+                        <div className="sidebar-recent-group">
+                          <div className="sidebar-recent-header">
+                            <span className="sub-label">{t.sidebar.recentFoldersTitle}</span>
+                            {onClearRecent && hasClearable && (
                               <button
-                                key={`rfile:${fp}`}
                                 type="button"
-                                className="sidebar-recent-item"
-                                onClick={() => onOpenWorkspaceFile(fp)}
-                                title={fp}
+                                className="sidebar-recent-clear"
+                                onClick={onClearRecent}
                               >
-                                <Clock size={12} />
-                                <span className="sidebar-recent-name">{name}</span>
+                                {t.sidebar.clearRecent}
                               </button>
-                            );
-                          })}
+                            )}
+                          </div>
+                          <div className="sidebar-recent-list">
+                            {orderedFolders.map((fp) => {
+                              const name = fp.split(/[/\\]/).filter(Boolean).pop() || fp;
+                              const isPinned = pinnedFoldersSet.has(fp);
+                              return (
+                                <div
+                                  key={`rf:${fp}`}
+                                  className={`sidebar-recent-row ${isPinned ? 'is-pinned' : ''}`}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setRecentCtx({
+                                      x: e.clientX,
+                                      y: e.clientY,
+                                      kind: 'folder',
+                                      path: fp,
+                                      isPinned,
+                                    });
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="sidebar-recent-item"
+                                    onClick={() => onOpenRecentFolder?.(fp)}
+                                    title={fp}
+                                  >
+                                    <Folder size={13} className="tree-folder-icon" />
+                                    <span className="sidebar-recent-name">{name}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`sidebar-recent-pin-btn ${isPinned ? 'is-pinned' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onTogglePinRecentFolder?.(fp);
+                                    }}
+                                    title={isPinned ? t.sidebar.unpinRecent : t.sidebar.pinRecent}
+                                    aria-label={isPinned ? t.sidebar.unpinRecent : t.sidebar.pinRecent}
+                                  >
+                                    <Pin size={12} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+
+                      {orderedFiles.length > 0 && (
+                        <div className="sidebar-recent-group">
+                          <div className="sidebar-recent-header">
+                            <span className="sub-label">{t.sidebar.recentFilesTitle}</span>
+                            {orderedFolders.length === 0 && onClearRecent && hasClearable && (
+                              <button
+                                type="button"
+                                className="sidebar-recent-clear"
+                                onClick={onClearRecent}
+                              >
+                                {t.sidebar.clearRecent}
+                              </button>
+                            )}
+                          </div>
+                          <div className="sidebar-recent-list">
+                            {orderedFiles.map((fp) => {
+                              const name = fp.split(/[/\\]/).filter(Boolean).pop() || fp;
+                              const isPinned = pinnedFilesSet.has(fp);
+                              return (
+                                <div
+                                  key={`rfile:${fp}`}
+                                  className={`sidebar-recent-row ${isPinned ? 'is-pinned' : ''}`}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setRecentCtx({
+                                      x: e.clientX,
+                                      y: e.clientY,
+                                      kind: 'file',
+                                      path: fp,
+                                      isPinned,
+                                    });
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="sidebar-recent-item"
+                                    onClick={() => onOpenWorkspaceFile(fp)}
+                                    title={fp}
+                                  >
+                                    <Clock size={12} />
+                                    <span className="sidebar-recent-name">{name}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`sidebar-recent-pin-btn ${isPinned ? 'is-pinned' : ''}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onTogglePinRecentFile?.(fp);
+                                    }}
+                                    title={isPinned ? t.sidebar.unpinRecent : t.sidebar.pinRecent}
+                                    aria-label={isPinned ? t.sidebar.unpinRecent : t.sidebar.pinRecent}
+                                  >
+                                    <Pin size={12} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             ) : (
               <>
@@ -2763,6 +2896,95 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="editor-ctx-label">{t.sidebar.ctxReveal}</span>
             </button>
           )}
+        </div>
+      )}
+
+      {recentCtx && (
+        <div
+          ref={recentCtxRef}
+          className="editor-ctx-menu"
+          style={{ left: recentCtxPos.left, top: recentCtxPos.top }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <button
+            type="button"
+            className="editor-ctx-item"
+            onClick={() => {
+              const target = recentCtx;
+              setRecentCtx(null);
+              if (target.kind === 'folder') {
+                onOpenRecentFolder?.(target.path);
+              } else {
+                onOpenWorkspaceFile(target.path);
+              }
+            }}
+          >
+            <span className="editor-ctx-label">{t.sidebar.openRecent}</span>
+          </button>
+          <button
+            type="button"
+            className="editor-ctx-item"
+            onClick={() => {
+              const target = recentCtx;
+              setRecentCtx(null);
+              if (target.kind === 'folder') {
+                onTogglePinRecentFolder?.(target.path);
+              } else {
+                onTogglePinRecentFile?.(target.path);
+              }
+            }}
+          >
+            <span className="editor-ctx-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {recentCtx.isPinned ? <PinOff size={12} /> : <Pin size={12} />}
+              {recentCtx.isPinned ? t.sidebar.unpinRecent : t.sidebar.pinRecent}
+            </span>
+          </button>
+          {(onCopyEntryPath || onRevealEntry) && <div className="editor-ctx-sep" />}
+          {onCopyEntryPath && (
+            <button
+              type="button"
+              className="editor-ctx-item"
+              onClick={() => {
+                const targetPath = recentCtx.path;
+                setRecentCtx(null);
+                onCopyEntryPath(targetPath);
+              }}
+            >
+              <span className="editor-ctx-label">{t.sidebar.ctxCopyPath}</span>
+            </button>
+          )}
+          {onRevealEntry && (
+            <button
+              type="button"
+              className="editor-ctx-item"
+              onClick={() => {
+                const targetPath = recentCtx.path;
+                setRecentCtx(null);
+                onRevealEntry(targetPath);
+              }}
+            >
+              <span className="editor-ctx-label">{t.sidebar.ctxReveal}</span>
+            </button>
+          )}
+          <div className="editor-ctx-sep" />
+          <button
+            type="button"
+            className="editor-ctx-item is-danger"
+            onClick={() => {
+              const target = recentCtx;
+              setRecentCtx(null);
+              if (target.kind === 'folder') {
+                onRemoveRecentFolder?.(target.path);
+              } else {
+                onRemoveRecentFile?.(target.path);
+              }
+            }}
+          >
+            <span className="editor-ctx-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Trash2 size={12} />
+              {t.sidebar.removeRecent}
+            </span>
+          </button>
         </div>
       )}
 

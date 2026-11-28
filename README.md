@@ -108,6 +108,8 @@ cargo test --manifest-path "src-tauri/Cargo.toml"
   - **Live Workbench Pane**: Inspect **Preview**, **Diff**, **Files**, and **Browser** tabs alongside the agent timeline across CLI (Codex, Claude, Gemini, Antigravity) and Cloud API / local LLM runners.
 - **CSV / TSV Spreadsheet Undo/Redo & Zen Mode Polish**:
   - Added full **Undo (`⌘Z` / `Ctrl+Z`) / Redo (`⇧⌘Z` / `Ctrl+Y`)** history across cell edits, AutoFill, paste, cut, and row/column operations (via shortcuts, right-click menu, and the native **Edit** menu), auto-selected initial cell on table load, and fixed Zen Mode exit button overlap with the **External Browser** button.
+- **Recent Folders & Files Pinning / Context Menu**:
+  - Added a right-side **Pin / Unpin** icon button to each item in **Recent Folders** and **Recent Files** (pinned items remain preserved across **Clear History**), plus a right-click menu with **Open**, **Pin / Unpin**, **Copy Path**, **Reveal in File Manager**, and **Remove from History**.
 
 <details>
 <summary>Previous release: v1.5.6</summary>

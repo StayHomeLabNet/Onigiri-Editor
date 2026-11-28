@@ -230,6 +230,8 @@ import {
   normalizeWorkspaceKey,
   RECENT_FILES_KEY,
   RECENT_FOLDERS_KEY,
+  PINNED_RECENT_FILES_KEY,
+  PINNED_RECENT_FOLDERS_KEY,
   saveWorkspaceSessionEntry,
   serializeTabRecord,
   WORKSPACE_SESSIONS_KEY,
@@ -485,10 +487,20 @@ export function App() {
   const [recentFolders, setRecentFolders] = useState<string[]>(() =>
     loadStringList(RECENT_FOLDERS_KEY, MAX_RECENT_FOLDERS)
   );
+  const [pinnedRecentFiles, setPinnedRecentFiles] = useState<string[]>(() =>
+    loadStringList(PINNED_RECENT_FILES_KEY, 50)
+  );
+  const [pinnedRecentFolders, setPinnedRecentFolders] = useState<string[]>(() =>
+    loadStringList(PINNED_RECENT_FOLDERS_KEY, 50)
+  );
   const recentFilesRef = useRef<string[]>(recentFiles);
   recentFilesRef.current = recentFiles;
   const recentFoldersRef = useRef<string[]>(recentFolders);
   recentFoldersRef.current = recentFolders;
+  const pinnedRecentFilesRef = useRef<string[]>(pinnedRecentFiles);
+  pinnedRecentFilesRef.current = pinnedRecentFiles;
+  const pinnedRecentFoldersRef = useRef<string[]>(pinnedRecentFolders);
+  pinnedRecentFoldersRef.current = pinnedRecentFolders;
 
   const [customSnippets, setCustomSnippets] = useState<CustomSnippetRecord[]>(() =>
     loadCustomSnippets()
@@ -1159,14 +1171,98 @@ export function App() {
   }, []);
 
   const handleClearRecent = useCallback(() => {
-    setRecentFiles([]);
-    setRecentFolders([]);
-    try {
-      localStorage.removeItem(RECENT_FILES_KEY);
-      localStorage.removeItem(RECENT_FOLDERS_KEY);
-    } catch {
-      // ignore
-    }
+    const pinnedFilesSet = new Set(pinnedRecentFilesRef.current);
+    const pinnedFoldersSet = new Set(pinnedRecentFoldersRef.current);
+    setRecentFiles((prev) => {
+      const kept = prev.filter((p) => pinnedFilesSet.has(p));
+      try {
+        if (kept.length > 0) localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(kept));
+        else localStorage.removeItem(RECENT_FILES_KEY);
+      } catch {
+        // ignore
+      }
+      return kept;
+    });
+    setRecentFolders((prev) => {
+      const kept = prev.filter((p) => pinnedFoldersSet.has(p));
+      try {
+        if (kept.length > 0) localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(kept));
+        else localStorage.removeItem(RECENT_FOLDERS_KEY);
+      } catch {
+        // ignore
+      }
+      return kept;
+    });
+  }, []);
+
+  const handleRemoveRecentFile = useCallback((filePath: string) => {
+    setRecentFiles((prev) => {
+      const next = prev.filter((p) => p !== filePath);
+      try {
+        localStorage.setItem(RECENT_FILES_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+    setPinnedRecentFiles((prev) => {
+      if (!prev.includes(filePath)) return prev;
+      const next = prev.filter((p) => p !== filePath);
+      try {
+        localStorage.setItem(PINNED_RECENT_FILES_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const handleRemoveRecentFolder = useCallback((folderPath: string) => {
+    setRecentFolders((prev) => {
+      const next = prev.filter((p) => p !== folderPath);
+      try {
+        localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+    setPinnedRecentFolders((prev) => {
+      if (!prev.includes(folderPath)) return prev;
+      const next = prev.filter((p) => p !== folderPath);
+      try {
+        localStorage.setItem(PINNED_RECENT_FOLDERS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTogglePinRecentFile = useCallback((filePath: string) => {
+    setPinnedRecentFiles((prev) => {
+      const exists = prev.includes(filePath);
+      const next = exists ? prev.filter((p) => p !== filePath) : [filePath, ...prev];
+      try {
+        localStorage.setItem(PINNED_RECENT_FILES_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTogglePinRecentFolder = useCallback((folderPath: string) => {
+    setPinnedRecentFolders((prev) => {
+      const exists = prev.includes(folderPath);
+      const next = exists ? prev.filter((p) => p !== folderPath) : [folderPath, ...prev];
+      try {
+        localStorage.setItem(PINNED_RECENT_FOLDERS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
   }, []);
 
   const setLocale = useCallback((next: React.SetStateAction<Locale>) => {
@@ -6803,8 +6899,14 @@ export function App() {
             activeImagePath={previewWorkspaceImagePath}
             recentFiles={recentFiles}
             recentFolders={recentFolders}
+            pinnedRecentFiles={pinnedRecentFiles}
+            pinnedRecentFolders={pinnedRecentFolders}
             onOpenRecentFolder={(dir) => void openWorkspaceFolderPath(dir)}
             onClearRecent={handleClearRecent}
+            onTogglePinRecentFile={handleTogglePinRecentFile}
+            onTogglePinRecentFolder={handleTogglePinRecentFolder}
+            onRemoveRecentFile={handleRemoveRecentFile}
+            onRemoveRecentFolder={handleRemoveRecentFolder}
             onChooseFolder={handleOpenFolder}
             onCloseFolder={handleCloseFolder}
             onRefreshFolder={() => workspaceRoot && refreshWorkspace(workspaceRoot)}

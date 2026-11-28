@@ -237,6 +237,10 @@ export interface Translations {
     recentFilesTitle: string;
     recentFoldersTitle: string;
     clearRecent: string;
+    openRecent: string;
+    pinRecent: string;
+    unpinRecent: string;
+    removeRecent: string;
     ctxOpen: string;
     ctxOpenSide: string;
     ctxCompareGitHead: string;
